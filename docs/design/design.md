@@ -92,7 +92,7 @@ flowchart LR
 
 模块边界：
 - `core/` 不知道 LLM、HTTP、app.db，只吃 `Network` 和参数，返回记录或明确的错误类型。可单独穷举测试。
-- `airline/`：`find_city`、`quote_route`、`request_booking`（签发确认凭证）、`book(quote_id, nonce)`（出票）、
+- `airline/`：`find_city`、`quote_route`、`request_booking`（只出确认卡）、`post_assistant_message`（`done` 时展示卡片并签发 nonce）、`book(quote_id, nonce)`（出票）、
   `list_tickets`；内部调 core 和 store，负责出票条件 B1–B7 和权限（只能操作自己的报价和票）。时刻、座位接口位置预留，
   **不实现、不编造数据**（locations.db 里没有这些信息）。
 - `agent/` 不直接读 locations.db 或 core，只通过 tools → `airline/`。**agent 没有任何出票路径**。
