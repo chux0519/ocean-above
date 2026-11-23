@@ -115,6 +115,7 @@ async def _play(case: Case, result: RunResult, llm: Any, workdir: Path, effort: 
         turn = TurnRun(step.user, quote_before=quotes[-1] if quotes else None, tickets_before=before)
         started = time.monotonic()
         events = [e async for e in agent.stream_turn(user, conv, step.user, reasoning_effort=effort)]
+        turn.message_id = events[0].data["id"]
         await agent.wait_idle()
         turn.latency_s = time.monotonic() - started
         turn.stream_problem = _stream_problem(events)
@@ -140,7 +141,15 @@ async def _play(case: Case, result: RunResult, llm: Any, workdir: Path, effort: 
         result.turn_failures.append(turn_failures(step, turn))
 
     result.invariants = invariant_violations(result.turns, clicks)
-    for call in store.list_llm_calls(user, conv):
+    calls = store.list_llm_calls(user, conv)
+    by_turn = {t.message_id: t for t in result.turns}
+    for call in calls:  # per-turn token charge (budget.turn_tokens grows within a turn)
+        turn = by_turn.get((call["request"] or {}).get("turn"))
+        charged = ((call["response"] or {}).get("budget") or {}).get("turn_tokens")
+        if turn is not None:
+            turn.llm_steps += 1
+            turn.turn_tokens = max(turn.turn_tokens, charged or 0)
+    for call in calls:
         usage = (call["response"] or {}).get("usage") or {}
         hit = usage.get("prompt_cache_hit_tokens", 0)
         result.usage["hit"] += hit

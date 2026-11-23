@@ -94,6 +94,15 @@ def _issue(messages, key: str) -> dict:
     raise AssertionError(f"no tool result with {key}")
 
 
+def no_service_issues(messages) -> list[dict]:
+    """The unserved cities of the newest result that has any, with `role` origin/destination
+    (a find_city result has no role: it is reported as "city")."""
+    for r in reversed(tool_results(messages)):
+        if r.get("code") == "no_service":
+            return [{"role": "city", **r}] if "issues" not in r else [i for i in r["issues"] if "nearest" in i]
+    raise AssertionError("no no_service result")
+
+
 def ambiguous_reply(messages):
     names = " or ".join(c["city"] for c in _issue(messages, "candidates")["candidates"])
     return [f"There is more than one match: {names}. ", "Which one do you mean?"]

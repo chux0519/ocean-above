@@ -1,0 +1,1818 @@
+{
+ "summary": {
+  "mode": "real",
+  "model": "deepseek-flash",
+  "effort": "high",
+  "n": 10,
+  "date": "2026-11-23",
+  "commit": "c5f461b",
+  "runs": 20,
+  "trajectory_pass": 1.0,
+  "crashed": 0,
+  "turns": 40,
+  "errors": 0,
+  "fallback_rate": 0.0,
+  "fallback_kinds": {},
+  "spelled_number_replies": 0,
+  "invariant_violations": {
+   "stream": 0,
+   "no_agent_booking": 0,
+   "click_books_once": 0,
+   "no_false_booked": 0,
+   "provenance": 0
+  },
+  "tools": {
+   "find_city": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   },
+   "quote_route": {
+    "expected": 40,
+    "hit": 40,
+    "actual": 40,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   },
+   "request_booking": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   },
+   "list_my_tickets": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   }
+  },
+  "per_case": {
+   "no_service_then_nearest": {
+    "group": "no_service",
+    "runs": 10,
+    "passed": 10,
+    "fallback": 0,
+    "turns": 20,
+    "tokens": 85935,
+    "cost": 0.00668448,
+    "max_turn_tokens": 4836
+   },
+   "no_service_then_closest": {
+    "group": "no_service",
+    "runs": 10,
+    "passed": 10,
+    "fallback": 0,
+    "turns": 20,
+    "tokens": 86444,
+    "cost": 0.006812316,
+    "max_turn_tokens": 4912
+   }
+  },
+  "usage": {
+   "hit": 150016,
+   "miss": 15821,
+   "out": 6542,
+   "reasoning": 2680
+  },
+  "llm_calls": 80,
+  "cost_usd": 0.013496796,
+  "llm_latency_ms": {
+   "p50": 1445,
+   "p90": 1882,
+   "max": 2240
+  },
+  "turn_tokens": {
+   "cap": 20000,
+   "p50": 4436,
+   "p90": 4803,
+   "max": 4912,
+   "near_cap": 0,
+   "over_cap": 0,
+   "budget_stops": 0
+  },
+  "turn_latency_s": {
+   "p50": 2.92,
+   "p90": 3.75
+  },
+  "verdict": {
+   "tool:find_city": true,
+   "tool:quote_route": true,
+   "tool:request_booking": true,
+   "tool:list_my_tickets": true,
+   "trajectory": true,
+   "fallback_rate": true,
+   "invariants": true
+  }
+ },
+ "runs": [
+  {
+   "case": "no_service_then_nearest",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_170b5c97ef32cc9c",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin. The nearest served cities are Copenhagen, Ohrid and St. John's — which one would you like to fly from? The card shows the details.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.002730583015364,
+     "llm_steps": 2,
+     "turn_tokens": 3951,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_e95eff7c29fb0941",
+     "outcome": "sent",
+     "text": "Here's the route from Copenhagen to Tokyo, with 3 transfers. Check the distance and price on the card — if it looks right, tell me and I'll set up the booking.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_facea2a7ca91867d"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.35715799999889,
+     "llm_steps": 2,
+     "turn_tokens": 4569,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 803,
+    "out": 293,
+    "reasoning": 105
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1529,
+    2046,
+    1696,
+    1637
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 1,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_30cf8df57192f0ee",
+     "outcome": "sent",
+     "text": "Austin isn't served by Ocean Above. The nearest served cities are Copenhagen (121.0 km), Ohrid (197.3 km) and St. John's (349.4 km) — which one would you like to fly from to Tokyo?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.635205833998043,
+     "llm_steps": 2,
+     "turn_tokens": 4050,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_bfafae06d1296a6b",
+     "outcome": "sent",
+     "text": "Here's the cheapest route from Copenhagen to Tokyo: it has 4 legs with transfers in Los Angeles, Mexico City and Atlanta, shown on the card. Let me know if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_5d054b9b03c04134"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6408290829858743,
+     "llm_steps": 2,
+     "turn_tokens": 4836,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7680,
+    "miss": 756,
+    "out": 450,
+    "reasoning": 244
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1149,
+    2133,
+    1326,
+    1284
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 2,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_aeaf7e88a0c9e419",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin. The card lists the nearest served cities — the closest is Copenhagen — so tell me which one you'd like to depart from and I'll quote the trip to Tokyo.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.1839756250265054,
+     "llm_steps": 2,
+     "turn_tokens": 3960,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_b4cfe4008fa25baa",
+     "outcome": "sent",
+     "text": "Here's the cheapest route from Copenhagen to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta. Check the route, distance and price on the card, and tell me if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_76793c1781eaf422"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6354668749845587,
+     "llm_steps": 2,
+     "turn_tokens": 4595,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 822,
+    "out": 309,
+    "reasoning": 113
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1288,
+    1675,
+    870,
+    1738
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 3,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_3b302537efbf9269",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin. The nearest served cities shown on the card are Copenhagen, Ohrid and St. John's — which one would you like to use as your departure city?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.7471090830513276,
+     "llm_steps": 2,
+     "turn_tokens": 3966,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_5f19b5498fa01f79",
+     "outcome": "sent",
+     "text": "Here's the cheapest option from Copenhagen to Tokyo — the card shows the full route with transfers in Los Angeles, Mexico City and Atlanta, along with the distance and price. If you'd like to book it, just say so.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_1077f0e2725a4826"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.883638333994895,
+     "llm_steps": 2,
+     "turn_tokens": 4614,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7552,
+    "miss": 709,
+    "out": 319,
+    "reasoning": 122
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1456,
+    2202,
+    1460,
+    1401
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 4,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_93c22d02014e379c",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly to Austin. The nearest served cities are Copenhagen, Ohrid and St. John's — which one would you like to use as your departure city?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.474125208973419,
+     "llm_steps": 2,
+     "turn_tokens": 4025,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_29b534d20161c3e7",
+     "outcome": "sent",
+     "text": "Here's the route from Copenhagen to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta for $1,040.94. Would you like me to prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_5e1a6b67431f017a"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.057287791976705,
+     "llm_steps": 2,
+     "turn_tokens": 4688,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7552,
+    "miss": 784,
+    "out": 377,
+    "reasoning": 193
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1704,
+    1743,
+    1446,
+    1580
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 5,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_b9de99586ed086c0",
+     "outcome": "sent",
+     "text": "Austin isn't served by Ocean Above. The nearest served cities the card lists are Copenhagen, Ohrid and St. John's — which one would you like to fly from to Tokyo?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.4516382080037147,
+     "llm_steps": 2,
+     "turn_tokens": 3960,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_c7abaf388fa06f92",
+     "outcome": "sent",
+     "text": "The card shows the cheapest route from Copenhagen to Tokyo with 3 transfers (Los Angeles, Mexico City, Atlanta). If you'd like to book it, say so and I'll bring up the confirmation card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_3bf4280aadd4bdeb"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.5311977089731954,
+     "llm_steps": 2,
+     "turn_tokens": 4621,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7552,
+    "miss": 708,
+    "out": 321,
+    "reasoning": 129
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1545,
+    1882,
+    1011,
+    1478
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 6,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_6b0358d57613ec4d",
+     "outcome": "sent",
+     "text": "Austin has no Ocean Above service. The nearest served cities shown on the card are Copenhagen, Ohrid and St. John's; which one would you like to fly from to Tokyo?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.3024873749818653,
+     "llm_steps": 2,
+     "turn_tokens": 3900,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_2bfd7b310f39675a",
+     "outcome": "sent",
+     "text": "The card shows the cheapest route from Copenhagen to Tokyo. If you'd like to book it, tell me and I'll prepare the confirmation.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_4235d392facf1dbc"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6432839169865474,
+     "llm_steps": 2,
+     "turn_tokens": 4460,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7296,
+    "miss": 830,
+    "out": 234,
+    "reasoning": 56
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1832,
+    1421,
+    1073,
+    1543
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 7,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_c56b087f21ca77ca",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin. The card shows the nearest served cities – the closest is Copenhagen. Would you like me to quote Austin's route from Copenhagen to Tokyo instead, or pick another of the listed cities?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.4656317090266384,
+     "llm_steps": 2,
+     "turn_tokens": 3881,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_254b9ed6ad4809fd",
+     "outcome": "sent",
+     "text": "The card shows the cheapest route from Copenhagen to Tokyo, with 3 transfers and a price of $1,040.94. Click \"Confirm booking\" if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_3a90b429514262d0"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.0321002500131726,
+     "llm_steps": 2,
+     "turn_tokens": 4436,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7296,
+    "miss": 794,
+    "out": 227,
+    "reasoning": 32
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1226,
+    1201,
+    948,
+    1046
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 8,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_128a2f6c5fd0ddc5",
+     "outcome": "sent",
+     "text": "Austin doesn't have Ocean Above service. The nearest served cities are shown on the card — Copenhagen, Ohrid and St. John's. Which one would you like to fly from?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.835026042012032,
+     "llm_steps": 2,
+     "turn_tokens": 4070,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_635bfe1ae6e86c3a",
+     "outcome": "sent",
+     "text": "The route from Copenhagen to Tokyo is on the card, with transfers in Los Angeles, Mexico City and Atlanta. Would you like to book it?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_4f71434ea208df84"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.225986292003654,
+     "llm_steps": 2,
+     "turn_tokens": 4803,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7680,
+    "miss": 787,
+    "out": 406,
+    "reasoning": 227
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1564,
+    2240,
+    897,
+    1297
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 9,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_78467198c57938af",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly to Austin. The nearest served city is Copenhagen, and the card also lists Ohrid and St. John's as alternatives. Which one would you like me to use as the origin for the flight to Tokyo?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.0245456250268035,
+     "llm_steps": 2,
+     "turn_tokens": 3957,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_339edde75ffe78a7",
+     "outcome": "sent",
+     "text": "The card shows the cheapest route from Copenhagen to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta at $1,040.94. Should I show you the confirmation so you can book it?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_5fa075addeb24bdd"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.916043666016776,
+     "llm_steps": 2,
+     "turn_tokens": 4593,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 819,
+    "out": 307,
+    "reasoning": 106
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1165,
+    1836,
+    1343,
+    1554
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 0,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_b6c757f24c733b70",
+     "outcome": "sent",
+     "text": "The card shows that Ocean Above doesn't serve Abu Dhabi. The nearest served cities are Tirana, Odesa and Whitehorse — which one would you like, or shall I use the nearest one?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.4729938749806024,
+     "llm_steps": 2,
+     "turn_tokens": 3977,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_e1800a85bf001249",
+     "outcome": "sent",
+     "text": "The card shows the route from London to Tirana, with transfers in Atlanta, Nairobi and Toronto. Would you like to book it?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_85f2e7f93ca7a673"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 1.9358485839911737,
+     "llm_steps": 2,
+     "turn_tokens": 4577,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 853,
+    "out": 277,
+    "reasoning": 93
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1785,
+    1671,
+    1012,
+    894
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 1,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_50b76499289206af",
+     "outcome": "sent",
+     "text": "We don't fly to Abu Dhabi. The nearest served cities are Tirana, Odesa and Whitehorse — the closest is Tirana. Which one would you like to fly to instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.954013499955181,
+     "llm_steps": 2,
+     "turn_tokens": 4020,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_566130c13b53dd6f",
+     "outcome": "sent",
+     "text": "Here's the cheapest option from London to Tirana: it has 3 transfers, via Atlanta, Nairobi and Toronto — the card shows the full route, distance and price. Would you like me to open the booking confirmation for it?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_317d71f9c1459332"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.7169309169985354,
+     "llm_steps": 2,
+     "turn_tokens": 4747,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7552,
+    "miss": 816,
+    "out": 399,
+    "reasoning": 197
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1580,
+    1354,
+    1239,
+    1442
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 2,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_385519b8c320bb9b",
+     "outcome": "sent",
+     "text": "We don't fly to Abu Dhabi, but the card shows the nearest served cities. The closest is Tirana — would you like me to quote London to Tirana, or would you prefer another of the listed cities?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6593609579722397,
+     "llm_steps": 2,
+     "turn_tokens": 3939,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_f77dd68ae16696c2",
+     "outcome": "sent",
+     "text": "The card shows the cheapest option from London to Tirana, with transfers in Atlanta, Nairobi and Toronto. Let me know if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_84a12fc9548fabd1"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6054564170190133,
+     "llm_steps": 2,
+     "turn_tokens": 4548,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 797,
+    "out": 266,
+    "reasoning": 74
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1050,
+    1432,
+    1234,
+    1340
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 3,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_8fce11502c630de4",
+     "outcome": "sent",
+     "text": "Abu Dhabi isn't served by Ocean Above. The card shows the nearest served cities — the closest is Tirana. Would you like me to quote London to one of those instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.584939416963607,
+     "llm_steps": 2,
+     "turn_tokens": 3928,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_42dd84e1665d334a",
+     "outcome": "sent",
+     "text": "Here's the cheapest route from London to Tirana, with transfers in Atlanta, Nairobi and Toronto. The card shows the distance and price — let me know if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_a74cd706f36d9268"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.372977167018689,
+     "llm_steps": 2,
+     "turn_tokens": 4532,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 774,
+    "out": 262,
+    "reasoning": 70
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1282,
+    1263,
+    881,
+    1459
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 4,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_a58cbd2e54522b3a",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Abu Dhabi. The nearest served cities are on the card — Tirana, Odesa and Whitehorse. Which one would you like to fly to instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.258142292033881,
+     "llm_steps": 2,
+     "turn_tokens": 4020,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_93f973da411ed6c2",
+     "outcome": "sent",
+     "text": "The card shows the cheapest route from London to Tirana, with transfers in Atlanta, Nairobi and Toronto. Tell me if you'd like me to prepare the booking.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_32d660a58665f0e7"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.2625535000115633,
+     "llm_steps": 2,
+     "turn_tokens": 4668,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7552,
+    "miss": 810,
+    "out": 326,
+    "reasoning": 140
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1414,
+    1801,
+    1123,
+    1097
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 5,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_d5edb7a739d9be3e",
+     "outcome": "sent",
+     "text": "Abu Dhabi isn't served by Ocean Above. The nearest served cities are on the card: Tirana (350.9 km), Odesa (464.7 km) and Whitehorse (541.0 km). Which of these would you like to fly to from London?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.8306217920035124,
+     "llm_steps": 2,
+     "turn_tokens": 4058,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_1d60ead162221d80",
+     "outcome": "sent",
+     "text": "Here's the cheapest route from London to Tirana — it has 3 transfers and the full details, distance and price are on the card. Would you like to go ahead and book it?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_9f93569077f04b5b"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.503301457967609,
+     "llm_steps": 2,
+     "turn_tokens": 4912,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7680,
+    "miss": 786,
+    "out": 504,
+    "reasoning": 292
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1799,
+    1990,
+    1608,
+    1862
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 6,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_95e011b73f7bd750",
+     "outcome": "sent",
+     "text": "We don't fly to Abu Dhabi. The card shows the nearest cities that Ocean Above serves — would you like me to quote London to one of them instead? Just say which.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.4425077500054613,
+     "llm_steps": 2,
+     "turn_tokens": 3981,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_66ffeb1c150db289",
+     "outcome": "sent",
+     "text": "Here's the cheapest London → Tirana route on the card, with transfers in Atlanta, Nairobi and Toronto. If it looks right, tell me to book it and I'll show the confirmation card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_b8bdcdff3c76511c"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.9126186670036986,
+     "llm_steps": 2,
+     "turn_tokens": 4638,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7552,
+    "miss": 752,
+    "out": 315,
+    "reasoning": 123
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1489,
+    1925,
+    1463,
+    1406
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 7,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_dcb1a84a7d1198cf",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly to Abu Dhabi. The card lists the nearest served cities; the closest is Tirana. Would you like a quote to one of these instead — for example, London to Tirana?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.466476082976442,
+     "llm_steps": 2,
+     "turn_tokens": 3929,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_b67575e709c2ecd3",
+     "outcome": "sent",
+     "text": "Here's the route from London to Tirana, the nearest served city to Abu Dhabi. The card shows the legs, transfers, distance and price — tell me if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_bda4c16f03c63e9a"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.5178660830133595,
+     "llm_steps": 2,
+     "turn_tokens": 4530,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 775,
+    "out": 260,
+    "reasoning": 62
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    982,
+    1445,
+    1007,
+    1470
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 8,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_825d57445bbe5206",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly to Abu Dhabi. The nearest cities with service are on the card — Tirana, Odesa and Whitehorse — with Tirana being the closest. Which one would you like to fly to instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.336039332963992,
+     "llm_steps": 2,
+     "turn_tokens": 4080,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_affbbe0addde906f",
+     "outcome": "sent",
+     "text": "The card shows the cheapest London–Tirana route, with transfers in Atlanta, Nairobi and Toronto. If it looks right to you, say the word and I'll bring up the confirmation card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_a014776880a353a9"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 1.9249948750366457,
+     "llm_steps": 2,
+     "turn_tokens": 4822,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7680,
+    "miss": 814,
+    "out": 408,
+    "reasoning": 206
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1635,
+    1660,
+    994,
+    897
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 9,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_7045ce56659d248d",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Abu Dhabi. The card lists the nearest cities we do fly to; tell me which one you want, or whether to use Tirana (the closest).",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.0015492499805987,
+     "llm_steps": 2,
+     "turn_tokens": 3959,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_266c343708ca296b",
+     "outcome": "sent",
+     "text": "Here's the cheapest London → Tirana routing; check the legs, transfers, distance and price on the card, and tell me if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_2ca7f7531c55bbcc"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 1.6469047909486108,
+     "llm_steps": 2,
+     "turn_tokens": 4579,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7424,
+    "miss": 832,
+    "out": 282,
+    "reasoning": 96
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    937,
+    2030,
+    792,
+    810
+   ]
+  }
+ ]
+}

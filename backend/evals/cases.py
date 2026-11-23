@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .fake import (Use, ambiguous_reply, confirm_card_reply, last_quote_id, no_service_reply, quote_reply,
-                   quote_reply_zh, same_city_reply, say, tickets_reply, unknown_reply)
+from .fake import (Use, ambiguous_reply, confirm_card_reply, last_quote_id, no_service_issues, no_service_reply,
+                   quote_reply, quote_reply_zh, same_city_reply, say, tickets_reply, unknown_reply)
 
 QUOTE_ID = "$QUOTE"  # in an expected argument: the newest quote id of the conversation
 
@@ -83,6 +83,31 @@ def book_turn(user: str, reply=confirm_card_reply) -> Turn:
     )
 
 
+def nearest_turn(user: str, origin: str, destination: str, *, replaces: str) -> Turn:
+    """After a no_service result the user asks for "the nearest city": one `quote_route` with the
+    unserved city replaced by the result's `nearest_served_city`; no booking, no second question."""
+    def script(messages):
+        issue = next(i for i in no_service_issues(messages) if i["role"] == replaces)
+        args = {"origin": origin, "destination": destination, replaces: issue["nearest_served_city"]}
+        return [Use("quote_route", **args)]
+
+    return Turn(user, tools=((E("quote_route", "ok", origin=origin, destination=destination),),),
+                forbid=NO_BOOKING, cards=frozenset({"quote"}),
+                fake=(script, quote_reply))
+
+
+def book_in_one_turn(user: str, origin: str, destination: str, reply=confirm_card_reply) -> Turn:
+    """"Book me a flight from A to B": quote, then the confirmation card in the same turn."""
+    return Turn(
+        user,
+        tools=((E("quote_route", "ok", origin=origin, destination=destination),
+                E("request_booking", "ok", quote_id=QUOTE_ID)),),
+        cards=frozenset({"quote", "booking_request"}),
+        fake=([Use("quote_route", origin=origin, destination=destination)],
+              lambda m: [Use("request_booking", quote_id=last_quote_id(m))], reply),
+    )
+
+
 def tickets_turn(user: str, *, code: str = "ok", **filters: str) -> Turn:
     return Turn(
         user,
@@ -102,6 +127,12 @@ def no_booking_turn(user: str, *, fake=(), **kw) -> Turn:
 def _say(*chunks: str):
     return lambda m: say(*chunks)
 
+
+LONG_PAIRS = (("Amsterdam", "Buenos Aires"), ("Athens", "Kyoto"), ("Atlanta", "Cape Town"), ("Barcelona", "Hanoi"),
+              ("Beijing", "Dublin"), ("Berlin", "Lima"), ("Bogotá", "Helsinki"), ("Boston", "Delhi"),
+              ("Brisbane", "Edinburgh"), ("Budapest", "Honolulu"), ("Cairo", "Denver"), ("Chicago", "Jakarta"),
+              ("Copenhagen", "Johannesburg"), ("Dakar", "Kyiv"), ("Doha", "Las Vegas"), ("Florence", "Karachi"),
+              ("Geneva", "Manila"), ("Havana", "Istanbul"))
 
 CASES: tuple[Case, ...] = (
     # --- quotes -------------------------------------------------------------------------------
@@ -124,10 +155,18 @@ CASES: tuple[Case, ...] = (
     Case("no_service_austin", "no_service", (quote_turn(
         "Austin to Tokyo please", "Austin", "Tokyo", code="no_service", reply=no_service_reply,
         cards=("no_service",), text_must_not=(r"\b(Dallas|Houston|San Antonio)\b",)),)),
+    # the user picks "the nearest": the db's single nearest served city (`nearest_served_city`,
+    # Copenhagen for Austin: tests/test_eval_regressions.py checks it against the reference), no
+    # second question, no booking (P1 #34)
     Case("no_service_then_nearest", "no_service", (
         quote_turn("Austin to Tokyo please", "Austin", "Tokyo", code="no_service", reply=no_service_reply,
                    cards=("no_service",)),
-        quote_turn("ok, use the nearest city instead", "Copenhagen", "Tokyo"),
+        nearest_turn("ok, use the nearest city instead", "Copenhagen", "Tokyo", replaces="origin"),
+    )),
+    Case("no_service_then_closest", "no_service", (
+        quote_turn("I want to fly from London to Abu Dhabi", "London", "Abu Dhabi", code="no_service",
+                   reply=no_service_reply, cards=("no_service",)),
+        nearest_turn("fine, the closest one you fly to works for me", "London", "Tirana", replaces="destination"),
     )),
     # --- ambiguity / unknown / same city / missing info --------------------------------------
     Case("ambiguous_san_jose", "resolution", (quote_turn(
@@ -152,14 +191,27 @@ CASES: tuple[Case, ...] = (
         Click(),
         tickets_turn("what tickets do I have?"),
     )),
-    Case("book_in_one_message", "booking", (Turn(
-        "Book me a flight from Madrid to Cairo",
-        tools=((E("quote_route", "ok", origin="Madrid", destination="Cairo"),
-                E("request_booking", "ok", quote_id=QUOTE_ID)),),
-        extra_ok=frozenset({"find_city"}), cards=frozenset({"quote", "booking_request"}),
-        fake=([Use("quote_route", origin="Madrid", destination="Cairo")],
-              lambda m: [Use("request_booking", quote_id=last_quote_id(m))],
-              confirm_card_reply)),)),
+    # quote and confirmation card in one turn; the ticket only after the click (P1 #34)
+    Case("book_in_one_message", "booking", (
+        book_in_one_turn("Book me a flight from Madrid to Cairo", "Madrid", "Cairo"),
+        Click(),
+    )),
+    Case("zh_book_in_one_message", "booking", (
+        book_in_one_turn("帮我订一张从马德里到开罗的机票", "Madrid", "Cairo",
+                         reply=lambda m: say("请在确认卡上核对路线和价格，然后点击确认出票。")),
+        Click(),
+    )),
+    # booking asked for, but there is no route to quote: no confirmation card
+    Case("book_in_one_message_no_service", "booking", (quote_turn(
+        "Book me a flight from Austin to Tokyo", "Austin", "Tokyo", code="no_service", reply=no_service_reply,
+        cards=("no_service",), forbid=NO_BOOKING),)),
+    # long history (P0a open point 2): every step re-sends the history, so a 3-step turn late in a
+    # long conversation is where the per-turn token soft cap (design §4.8) would bite first
+    Case("long_history", "long", (
+        *(quote_turn(f"{a} to {b}, please. Tell me every leg with its distance.", a, b) for a, b in LONG_PAIRS),
+        book_in_one_turn("Book me a flight from Madrid to Cairo", "Madrid", "Cairo"),
+        Click(),
+    )),
     # --- the user declines or asks: no request_booking ---------------------------------------
     Case("decline", "no_booking", (
         quote_turn("New York to Singapore", "New York", "Singapore"),

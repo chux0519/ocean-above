@@ -1,0 +1,1888 @@
+{
+ "summary": {
+  "mode": "real",
+  "model": "deepseek-flash",
+  "effort": "high",
+  "n": 10,
+  "date": "2026-11-23",
+  "commit": "c5f461b",
+  "runs": 30,
+  "trajectory_pass": 1.0,
+  "crashed": 0,
+  "turns": 30,
+  "errors": 0,
+  "fallback_rate": 0.0,
+  "fallback_kinds": {},
+  "spelled_number_replies": 0,
+  "invariant_violations": {
+   "stream": 0,
+   "no_agent_booking": 0,
+   "click_books_once": 0,
+   "no_false_booked": 0,
+   "provenance": 0
+  },
+  "tools": {
+   "find_city": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   },
+   "quote_route": {
+    "expected": 30,
+    "hit": 30,
+    "actual": 30,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   },
+   "request_booking": {
+    "expected": 20,
+    "hit": 20,
+    "actual": 20,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   },
+   "list_my_tickets": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   }
+  },
+  "per_case": {
+   "book_in_one_message": {
+    "group": "booking",
+    "runs": 10,
+    "passed": 10,
+    "fallback": 0,
+    "turns": 10,
+    "tokens": 62060,
+    "cost": 0.005661816,
+    "max_turn_tokens": 6282
+   },
+   "zh_book_in_one_message": {
+    "group": "booking",
+    "runs": 10,
+    "passed": 10,
+    "fallback": 0,
+    "turns": 10,
+    "tokens": 63338,
+    "cost": 0.004658112,
+    "max_turn_tokens": 6513
+   },
+   "book_in_one_message_no_service": {
+    "group": "booking",
+    "runs": 10,
+    "passed": 10,
+    "fallback": 0,
+    "turns": 10,
+    "tokens": 39869,
+    "cost": 0.00364416,
+    "max_turn_tokens": 4069
+   }
+  },
+  "usage": {
+   "hit": 139648,
+   "miss": 19574,
+   "out": 6045,
+   "reasoning": 2190
+  },
+  "llm_calls": 80,
+  "cost_usd": 0.013964088,
+  "llm_latency_ms": {
+   "p50": 1340,
+   "p90": 1729,
+   "max": 2479
+  },
+  "turn_tokens": {
+   "cap": 20000,
+   "p50": 6173,
+   "p90": 6396,
+   "max": 6513,
+   "near_cap": 0,
+   "over_cap": 0,
+   "budget_stops": 0
+  },
+  "turn_latency_s": {
+   "p50": 3.86,
+   "p90": 4.51
+  },
+  "verdict": {
+   "tool:find_city": true,
+   "tool:quote_route": true,
+   "tool:request_booking": true,
+   "tool:list_my_tickets": true,
+   "trajectory": true,
+   "fallback_rate": true,
+   "invariants": true
+  }
+ },
+ "runs": [
+  {
+   "case": "book_in_one_message",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_0bc4e8114d162640",
+     "outcome": "sent",
+     "text": "The confirmation card for your Madrid to Cairo flight is ready — please check the route, distance and price on the card, then click \"Confirm booking\" to issue the ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_a388e92afac06345"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_a388e92afac06345"
+       },
+       "code": "ok",
+       "quote_id": "q_a388e92afac06345"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.1939418749534525,
+     "llm_steps": 3,
+     "turn_tokens": 6270,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 4224,
+    "miss": 1845,
+    "out": 201,
+    "reasoning": 60
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1500,
+    788,
+    1377
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 1,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_669bb91d6e790124",
+     "outcome": "sent",
+     "text": "The direct Madrid → Cairo flight is shown on the confirmation card. Please check the route, distance and price there, and click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_e1596e624de6a969"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_e1596e624de6a969"
+       },
+       "code": "ok",
+       "quote_id": "q_e1596e624de6a969"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.675367625022773,
+     "llm_steps": 3,
+     "turn_tokens": 6256,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 4224,
+    "miss": 1837,
+    "out": 195,
+    "reasoning": 54
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1535,
+    1328,
+    1487
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 2,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_65745aad9e230fd3",
+     "outcome": "sent",
+     "text": "The confirmation card for your direct Madrid → Cairo flight is ready. Please check the route, distance and price on the card, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_c78cdd8482d45719"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_c78cdd8482d45719"
+       },
+       "code": "ok",
+       "quote_id": "q_c78cdd8482d45719"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.9463989170035347,
+     "llm_steps": 3,
+     "turn_tokens": 6138,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 4096,
+    "miss": 1885,
+    "out": 157,
+    "reasoning": 14
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1268,
+    1446,
+    969
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 3,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_3dc6c2faa52f4faf",
+     "outcome": "sent",
+     "text": "Your direct flight from Madrid to Cairo is ready on the card. Please check the route, distance and price there, then click \"Confirm booking\" to issue the ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_13265c31c118270e"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_13265c31c118270e"
+       },
+       "code": "ok",
+       "quote_id": "q_13265c31c118270e"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.387741000042297,
+     "llm_steps": 3,
+     "turn_tokens": 6137,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 4096,
+    "miss": 1883,
+    "out": 158,
+    "reasoning": 17
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1258,
+    1618,
+    1378
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 4,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_4ff0dbff8ecbccca",
+     "outcome": "sent",
+     "text": "The card shows your direct Madrid–Cairo route. Please check the route, distance and price on the card and click \"Confirm booking\" to issue the ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_81ca14450a0959bc"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_81ca14450a0959bc"
+       },
+       "code": "ok",
+       "quote_id": "q_81ca14450a0959bc"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.62667066702852,
+     "llm_steps": 3,
+     "turn_tokens": 6282,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 575,
+    "out": 203,
+    "reasoning": 63
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1493,
+    1737,
+    1210
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 5,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_e8dd9fdfa8990872",
+     "outcome": "sent",
+     "text": "I found a direct flight from Madrid to Cairo. Please check the route, distance and price on the card, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_9c42ac2db03ab636"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_9c42ac2db03ab636"
+       },
+       "code": "ok",
+       "quote_id": "q_9c42ac2db03ab636"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.2539199169841595,
+     "llm_steps": 3,
+     "turn_tokens": 6131,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5376,
+    "miss": 603,
+    "out": 152,
+    "reasoning": 11
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1262,
+    1095,
+    840
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 6,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_d6b291fbb41982f5",
+     "outcome": "sent",
+     "text": "The confirmation card is ready for your Madrid to Cairo flight. Please check the route, distance and price on the card, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_18899cc495db8422"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_18899cc495db8422"
+       },
+       "code": "ok",
+       "quote_id": "q_18899cc495db8422"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.238619417010341,
+     "llm_steps": 3,
+     "turn_tokens": 6279,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 571,
+    "out": 204,
+    "reasoning": 63
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1608,
+    900,
+    1548
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 7,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_2cd324ae6e482b0c",
+     "outcome": "sent",
+     "text": "The card shows your direct flight from Madrid to Cairo. Please check the route, distance and price on it, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_b804ad58349b2a3e"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_b804ad58349b2a3e"
+       },
+       "code": "ok",
+       "quote_id": "q_b804ad58349b2a3e"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.101082457986195,
+     "llm_steps": 3,
+     "turn_tokens": 6173,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 503,
+    "out": 166,
+    "reasoning": 25
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1695,
+    1217,
+    1147
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 8,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_2598055cb3552503",
+     "outcome": "sent",
+     "text": "I found a direct flight from Madrid to Cairo. Please check the route, distance and price on the card, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_22a0695fec4b8324"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_22a0695fec4b8324"
+       },
+       "code": "ok",
+       "quote_id": "q_22a0695fec4b8324"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.236787999980152,
+     "llm_steps": 3,
+     "turn_tokens": 6223,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 537,
+    "out": 182,
+    "reasoning": 40
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1549,
+    1017,
+    1628
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 9,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_21fae798bf54a526",
+     "outcome": "sent",
+     "text": "The confirmation card for your direct Madrid → Cairo flight is ready. Please check the route, distance and price on the card, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_32d27de6ab903840"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_32d27de6ab903840"
+       },
+       "code": "ok",
+       "quote_id": "q_32d27de6ab903840"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.4435442499816418,
+     "llm_steps": 3,
+     "turn_tokens": 6171,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 499,
+    "out": 168,
+    "reasoning": 25
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1293,
+    879,
+    1218
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 0,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_2d6c53c7850450c3",
+     "outcome": "sent",
+     "text": "已找到从 Madrid 到 Cairo 的直飞航线，确认卡片已经生成。请核对卡片上的航线、距离和价格，然后点击“Confirm booking”完成订票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_7466ed17bba795d2"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_7466ed17bba795d2"
+       },
+       "code": "ok",
+       "quote_id": "q_7466ed17bba795d2"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.905746291973628,
+     "llm_steps": 3,
+     "turn_tokens": 6254,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 556,
+    "out": 194,
+    "reasoning": 49
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1266,
+    1044,
+    1399
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 1,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_60e73d399351951b",
+     "outcome": "sent",
+     "text": "已经为你找到 Madrid 到 Cairo 的直飞航线，确认卡片已生成。请核对卡片上的航线、距离和价格，然后点击“Confirm booking”完成出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_18dd3e587f4761a6"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_18dd3e587f4761a6"
+       },
+       "code": "ok",
+       "quote_id": "q_18dd3e587f4761a6"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.370995124976616,
+     "llm_steps": 3,
+     "turn_tokens": 6291,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 582,
+    "out": 205,
+    "reasoning": 58
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1355,
+    1666,
+    1302
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 2,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_32b539d5230dfa1e",
+     "outcome": "sent",
+     "text": "已为你找到 Madrid 到 Cairo 的直飞航线，确认卡片已生成。请核对卡片上的航线、距离和价格，然后点击“Confirm booking”出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_7d0c5ed57913b003"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_7d0c5ed57913b003"
+       },
+       "code": "ok",
+       "quote_id": "q_7d0c5ed57913b003"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.9608143329969607,
+     "llm_steps": 3,
+     "turn_tokens": 6278,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 574,
+    "out": 200,
+    "reasoning": 54
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1219,
+    1359,
+    1340
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 3,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_07b9b2e6524ca79a",
+     "outcome": "sent",
+     "text": "已为您找到从 Madrid 到 Cairo 的直飞航班，价格是 $366.55。请在卡片上核对航线、距离和价格，然后点击 \"Confirm booking\"；只有您点击后才会出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_a80a62bea565b4ce"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_a80a62bea565b4ce"
+       },
+       "code": "ok",
+       "quote_id": "q_a80a62bea565b4ce"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.8646091659902595,
+     "llm_steps": 3,
+     "turn_tokens": 6513,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5632,
+    "miss": 596,
+    "out": 285,
+    "reasoning": 131
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1459,
+    1019,
+    1336
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 4,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_0aa0c0302ca1761a",
+     "outcome": "sent",
+     "text": "已为你找到从 Madrid 到 Cairo 的直飞航班，并生成了确认卡片。\n\n请核对卡片上的航线、距离和价格，然后点击“Confirm booking”完成订票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_796325515c977135"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_796325515c977135"
+       },
+       "code": "ok",
+       "quote_id": "q_796325515c977135"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.858519875037018,
+     "llm_steps": 3,
+     "turn_tokens": 6396,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5632,
+    "miss": 517,
+    "out": 247,
+    "reasoning": 102
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1413,
+    899,
+    1494
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 5,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_714bc5580f82b59a",
+     "outcome": "sent",
+     "text": "从 Madrid 到 Cairo 的直飞航线已生成确认卡片，请在卡片上核对航线、距离和价格，然后点击“确认预订”即可出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_e25d2ffa43bdf9ef"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_e25d2ffa43bdf9ef"
+       },
+       "code": "ok",
+       "quote_id": "q_e25d2ffa43bdf9ef"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.506554041989148,
+     "llm_steps": 3,
+     "turn_tokens": 6498,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5632,
+    "miss": 594,
+    "out": 272,
+    "reasoning": 128
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1831,
+    952,
+    1686
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 6,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_03f4ee8b4d9b9ad3",
+     "outcome": "sent",
+     "text": "已为您找到 Madrid 到 Cairo 的直飞路线，确认卡片已经生成。请核对卡片上的路线、距离和价格，然后点击“Confirm booking”完成预订。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_78aa681a9c5f1245"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_78aa681a9c5f1245"
+       },
+       "code": "ok",
+       "quote_id": "q_78aa681a9c5f1245"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.6099353749887086,
+     "llm_steps": 3,
+     "turn_tokens": 6329,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5632,
+    "miss": 480,
+    "out": 217,
+    "reasoning": 71
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1336,
+    962,
+    1268
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 7,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_7fd406441b8189e2",
+     "outcome": "sent",
+     "text": "我找到了从 Madrid 到 Cairo 的直飞航班，确认卡片已经生成。请核对卡片上的路线、距离和价格，然后点击“Confirm booking”来完成出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_d3576c3ba7eeba88"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_d3576c3ba7eeba88"
+       },
+       "code": "ok",
+       "quote_id": "q_d3576c3ba7eeba88"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.369559124985244,
+     "llm_steps": 3,
+     "turn_tokens": 6340,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5632,
+    "miss": 486,
+    "out": 222,
+    "reasoning": 76
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1439,
+    1309,
+    1573
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 8,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_1a0b8c509a037e33",
+     "outcome": "sent",
+     "text": "这是 Madrid 到 Cairo 的直飞航线确认卡片。请核对卡片上的航线、距离和价格，然后点击“Confirm booking”完成出票；只有您点击后才会出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_ca503f79065a8f79"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_ca503f79065a8f79"
+       },
+       "code": "ok",
+       "quote_id": "q_ca503f79065a8f79"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.482686042028945,
+     "llm_steps": 3,
+     "turn_tokens": 6286,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5376,
+    "miss": 704,
+    "out": 206,
+    "reasoning": 57
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    1202,
+    874,
+    1358
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 9,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_ff23614f29335c2c",
+     "outcome": "sent",
+     "text": "Madrid 到 Cairo 的直飞航班已生成确认卡。请查看卡上的航线、距离和价格，然后点击“Confirm booking”完成出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_e7aae73e0c0d8887"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_e7aae73e0c0d8887"
+       },
+       "code": "ok",
+       "quote_id": "q_e7aae73e0c0d8887"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6688497500144877,
+     "llm_steps": 3,
+     "turn_tokens": 6153,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 5504,
+    "miss": 487,
+    "out": 162,
+    "reasoning": 17
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    921,
+    799,
+    918
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_a8fa1f4640b4ddd3",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly to Austin — the card lists the nearest cities we serve. Which one would you like to fly from?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.7034713749890216,
+     "llm_steps": 2,
+     "turn_tokens": 3904,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 304,
+    "out": 144,
+    "reasoning": 62
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    917,
+    1750
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 1,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_8512dbbfc64d28ca",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin. The card shows the nearest served cities; the closest is Copenhagen. Would you like me to quote Austin → Tokyo via Copenhagen instead, or one of the other listed cities?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.777341667038854,
+     "llm_steps": 2,
+     "turn_tokens": 3944,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 319,
+    "out": 169,
+    "reasoning": 72
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1468,
+    1260
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 2,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_e92435dfbfe5fa6d",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly to Austin. The nearest served cities are on the card — Copenhagen, Ohrid, and St. John's. Which one would you like to use as your departure city?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.2908150830189697,
+     "llm_steps": 2,
+     "turn_tokens": 3959,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 321,
+    "out": 182,
+    "reasoning": 86
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    965,
+    1280
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 3,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_6ceca1333eb24fba",
+     "outcome": "sent",
+     "text": "Austin isn't served by Ocean Above. The nearest served city listed on the card is Copenhagen, along with Ohrid and St. John's — which one should I use for your departure?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.49481762497453,
+     "llm_steps": 2,
+     "turn_tokens": 4069,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 353,
+    "out": 260,
+    "reasoning": 166
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1582,
+    1886
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 4,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_1d6260b4e6f75af2",
+     "outcome": "sent",
+     "text": "Ocean Above does not fly to Austin. The card shows the nearest served cities — the closest is Copenhagen (121.0 km), followed by Ohrid (197.3 km) and St. John's (349.4 km). Which of these should I use as your origin instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.8490447090007365,
+     "llm_steps": 2,
+     "turn_tokens": 3978,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 321,
+    "out": 201,
+    "reasoning": 87
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1394,
+    1430
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 5,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_2f49f389bfc4e24d",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly from Austin. The nearest served city is Copenhagen, with other options Ohrid and St. John's. Would you like me to quote from Copenhagen to Tokyo — or do you have another origin in mind?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.7668830830371007,
+     "llm_steps": 2,
+     "turn_tokens": 3934,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 340,
+    "out": 138,
+    "reasoning": 36
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1543,
+    1196
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 6,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_751cfc122d5c18b6",
+     "outcome": "sent",
+     "text": "Austin isn't served by Ocean Above. The nearest served cities are Copenhagen, Ohrid and St. John's, as shown on the card. Which one would you like to fly from?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.5982057910296135,
+     "llm_steps": 2,
+     "turn_tokens": 3971,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 318,
+    "out": 197,
+    "reasoning": 103
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1729,
+    1838
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 7,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_b0777e974584cdf1",
+     "outcome": "sent",
+     "text": "Austin has no Ocean Above service. The nearest served cities are Copenhagen (121.0 km), Ohrid (197.3 km) and St. John's (349.4 km). Which one would you like to use as your departure city?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.918428416014649,
+     "llm_steps": 2,
+     "turn_tokens": 4045,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 329,
+    "out": 260,
+    "reasoning": 154
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1283,
+    1596
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 8,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_6c3f29ceddf55e3e",
+     "outcome": "sent",
+     "text": "Austin isn't served by Ocean Above. The nearest served city on the card is Copenhagen, with Ohrid and St. John's also listed — which one would you like me to use for your flight to Tokyo?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.4371014999924228,
+     "llm_steps": 2,
+     "turn_tokens": 4032,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 321,
+    "out": 255,
+    "reasoning": 156
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1123,
+    2272
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 9,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_09d9f4d632a1cbd7",
+     "outcome": "sent",
+     "text": "Austin doesn't have Ocean Above service. The card lists the nearest cities we do serve — Copenhagen is the closest of them. Which one would you like to fly from?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.201631625008304,
+     "llm_steps": 2,
+     "turn_tokens": 4033,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 3456,
+    "miss": 334,
+    "out": 243,
+    "reasoning": 153
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    1679,
+    2479
+   ]
+  }
+ ]
+}

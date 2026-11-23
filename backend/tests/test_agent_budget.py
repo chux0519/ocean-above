@@ -303,7 +303,7 @@ def test_turn_seconds_come_from_the_budget(world):
 def test_defaults_match_the_issue_and_keep_the_old_limits(world):
     b = AgentBudget()
     assert (b.max_steps, b.max_tool_calls_per_step, b.max_tool_calls_per_turn, b.max_output_tokens_per_call,
-            b.max_total_tokens_per_turn, b.max_turn_seconds) == (6, 4, 12, 4096, 20000, 90.0)
+            b.max_total_tokens_per_turn, b.max_turn_seconds) == (6, 4, 12, 4096, 60000, 90.0)
     agent, _ = make(world)
     assert (agent.max_steps, agent.turn_timeout, agent.budget) == (6, 90.0, b)
     agent, _ = make(world, budget=AgentBudget(max_steps=3), max_steps=2, turn_timeout=5)

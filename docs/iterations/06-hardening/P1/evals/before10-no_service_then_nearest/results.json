@@ -1,0 +1,888 @@
+{
+ "summary": {
+  "mode": "real",
+  "model": "deepseek-flash",
+  "effort": "high",
+  "n": 10,
+  "date": "2026-11-23",
+  "commit": "d61cff8",
+  "runs": 10,
+  "trajectory_pass": 1.0,
+  "crashed": 0,
+  "turns": 20,
+  "errors": 0,
+  "fallback_rate": 0.0,
+  "fallback_kinds": {},
+  "spelled_number_replies": 0,
+  "invariant_violations": {
+   "stream": 0,
+   "no_agent_booking": 0,
+   "click_books_once": 0,
+   "no_false_booked": 0,
+   "provenance": 0
+  },
+  "tools": {
+   "find_city": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   },
+   "quote_route": {
+    "expected": 20,
+    "hit": 20,
+    "actual": 20,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   },
+   "request_booking": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   },
+   "list_my_tickets": {
+    "expected": 0,
+    "hit": 0,
+    "actual": 0,
+    "refused": 0,
+    "spurious": 0,
+    "success": null
+   }
+  },
+  "per_case": {
+   "no_service_then_nearest": {
+    "group": "no_service",
+    "runs": 10,
+    "passed": 10,
+    "fallback": 0,
+    "turns": 20,
+    "tokens": 80377,
+    "cost": 0.008641596
+   }
+  },
+  "usage": {
+   "hit": 66816,
+   "miss": 8925,
+   "out": 4636,
+   "reasoning": 2742
+  },
+  "llm_calls": 40,
+  "cost_usd": 0.008641596,
+  "llm_latency_ms": {
+   "p50": 1131,
+   "p90": 2323,
+   "max": 5018
+  },
+  "turn_latency_s": {
+   "p50": 2.61,
+   "p90": 4.39
+  },
+  "verdict": {
+   "tool:find_city": true,
+   "tool:quote_route": true,
+   "tool:request_booking": true,
+   "tool:list_my_tickets": true,
+   "trajectory": true,
+   "fallback_rate": true,
+   "invariants": true
+  }
+ },
+ "runs": [
+  {
+   "case": "no_service_then_nearest",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Austin doesn't have Ocean Above service. The nearest served cities are shown on the card — Copenhagen, Ohrid and St. John's. Which one would you like me to quote from to Tokyo?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.8946541670011356,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "The card shows the cheapest route from Copenhagen to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta. Let me know if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_9acd7185c3e15464"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6084935419494286,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6656,
+    "miss": 885,
+    "out": 384,
+    "reasoning": 198
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1004,
+    1403,
+    1427,
+    1142
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 1,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin. The nearest served cities are on the card — Copenhagen, Ohrid and St. John's. Which one would you like to fly from to Tokyo?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.743524541030638,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "Here's the cheapest option from Copenhagen to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta. Check the route, distance and price on the card, and tell me if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_3b256142cb4d0f37"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.2496287079993635,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6528,
+    "miss": 879,
+    "out": 304,
+    "reasoning": 111
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    781,
+    1604,
+    1315,
+    892
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 2,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin, so there's no quote from there — the card shows the nearest cities with service: Copenhagen, Ohrid and St. John's. Which one would you like to use as your departure point, or shall I check a different origin?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.829131792008411,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "The cheapest quote from Copenhagen — the closest served city on the card — to Tokyo is ready, with 3 transfers and a total distance and price shown on the card. Tell me if you'd like to book it, or say so if you'd rather start from Ohrid or St. John's.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_af41c44952b6f662"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 6.976583165989723,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 7296,
+    "miss": 859,
+    "out": 1023,
+    "reasoning": 795
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    749,
+    1860,
+    5018,
+    1923
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 3,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't serve Austin. The nearest served cities on the card are Copenhagen, Ohrid and St. John's — which one should I quote to Tokyo for you?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 1.9829967910191044,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "Here's the cheapest route from Copenhagen to Tokyo on the card — it has 3 transfers, via Los Angeles, Mexico City and Atlanta. Let me know if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_b3023d8bdb186f3e"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.2352191249956377,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6656,
+    "miss": 931,
+    "out": 481,
+    "reasoning": 294
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    833,
+    1068,
+    2223,
+    979
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 4,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Austin isn't served by Ocean Above — the card shows the nearest cities that are. Which one would you like to fly from?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.0372305419878103,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "The quote from Copenhagen to Tokyo is on the card — it has 3 transfers and costs $1,040.94. Would you like to book it?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_678c04ca1f05af21"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 1.870597083994653,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6528,
+    "miss": 823,
+    "out": 250,
+    "reasoning": 79
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    872,
+    1123,
+    973,
+    870
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 5,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Austin doesn't appear to be served by Ocean Above. The nearest served cities on the card are Copenhagen, Ohrid and St. John's — which one would you like to depart from instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6046300839516334,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "The card shows the cheapest route from Copenhagen to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta. Would you like to book it?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_002eaebd3bd241f1"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.5850402080104686,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6656,
+    "miss": 908,
+    "out": 386,
+    "reasoning": 205
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1233,
+    1338,
+    1503,
+    1047
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 6,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "We don't fly to or from Austin. The nearest cities we serve are Copenhagen (121.0 km), Ohrid (197.3 km) and St. John's (349.4 km) — which one would you like to use as your departure city?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.6457824579556473,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "Here's the quote from Copenhagen — the nearest of the served cities — to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta. Check the route, distance and price on the card, and tell me if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_9b955241759d4c24"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.107827915984672,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6784,
+    "miss": 885,
+    "out": 546,
+    "reasoning": 329
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1263,
+    1353,
+    3124,
+    967
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 7,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Austin isn't served by Ocean Above. The card shows the nearest cities that are; which one would you like to depart from instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.1025571250356734,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "The cheapest Copenhagen–Tokyo route is shown on the card, including the transfer cities and price. Let me know if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_4111de31eb1365a5"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 3.5924844169639982,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6528,
+    "miss": 927,
+    "out": 454,
+    "reasoning": 284
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    896,
+    1181,
+    1226,
+    2323
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 8,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Ocean Above doesn't fly from Austin. The card shows the nearest served cities — would you like me to quote a route from one of those instead?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 1.7184270840371028,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "Here's the cheapest route from Copenhagen to Tokyo, with transfers in Los Angeles, Mexico City and Atlanta. Tell me if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_c9bc641404a61b2e"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 1.8550170420203358,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6400,
+    "miss": 941,
+    "out": 230,
+    "reasoning": 56
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    946,
+    754,
+    914,
+    903
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 9,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "outcome": "sent",
+     "text": "Austin doesn't have Ocean Above service. The nearest served cities are Copenhagen, Ohrid and St. John's — which one would you like to fly from?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 2.140900333004538,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "outcome": "sent",
+     "text": "I used Copenhagen, the closest served city to Austin, as the departure point. The card shows the Copenhagen → Tokyo route with its transfers, distance and price — tell me if you'd like to book it.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_8148b1058aeab0d6"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 4.390411875036079,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 6784,
+    "miss": 887,
+    "out": 578,
+    "reasoning": 391
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    1013,
+    1103,
+    3217,
+    1131
+   ]
+  }
+ ]
+}

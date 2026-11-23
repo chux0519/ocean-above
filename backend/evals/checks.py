@@ -24,6 +24,7 @@ class TurnRun:
     """What happened in one user turn (filled by the runner)."""
 
     user: str
+    message_id: str = ""  # the stored user message (ties LLM calls to the turn)
     outcome: str = "sent"  # sent | fallback | error
     text: str = ""
     problems: list[dict] = field(default_factory=list)  # ReplyGuard problems (stored guard_problems)
@@ -35,6 +36,8 @@ class TurnRun:
     stream_problem: str | None = None
     recheck: list[dict] = field(default_factory=list)  # an independent ReplyGuard pass over the final text
     latency_s: float = 0.0
+    llm_steps: int = 0  # LLM calls of the turn (attempts included)
+    turn_tokens: int = 0  # tokens charged against the per-turn soft cap (design §4.8), at the end of the turn
     error: str | None = None  # SSE error code or an exception
 
 

@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from app.agent.budget import AgentBudget
+
 from .cases import CASES, Case, Turn
 from .checks import INVARIANTS, REFUSED, align
 from .runner import RunResult, spelled_numbers
@@ -67,6 +69,7 @@ def summarize(cases: list[Case], results: list[RunResult], meta: dict[str, Any])
             "turns": sum(len(r.turns) for r in runs),
             "tokens": sum(r.usage["hit"] + r.usage["miss"] + r.usage["out"] for r in runs),
             "cost": sum(r.cost() for r in runs),
+            "max_turn_tokens": max((t.turn_tokens for r in runs for t in r.turns), default=0),
         }
     latency = [ms for r in results for ms in r.llm_latency_ms]
     turn_latency = [t.latency_s for t in turns]
@@ -86,10 +89,21 @@ def summarize(cases: list[Case], results: list[RunResult], meta: dict[str, Any])
         "cost_usd": sum(r.cost() for r in results),
         "llm_latency_ms": {"p50": percentile(latency, 0.5), "p90": percentile(latency, 0.9),
                            "max": max(latency, default=0)},
+        "turn_tokens": _turn_tokens(turns, kinds),
         "turn_latency_s": {"p50": round(percentile(turn_latency, 0.5), 2), "p90": round(percentile(turn_latency, 0.9), 2)},
     }
     summary["verdict"] = verdict(summary)
     return summary
+
+
+def _turn_tokens(turns: list, kinds: Counter) -> dict[str, Any]:
+    """Tokens each chat turn charged against the per-turn soft cap (design §4.8; the default cap,
+    the eval runs the agent with default budgets). `near_cap`: turns above 3/4 of it."""
+    cap = AgentBudget().max_total_tokens_per_turn
+    values = [t.turn_tokens for t in turns]
+    return {"cap": cap, "p50": percentile(values, 0.5), "p90": percentile(values, 0.9), "max": max(values, default=0),
+            "near_cap": sum(v > cap * 3 // 4 for v in values), "over_cap": sum(v >= cap for v in values),
+            "budget_stops": kinds.get("token_budget", 0) + kinds.get("tool_budget", 0) + kinds.get("max_steps", 0)}
 
 
 def verdict(s: dict[str, Any]) -> dict[str, bool]:
@@ -120,6 +134,10 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
         f"- Latency: LLM call p50 {s['llm_latency_ms']['p50']:.0f} ms, p90 {s['llm_latency_ms']['p90']:.0f} ms, "
         f"max {s['llm_latency_ms']['max']:.0f} ms; whole chat turn p50 {s['turn_latency_s']['p50']} s, "
         f"p90 {s['turn_latency_s']['p90']} s",
+        f"- Tokens per chat turn (charged against the {s['turn_tokens']['cap']:,} soft cap): p50 "
+        f"{s['turn_tokens']['p50']:,}, p90 {s['turn_tokens']['p90']:,}, max {s['turn_tokens']['max']:,}; "
+        f"turns above 75% of the cap: {s['turn_tokens']['near_cap']}, at or above it: {s['turn_tokens']['over_cap']}; "
+        f"budget stops (template): {s['turn_tokens']['budget_stops']}",
         "",
         "## Verdict",
         "",
@@ -152,12 +170,12 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
         "",
         "## Cases",
         "",
-        "| Case | Group | Passed | Fallbacks | Tokens | Cost |",
-        "|---|---|---|---|---|---|",
+        "| Case | Group | Passed | Fallbacks | Tokens | Max turn tokens | Cost |",
+        "|---|---|---|---|---|---|---|",
     ]
     for name, c in s["per_case"].items():
         lines.append(f"| {name} | {c['group']} | {c['passed']}/{c['runs']} | {c['fallback']}/{c['turns']} | "
-                     f"{c['tokens']:,} | ${c['cost']:.4f} |")
+                     f"{c['tokens']:,} | {c['max_turn_tokens']:,} | ${c['cost']:.4f} |")
     failed = [r for r in results if not r.passed]
     lines += ["", f"## Failures ({len(failed)} of {len(results)} runs)", ""]
     if not failed:

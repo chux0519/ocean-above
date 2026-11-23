@@ -41,7 +41,10 @@ class AgentBudget:
     max_tool_calls_per_step: int = 4  # executed tool calls of one completion
     max_tool_calls_per_turn: int = 12  # executed tool calls of the whole turn
     max_output_tokens_per_call: int = 4096  # the request's max_tokens (includes thinking tokens)
-    max_total_tokens_per_turn: int = 20_000  # soft: provider-reported total tokens of all calls
+    # soft: provider-reported total tokens of all calls. 60k, not the first 20k: every step re-sends
+    # the history, and in a 19-turn eval conversation a 3-step turn already had ~18k after step 2
+    # (P1 #34, docs/iterations/06-hardening/P1/STATE.md); 60k leaves 4 steps at full history.
+    max_total_tokens_per_turn: int = 60_000
     max_turn_seconds: float = 90.0  # the whole turn: LLM calls, tools, retries
 
     def __post_init__(self) -> None:

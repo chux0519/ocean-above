@@ -96,8 +96,28 @@ def slim(value: Any) -> Any:
     return value
 
 
+def _mark_nearest(item: Any) -> None:
+    """On an unserved city with its `nearest` list (nearest first, as the airline ranked it): name
+    the single nearest served city in `nearest_served_city`, so "use the nearest city" needs no
+    comparison by the LLM. Left out when the first two are equally near at display precision
+    (then the user has to choose)."""
+    if not isinstance(item, dict):
+        return
+    near = item.get("nearest")
+    if not isinstance(near, list) or not near or not all(isinstance(n, dict) for n in near):
+        return
+    if len(near) > 1 and near[0].get("distance_display") == near[1].get("distance_display"):
+        return
+    if isinstance(near[0].get("city"), str):
+        item["nearest_served_city"] = near[0]["city"]
+
+
 def _payload(code: str, data: dict) -> dict:
     out = {"code": code, **slim(data)}
+    if code == "no_service":
+        _mark_nearest(out)  # find_city
+        for issue in out.get("issues") or ():  # quote_route
+            _mark_nearest(issue)
     if isinstance(out.get("tickets"), list) and len(out["tickets"]) > MAX_TICKETS_FOR_LLM:
         out["tickets"] = out["tickets"][:MAX_TICKETS_FOR_LLM]  # newest first
         out["tickets_shown"] = MAX_TICKETS_FOR_LLM
