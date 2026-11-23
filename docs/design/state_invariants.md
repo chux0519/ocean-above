@@ -49,3 +49,6 @@ Design context: `docs/design/design.md` §6.
   nothing and refunds its message slot. (Model test: `test_slots_model`.)
 - **C2 Drain before release.** A turn releases its conversation lock and slot only after every worker thread it started
   has ended, or after the drain timeout (30 s, logged).
+- **C3 Clicks hold no worker thread while waiting.** A booking click waits for the conversation lock on the event
+  loop; its transaction runs to its end before the lock is released, even when the request is cancelled.
+- **C4 Per-user caps.** At most `AGENT_MAX_TURNS_PER_USER` turns and 2 pending booking clicks per user at once.

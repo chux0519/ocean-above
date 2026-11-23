@@ -1,4 +1,4 @@
-# API and card contract (v1.4, 2026-11-23)
+# API and card contract (v1.5, 2026-11-24)
 
 Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
 `contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
@@ -44,7 +44,7 @@ script, not by the production core) — correctness is tested in the backend, no
 
 Booking errors: `invalid_nonce` (409), `not_presented` (409), `expired` (409), `already_booked` (409),
 `stale` (409; data changed — ask for a new quote), `not_found` (404), `conversation_busy` (409; a reply is still
-being generated — retry after `done`), `data_unavailable` (503; route data could not be read — retry; the quote and
+being generated — retry after `done` — or the user already has 2 booking clicks in progress), `data_unavailable` (503; route data could not be read — retry; the quote and
 nonce are unchanged).
 
 ## Objects
@@ -105,6 +105,7 @@ posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is run
 | `replace` | `{"text":"…"}` | replace the whole assistant text so far |
 | `ping` | `{}` | heartbeat every 15 s; ignore |
 | `done` | `{"message": Message}` | final assistant message incl. cards with current states |
-| `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation) and `server_busy` (too many turns site-wide; the day's message slot is given back): both are sent before `user_message`, nothing is stored — keep the input box text and retry |
+| `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation, or the user already has 2 turns running in
+other conversations), `internal_error` sent before `user_message` (the message could not be stored; slot refunded) and `server_busy` (too many turns site-wide; the day's message slot is given back): both are sent before `user_message`, nothing is stored — keep the input box text and retry |
 
 Example: `contract/fixtures/sse_quote_turn.txt`.

@@ -283,6 +283,8 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 | 本轮工具调用或 token 超出预算 | 超出的工具调用不执行并回结构化拒绝；需要结束时模板回复（`tool_budget` / `token_budget`），见 §4.8 |
 | 全站对话轮次已满 | 最多等 5 s；仍满 → `server_busy`，消息不保存，额度退还，前端保留输入 |
 | app.db 锁等待 / 操作超时 | 回滚；HTTP 503 `data_unavailable`（出票可用同一 nonce 重试）；对话里走模板 / `internal_error` |
+| 同一用户已有 2 个轮次在跑 | `conversation_busy`（其他会话忙），什么都不存 |
+| 用户消息没能存入 app.db | `internal_error`（没有保存），额度退还 |
 
 ### 4.7 流式输出
 - 传输：`POST /api/conversations/{id}/messages` 返回 SSE（`text/event-stream`），前端用 fetch 逐段读取。
@@ -318,11 +320,17 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
   每个都得到一条 `{"code":"tool_budget_exceeded","message":…,"limit":"per_step"|"per_turn"}` 工具结果，
   所以每个 `tool_call_id` 都有回应，协议有效；拒绝也像普通调用一样存入 `tool_calls`（`error = "budget: …"`），
   下一轮重建的上下文与记录的 completion 对齐。拒绝不是记录：不进 ReplyGuard，模板也不引用它。
-- **token 软上限**：用服务商回报的 `usage.total_tokens`，在两次 LLM 请求之间检查——调用前无法精确知道一次请求会用多少
-  token，所以正在进行的那一步会跑完，超出后只是不再开始下一步。失败的调用和重试也计入；没有回报 usage 的调用（部分
-  流式失败、某些服务商）按保守估计计：`ceil(请求 JSON 字符数 / 2) + 单次输出上限`。每次调用的计费写在
-  `llm_calls.response.budget`（`charged_tokens`、`estimated`、`turn_tokens`）；`llm_calls.tokens` 仍只存服务商回报的值，
-  全站每日预算（§8.2）照旧按它累计。**这不是严格的费用上限**：单次调用最多可以超出剩余额度一整步，价格也按模型而异。
+- 一次 completion 的工具调用超过 `每步上限 × 4`（默认 16）时视为异常：一个都不执行、不逐条落拒绝，本轮以模板结束
+  （`tool_budget`，值为调用数）；该 completion 在 `llm_calls` 里标 `tool_calls_not_run`，重建上下文时跳过它。
+- 工具返回后，结果、卡片和给 LLM 的消息立即登记到本轮，再写 `tool_calls` 行；时限落在写行上时，模板回复仍带这张卡。
+- **token 软上限**：在两次 LLM 请求之间、以及每次重试之前检查（正在进行的那一步会跑完，超出后不再开始下一步，也不再重试）。
+  每次调用按以下规则计费：服务商回报的用量取 `max(total_tokens, prompt_tokens + completion_tokens)`（0 不算回报）；
+  **没读到任何响应体的失败**（HTTP 错误状态、连接 / 握手失败）计 0；其余没有可用回报的调用（流中途断开、
+  completion 没带 usage）按估算计：`ceil(请求 JSON 字符数 / 2) + ceil(已收到的输出字符数 / 2)`（输出含文本、思考、
+  工具调用，最多到单次输出上限）；输出量不可知时（本次调用超时、ReplyGuard 截断、整轮时限打断）按整个单次输出上限计。
+  整轮时限打断的调用也落一条 `llm_calls`（`aborted: "turn_timeout"`）。每次计费写在 `llm_calls.response.budget`；
+  `llm_calls.tokens` 存同一个计费值（服务商原始回报仍在 `response.usage`），全站每日预算（§8.2）按它累计，
+  所以两者口径一致。**这不是严格的费用上限**：单次调用最多可以超出剩余额度一整步，价格也按模型而异。
 - **预算停止永远不出票、不改 quote 状态**：agent 本来就没有出票路径；被拒的 `request_booking` 不执行，所以不会出现确认卡。
   已执行的工具结果和卡片照常保留，assistant 消息照常存储（模板），会话保持良构。
 - 停止时记一条 warning 日志（步数、已执行/被拒调用数、token、估计次数）。
@@ -337,7 +345,18 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 - **app.db 时限**：每条语句等锁最多 10 s（busy timeout），每个连接（一次读或写事务）从打开起 10 s 后中断正在跑的 SQL；
   两者都回滚并抛 `StoreUnavailable`。HTTP 一律 503 `data_unavailable`（出票：没写入任何东西，quote 和 nonce 不变，可重试）；
   对话轮次里走现有的 `internal_error` / 模板回退。
-- 未覆盖：读 locations.db（无操作时限）、CPU 计算（路由毫秒级）、文件系统卡顿。
+- **每用户上限**：同一用户同时运行的轮次最多 `AGENT_MAX_TURNS_PER_USER`（默认 2，1–256），在会话锁之后、名额之前检查；
+  超出 → SSE `error conversation_busy`（文案说明是其他会话在忙），什么都不存，不退额度。
+- **出票点击不占线程等锁**：`book_async` 在事件循环上等会话锁（`hold_async`），拿到锁后才在工作线程里跑出票事务；请求被取消时
+  也等事务线程结束再释放锁。每用户同时进行的点击最多 2 个，超出 → 409 `conversation_busy`（可重试，什么都没改）。
+  出票事务开始前先加载已变化的 locations.db，事务内的 B6 严格复核只需重新哈希文件。
+- **线程池大小**：启动时显式设置事件循环默认线程池为 `2 × AGENT_MAX_ACTIVE_TURNS + 16`（默认 32）：每个运行中的轮次
+  同时最多用一个线程，被打断的轮次最多两个（未结束的工具线程 + 被打断调用的记录），余量给出票事务和路由的短读取。
+- **消息没存上**：保存用户消息时 app.db 出错 → SSE `internal_error`（“没有保存”），在 `user_message` 之前，退还当天额度。
+  app.db 超时的 HTTP 503 文案改为 “服务繁忙，没有做任何改动”。
+- 未覆盖（替换原句）：读 locations.db 没有操作时限；出票事务里的严格复核仍在 app.db 写锁内哈希 locations.db，文件系统卡住时
+  写锁被一直占着，其他写入 10 s 后 `StoreUnavailable`。CPU 计算（路由毫秒级）。等名额时持有会话锁：全站满载时，
+  同会话的点击最多等 5 s（在事件循环上，不占线程）后得到 `conversation_busy`。
 
 ## 5. 路线、距离、价格
 
