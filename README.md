@@ -1,5 +1,26 @@
 # Ocean Above
 
+## Run locally
+
+Requirements: Docker with Compose v2.24+ (or OrbStack / Docker Desktop), and an OpenAI-compatible LLM key.
+
+```bash
+cp .env.example .env                      # then fill in LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, DEV_AUTH_USER, DEV_AUTH_PASSWORD
+mkdir -p locations && cp locations.db locations/   # the API mounts this directory read-only; the copy is not versioned
+docker compose up -d --build
+curl http://127.0.0.1:3000/health         # through the proxy; OCEAN_PORT in .env changes the port
+# then open http://localhost:3000 in a browser
+docker compose down
+```
+
+- Services: `proxy` (Caddy, the only published port, bound to `127.0.0.1`), `web` (Next.js), `api` (FastAPI, one worker).
+  `/api/*` and `/health` go to the API with no buffering (SSE); everything else goes to the web app.
+- `./data/` holds the application database (`app.db`) and survives rebuilds; delete it only to reset state.
+- After replacing `locations.db` on the host, copy the new file into `./locations/` again; the API reloads it on the
+  next request because the fingerprint changed (no restart needed). Use `LOCATIONS_DIR=/path/to/dir` to mount another directory.
+- Logs: `docker compose logs -f api` (json-file, 10 MB × 3 per service).
+- Without Docker: backend in `backend/` (section below), frontend in `frontend/` with `npm ci && npm run dev`.
+
 ## Backend development and tests
 
 Requirements: [uv](https://docs.astral.sh/uv/) (it installs Python and the dependencies from `backend/uv.lock`).

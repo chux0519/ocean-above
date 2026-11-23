@@ -1,0 +1,49 @@
+# Ocean Above: web + api + proxy (Caddy). Only `proxy` publishes a port, on loopback.
+# Before the first `up`: copy locations.db into ./locations (see README "Run locally").
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      API_ORIGIN: http://api:8000
+    expose:
+      - "3000"
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    logging: *logging
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      LOCATIONS_DB: /srv/locations/locations.db
+    volumes:
+      # Application database (written by the API). Survives rebuilds; never overwritten by a deploy.
+      - ./data:/app/data
+      # Directory, not a single file: a replaced locations.db must be visible in the container (fingerprint reload).
+      - ${LOCATIONS_DIR:-./locations}:/srv/locations:ro
+    expose:
+      - "8000"
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      - web
+      - api
+    ports:
+      - "127.0.0.1:${OCEAN_PORT:-3000}:80"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro

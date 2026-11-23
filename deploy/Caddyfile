@@ -1,0 +1,17 @@
+# Single public entry (compose service `proxy`, published on 127.0.0.1 only; Cloudflare Tunnel forwards to it).
+# Plain HTTP inside the compose network: TLS is terminated by Cloudflare.
+:80 {
+	# /api/* (including SSE streams) and the health probe go to the API.
+	@api path /api/* /health
+	handle @api {
+		reverse_proxy api:8000 {
+			# Do not buffer: SSE events must reach the browser as they are produced.
+			flush_interval -1
+		}
+	}
+
+	# Everything else is the web app.
+	handle {
+		reverse_proxy web:3000
+	}
+}

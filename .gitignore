@@ -13,3 +13,6 @@ data/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Runtime copy of locations.db for docker compose (not versioned; see README)
+/locations/
