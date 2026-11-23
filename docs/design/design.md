@@ -281,6 +281,8 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 | 用户在回复完成前又发消息 / 点按钮 | 同会话串行（每会话一把锁，聊天和出票接口共用）；uvicorn 单 worker |
 | 超出限额 | 明确提示（每用户每日消息上限、全站每日预算） |
 | 本轮工具调用或 token 超出预算 | 超出的工具调用不执行并回结构化拒绝；需要结束时模板回复（`tool_budget` / `token_budget`），见 §4.8 |
+| 全站对话轮次已满 | 最多等 5 s；仍满 → `server_busy`，消息不保存，额度退还，前端保留输入 |
+| app.db 锁等待 / 操作超时 | 回滚；HTTP 503 `data_unavailable`（出票可用同一 nonce 重试）；对话里走模板 / `internal_error` |
 
 ### 4.7 流式输出
 - 传输：`POST /api/conversations/{id}/messages` 返回 SSE（`text/event-stream`），前端用 fetch 逐段读取。
@@ -324,6 +326,18 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 - **预算停止永远不出票、不改 quote 状态**：agent 本来就没有出票路径；被拒的 `request_booking` 不执行，所以不会出现确认卡。
   已执行的工具结果和卡片照常保留，assistant 消息照常存储（模板），会话保持良构。
 - 停止时记一条 warning 日志（步数、已执行/被拒调用数、token、估计次数）。
+
+### 4.9 并发与阻塞调用（06 P0b，#33）
+- **全站并发上限**：同时运行的对话轮次最多 `AGENT_MAX_ACTIVE_TURNS`（默认 8，1–256），在每会话锁之外。先拿会话锁，再拿名额
+  （先来先得），最多等 `AGENT_TURN_QUEUE_SECONDS`（默认 5 s，0–60）；等不到 → SSE `error server_busy`，在 `user_message`
+  之前发出，什么都不存，并退还当天的消息额度。等待是 `await`，不阻塞事件循环。
+- **线程不能强制中止**：工具和 app.db 调用在工作线程里跑（`asyncio.to_thread`）；超时只能停止等待，线程会跑完。所以本轮
+  在时限内启动的线程都登记下来；整轮超时或出错后，先等它们结束（最多 30 s）再落 assistant 消息、释放会话锁和名额——
+  否则线程可能在锁释放后还在写 quote。超过 30 s 记 error 日志后照常结束。线程占着名额，因此线程数有上限。
+- **app.db 时限**：每条语句等锁最多 10 s（busy timeout），每个连接（一次读或写事务）从打开起 10 s 后中断正在跑的 SQL；
+  两者都回滚并抛 `StoreUnavailable`。HTTP 一律 503 `data_unavailable`（出票：没写入任何东西，quote 和 nonce 不变，可重试）；
+  对话轮次里走现有的 `internal_error` / 模板回退。
+- 未覆盖：读 locations.db（无操作时限）、CPU 计算（路由毫秒级）、文件系统卡顿。
 
 ## 5. 路线、距离、价格
 

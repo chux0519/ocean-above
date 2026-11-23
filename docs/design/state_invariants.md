@@ -43,3 +43,9 @@ Design context: `docs/design/design.md` §6.
 ## S. Sessions
 - **S1 Revocable sessions.** A session is valid only while its epoch equals `users.session_epoch` and its login method
   is still enabled; logout bumps the epoch (all of the user's sessions end).
+
+## C. Concurrency
+- **C1 Site-wide slots.** At most `AGENT_MAX_ACTIVE_TURNS` turns hold a slot; a refused turn (`server_busy`) stores
+  nothing and refunds its message slot. (Model test: `test_slots_model`.)
+- **C2 Drain before release.** A turn releases its conversation lock and slot only after every worker thread it started
+  has ended, or after the drain timeout (30 s, logged).
