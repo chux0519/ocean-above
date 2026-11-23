@@ -90,6 +90,6 @@ posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is run
 | `replace` | `{"text":"…"}` | replace the whole assistant text so far |
 | `ping` | `{}` | heartbeat every 15 s; ignore |
 | `done` | `{"message": Message}` | final assistant message incl. cards with current states |
-| `error` | `{"code","message"}` | stream ends; the user message is kept |
+| `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation; sent before `user_message`, nothing stored — keep the input box text and retry) |
 
 Example: `contract/fixtures/sse_quote_turn.txt`.
