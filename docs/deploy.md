@@ -1,4 +1,21 @@
-# Deploy — demo `ocean-above.potafree.net`
+# Deploy — `ocean-above.potafree.net`
+
+## Production: VPS (since 2026-11-23)
+Migrated by the user's codex agent (report received over hc, 2026-11-23). Source of truth for releases from now on.
+- Host: a small RackNerd VPS (about 1 GiB RAM; containers use about 215 MiB). Docker Engine 29.x, Compose v5.x,
+  compose project `ocean-above`, checkout `~/llc2026/ocean-above`, existing `.env` (600), `data/app.db`, `locations/`.
+- Edge: Cloudflare proxied A record → nginx on the VPS (Let's Encrypt, auto-renew tested) → `127.0.0.1:18765` (Caddy
+  `proxy` service) → `web` / `api`. The homelab tunnel `ocean-above-homelab` was deleted. With Cloudflare in front,
+  `TRUST_CF_CONNECTING_IP=1` must stay set; nginx must pass `CF-Connecting-IP` / `X-Forwarded-For` through.
+- **Build elsewhere, never on the VPS** (too little RAM): build `linux/amd64` images on the build machine, ship code as a
+  git bundle (private repo; GitHub read access from the VPS not verified) and images with `docker save | ssh … docker
+  load`, then on the VPS: `sudo -n docker compose -p ocean-above up -d --no-build --pull never`. Reuse the SSH
+  ControlMaster (from the homelab: `~/.ssh/cm-homelab-monitoring-racknerd`).
+- Verified at `main@21d25e4`: home page, `/api/health`, `/api/debug/sse-ping` (first event ≈ 1.15 s), SQLite snapshot
+  checksum, locations fingerprint, Google JWKS and DeepSeek reachable, certificate renewal dry run.
+- Every release: record commit, image ids and the checks above in the deploy log below.
+
+## Homelab (previous demo host, retired as the public entry 2026-11-23)
 
 Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-23.
 
@@ -26,6 +43,7 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
 - 2026-11-23: compose skeleton (PR #9) verified there: build OK, `/health` 200 through Caddy, `/` → `/login` 200.
 
 ## Deploy log
+- 2026-11-23 `21d25e4`: moved to the VPS (see top). Homelab compose no longer receives public traffic.
 - 2026-11-23 `bb4488e`: first real deploy (compose project `ocean-above`, `OCEAN_PORT=18765`, `.env` placed by scp,
   mode 600). Public `/api/health` 200; SSE ping through Cloudflare: first event 1.34 s, then every 2 s (no buffering).
   Dev fixed-account login is on (strong random password, not public); Google login + limits before announcing (05).
