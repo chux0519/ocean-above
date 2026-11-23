@@ -4,7 +4,10 @@ from app.api import Settings
 from app.main import create_app
 
 
-def test_health_and_cities(real_db, tmp_path):
+def test_health_and_cities(real_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("OCEAN_ENV_FILE", str(tmp_path / "none.env"))
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with TestClient(create_app(real_db, Settings(app_db=tmp_path / "app.db"))) as client:
         res = client.get("/health")
         assert res.status_code == 200

@@ -9,7 +9,9 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ..airline import Airline
+from ..agent import Agent, LLMConfig, LLMNotConfigured, OpenAIChatClient, encode_stream
+from ..agent.sse import HEADERS as SSE_HEADERS, MEDIA_TYPE as SSE_MEDIA_TYPE
+from ..airline import Airline, NotFound
 from ..core.network import NetworkProvider
 from ..store import Store
 from . import session
@@ -42,6 +44,10 @@ def current_user(request: Request) -> dict:
     return user
 
 
+def _octets(text: str) -> bytes:
+    return text.encode("utf-8", "surrogatepass")
+
+
 def user_view(user: dict) -> dict:
     return {"id": user["id"], "display_name": user["display_name"], "auth_provider": user["auth_provider"]}
 
@@ -68,8 +74,9 @@ def build_router() -> APIRouter:
     @r.post("/auth/dev")
     def auth_dev(creds: Credentials, request: Request):
         s: Settings = request.app.state.settings
-        ok = s.dev_login and hmac.compare_digest(creds.username.encode(), s.dev_user.encode()) \
-            & hmac.compare_digest(creds.password.encode(), s.dev_password.encode())
+        # surrogatepass: a lone surrogate in the JSON must be a wrong password, not a 500
+        ok = s.dev_login and hmac.compare_digest(_octets(creds.username), _octets(s.dev_user)) \
+            & hmac.compare_digest(_octets(creds.password), _octets(s.dev_password))
         if not ok:
             raise ApiError(401, "invalid_credentials", "Wrong username or password.")
         user = request.app.state.store.upsert_user("dev", s.dev_user, s.dev_user)
@@ -113,10 +120,22 @@ def build_router() -> APIRouter:
         return {**summary, "messages": request.app.state.airline.messages(user["id"], conversation_id)}
 
     @r.post("/conversations/{conversation_id}/messages")
-    def send_message(conversation_id: str, body: Text, request: Request, user: dict = Depends(current_user)):
-        if request.app.state.store.get_conversation(user["id"], conversation_id) is None:
+    async def send_message(conversation_id: str, body: Text, request: Request,
+                           user: dict = Depends(current_user)):
+        # Everything that can fail is decided here, before the response headers go out.
+        app = request.app
+        if await asyncio.to_thread(app.state.store.get_conversation, user["id"], conversation_id) is None:
             raise ApiError(404, "not_found", "Conversation not found.")
-        return respond(501, "not_implemented", "Sending messages is not wired up yet.")
+        agent: Agent | None = app.state.agent
+        if agent is None:
+            raise ApiError(503, "llm_unavailable", "The assistant is not configured on this server.")
+        try:
+            events = agent.stream_turn(user["id"], conversation_id, body.text)
+        except NotFound:
+            raise ApiError(404, "not_found", "Conversation not found.") from None
+        except ValueError as e:
+            raise ApiError(400, "bad_request", str(e) or "The message is not valid.") from None
+        return StreamingResponse(encode_stream(events), media_type=SSE_MEDIA_TYPE, headers=SSE_HEADERS)
 
     @r.post("/quotes/{quote_id}/book")
     async def book(quote_id: str, body: Nonce, request: Request, user: dict = Depends(current_user)) -> dict:
@@ -146,11 +165,30 @@ def build_router() -> APIRouter:
     return r
 
 
-def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=None) -> None:
-    """Called from the app's lifespan: opens app.db and shares one Airline (one lock set)."""
+def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=None, *,
+            llm=None, agent_kwargs: dict | None = None) -> None:
+    """Called from the app's lifespan: opens app.db and shares one Airline (one lock set) between
+    the booking route and the agent. `llm` (tests) replaces the OpenAI-compatible client; with no
+    API key configured there is no agent and the message route answers 503 llm_unavailable."""
     app.state.settings = settings
-    app.state.store = store = Store(settings.app_db, **({'clock': clock} if clock else {}))
-    app.state.airline = Airline(store, networks, nonce_secret=settings.nonce_secret)
+    app.state.store = store = Store(settings.app_db, **({"clock": clock} if clock else {}))
+    app.state.airline = airline = Airline(store, networks, nonce_secret=settings.nonce_secret)
+    if llm is None:
+        try:
+            llm = OpenAIChatClient(LLMConfig.from_env())
+        except LLMNotConfigured:
+            llm = None
+    app.state.llm = llm
+    app.state.agent = Agent(airline, llm, **(agent_kwargs or {})) if llm is not None else None
+
+
+async def shutdown(app: FastAPI) -> None:
+    """Let running turns finish (they are stored even when the client left), then close the LLM client."""
+    if getattr(app.state, "agent", None) is not None:
+        await app.state.agent.wait_idle()
+    close = getattr(getattr(app.state, "llm", None), "aclose", None)
+    if close is not None:
+        await close()
 
 
 def mount(app: FastAPI) -> None:

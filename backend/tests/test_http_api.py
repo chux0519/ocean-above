@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.api import Settings, session
 from app.main import create_app
 
+from .agent_helpers import Call, FakeLLM
 from .airline_helpers import SECRET, World, assert_card, assert_message, assert_shape, fixture_schemas
 
 SCHEMAS = fixture_schemas()
@@ -28,6 +29,14 @@ SCHEMAS_ME = _learned(json.loads((FIXTURES / "me.json").read_text()))
 SCHEMAS_CONFIG = _learned(json.loads((FIXTURES / "config.json").read_text()))
 SCHEMAS_TICKETS = _learned(json.loads((FIXTURES / "tickets.json").read_text()))
 SECRET_KEY = b"session-secret-0123456789"
+
+
+@pytest.fixture(autouse=True)
+def no_real_llm(monkeypatch, tmp_path):
+    """Whatever .env or environment the machine has, the app finds no API key unless a test injects a fake."""
+    for name in ("LLM_API_KEY", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OCEAN_ENV_FILE", str(tmp_path / "no-such.env"))
 
 
 @pytest.fixture
@@ -119,6 +128,12 @@ def test_login_me_logout(client):
     res = client.post("/api/auth/logout")
     assert res.json() == {"ok": True}
     assert_error(client.get("/api/me"), 401, "unauthorized")
+
+
+def test_lone_surrogates_in_credentials_are_a_wrong_login_not_a_500(client):
+    for body in ('{"username": "\\ud800", "password": "pw"}', '{"username": "demo", "password": "\\udc00x"}'):
+        res = client.post("/api/auth/dev", content=body, headers={"content-type": "application/json"})
+        assert_error(res, 401, "invalid_credentials")
 
 
 def test_cookie_secure_flag(world):
@@ -282,11 +297,116 @@ def test_unknown_quote_is_404(client, world):
     assert_error(client.post("/api/quotes/q_nope/book", json={"nonce": "n"}), 404, "not_found")
 
 
-# --- messages stub --------------------------------------------------------------------------
-def test_messages_endpoint_is_a_stub_for_now(client, world):
+# --- messages (SSE) -------------------------------------------------------------------------
+def parse_sse(text: str) -> list[tuple[str, dict]]:
+    out = []
+    for block in text.split("\n\n"):
+        if block.strip():
+            head, data = block.split("\n", 1)
+            assert head.startswith("event: ") and data.startswith("data: "), block
+            out.append((head[len("event: "):], json.loads(data[len("data: "):])))
+    return out
+
+
+def chat_client(world, *steps, **kw):
+    llm = FakeLLM(*steps, **kw)
+    return TestClient(create_app(world.db, make_settings(world), clock=world.clock, llm=llm)), llm
+
+
+QUOTE_TURN = [[Call("quote_route", origin="A", destination="D")], ["Here is your route."]]
+
+
+def test_message_stream_then_book_the_presented_card(world):
+    c, llm = chat_client(world, *QUOTE_TURN)
+    with c as client:
+        as_user(client, world.alice)
+        res = client.post(f"/api/conversations/{world.conv}/messages", json={"text": "A to D please"})
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/event-stream")
+        assert res.headers["cache-control"] == "no-cache, no-transform"
+        events = parse_sse(res.text)
+        kinds = [k for k, _ in events]
+        assert kinds[0] == "user_message" and kinds[-1] == "done" and kinds.count("done") == 1
+        assert "card" in kinds and "delta" in kinds and kinds.index("card") < kinds.index("done")
+        assert_message(events[0][1], SCHEMAS)
+        assert events[0][1]["role"] == "user" and events[0][1]["text"] == "A to D please"
+        for kind, data in events:
+            if kind == "card":
+                assert_card(data["card"], SCHEMAS)
+                assert data["card"]["state"]["bookable"] is False  # not before `done`
+        message = events[-1][1]["message"]
+        assert_message(message, SCHEMAS)
+        assert message["role"] == "assistant" and message["text"] == "Here is your route."
+        card = message["cards"][0]
+        assert card["type"] == "quote" and card["state"]["bookable"] and card["state"]["nonce"]
+        # the click: the same Airline serves the agent and the booking route
+        booked = client.post(f"/api/quotes/{card['id']}/book", json={"nonce": card["state"]["nonce"]})
+        assert booked.status_code == 200, booked.text
+        assert booked.json()["ticket"]["quote_id"] == card["id"]
+        detail = client.get(f"/api/conversations/{world.conv}").json()
+        assert [m["role"] for m in detail["messages"]] == ["user", "assistant", "system"]
+        assert detail["messages"][1]["cards"][0]["state"]["status"] == "booked"
+    assert world.ticket_count() == 1
+
+
+def test_the_agent_and_the_booking_route_share_one_airline(world):
+    c, _ = chat_client(world, *QUOTE_TURN)
+    with c as client:
+        assert client.app.state.agent is not None
+        assert client.app.state.airline.locks is client.app.state.agent._locks
+
+
+def test_message_to_another_users_conversation_is_404(world):
+    c, llm = chat_client(world, *QUOTE_TURN)
+    with c as client:
+        as_user(client, world.bob)
+        assert_error(client.post(f"/api/conversations/{world.conv}/messages", json={"text": "hi"}), 404, "not_found")
+        assert_error(client.post("/api/conversations/c_nope/messages", json={"text": "hi"}), 404, "not_found")
+        client.cookies.clear()
+        assert_error(client.post(f"/api/conversations/{world.conv}/messages", json={"text": "hi"}), 401, "unauthorized")
+    assert llm.requests == []  # the model was never called
+    assert world.store.list_messages(world.alice, world.conv) == []
+
+
+def test_bad_message_bodies_are_400_before_the_stream_starts(world):
+    c, llm = chat_client(world, *QUOTE_TURN)
+    with c as client:
+        as_user(client, world.alice)
+        url = f"/api/conversations/{world.conv}/messages"
+        assert_error(client.post(url, json={}), 400, "bad_request")
+        assert_error(client.post(url, json={"text": ""}), 400, "bad_request")
+        assert_error(client.post(url, json={"text": "   "}), 400, "bad_request")
+        assert_error(client.post(url, json={"text": "x" * 5000}), 400, "bad_request")
+        assert_error(client.post(url, json={"text": 5}), 400, "bad_request")
+    assert llm.requests == [] and world.store.list_messages(world.alice, world.conv) == []
+
+
+def test_without_an_llm_key_only_the_message_route_is_unavailable(client, world):
+    assert client.app.state.agent is None
     as_user(client, world.alice)
-    assert_error(client.post(f"/api/conversations/{world.conv}/messages", json={"text": "hi"}), 501, "not_implemented")
-    assert_error(client.post(f"/api/conversations/{world.conv}/messages", json={}), 400, "bad_request")
+    assert_error(client.post(f"/api/conversations/{world.conv}/messages", json={"text": "hi"}), 503, "llm_unavailable")
+    # ownership still comes first
+    as_user(client, world.bob)
+    assert_error(client.post(f"/api/conversations/{world.conv}/messages", json={"text": "hi"}), 404, "not_found")
+    assert client.get("/api/conversations").status_code == 200 and client.get("/api/tickets").status_code == 200
+
+
+def test_llm_failure_is_an_sse_error_event(world):
+    from app.agent import LLMError
+
+    c, _ = chat_client(world, default=LLMError("down", retryable=False))
+    with c as client:
+        as_user(client, world.alice)
+        res = client.post(f"/api/conversations/{world.conv}/messages", json={"text": "hello"})
+        events = parse_sse(res.text)
+        assert [k for k, _ in events] == ["user_message", "error"]
+        assert events[-1][1]["code"] == "llm_unavailable"
+
+
+def test_a_key_in_the_environment_builds_the_real_client(world, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", "test-key-not-real")
+    with TestClient(create_app(world.db, make_settings(world))) as client:
+        assert client.app.state.agent is not None  # built, never called
 
 
 def test_unknown_path_and_method_use_the_error_body(client):

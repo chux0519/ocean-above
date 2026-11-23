@@ -1,8 +1,6 @@
-# T5 STATE (round 01, part 1)
+# T5 STATE (part 2)
 
-- Done: all endpoints except the message stream (see implementation.md); tests 289 passed.
-- In progress: nothing.
-- Next: wire `POST /conversations/{id}/messages` to T3's turn runner (SSE, 15 s ping, same `app.state.airline` locks) once
-  `it03-agent` is merged and the coordinator sends the signature; add the SSE tests then.
-- Open decisions: none. (Session cookie is stateless; no server-side revocation.)
-- Verify: see implementation.md "Verify".
+- Done: message SSE route wired to T3's agent; 503 without key; surrogate fix; `.env.example`; tests; 427 passed.
+- Depends on PR #14 (T3): merge #14 first. In progress: nothing. Next: coordinator review.
+- Open decisions: none. Not done (by design): rate limits (design §8.2).
+- Verify: `cd backend && HYPOTHESIS_PROFILE=ci uv run pytest -q`; `bash tool/test_diff.sh`; `python3 tool/review_lint.py`.

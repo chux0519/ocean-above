@@ -14,8 +14,8 @@ DEFAULT_DB = Path(__file__).resolve().parents[2] / "locations.db"
 
 
 def create_app(db_path: str | Path | None = None, settings: api.Settings | None = None,
-               clock=None) -> FastAPI:
-    """`settings` default to the environment; `clock` is for tests."""
+               clock=None, llm=None, agent_kwargs: dict | None = None) -> FastAPI:
+    """`settings` default to the environment; `clock`, `llm` (a fake LLM) and `agent_kwargs` are for tests."""
     settings = settings or api.Settings.from_env()
     path = Path(db_path or os.environ.get("LOCATIONS_DB") or DEFAULT_DB)
 
@@ -23,8 +23,9 @@ def create_app(db_path: str | Path | None = None, settings: api.Settings | None 
     async def lifespan(app: FastAPI):
         app.state.networks = NetworkProvider(path)
         app.state.networks.current()  # fail at startup, not on the first request, if the db is bad
-        api.install(app, settings, app.state.networks, clock)
+        api.install(app, settings, app.state.networks, clock, llm=llm, agent_kwargs=agent_kwargs)
         yield
+        await api.shutdown(app)
 
     app = FastAPI(title="Ocean Above API", lifespan=lifespan)
     api.mount(app)
