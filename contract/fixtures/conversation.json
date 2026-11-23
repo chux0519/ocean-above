@@ -345,6 +345,56 @@
         }
       ],
       "created_at": "2026-11-23T08:08:01Z"
+    },
+    {
+      "id": "m_14",
+      "role": "user",
+      "text": "Tokyo to San Jose",
+      "cards": [],
+      "created_at": "2026-11-23T08:09:00Z"
+    },
+    {
+      "id": "m_15",
+      "role": "assistant",
+      "text": "Here is the direct flight from Tokyo to San Jose. Note there is also a city called San José — check the card if you meant that one.",
+      "cards": [
+        {
+          "type": "quote",
+          "id": "q_5a1e",
+          "origin": "Tokyo",
+          "destination": "San Jose",
+          "legs": [
+            {
+              "from": "Tokyo",
+              "to": "San Jose",
+              "distance_display": "195.2 km",
+              "distance": "195.243437789852492869613342918456"
+            }
+          ],
+          "transfers": [],
+          "distance_display": "195.2 km",
+          "price_display": "$25.38",
+          "distance": "195.243437789852492869613342918456",
+          "price": "25.381646912680825067809564643539",
+          "expires_at": "2026-11-23T08:24:00Z",
+          "state": {
+            "status": "presented",
+            "bookable": true,
+            "nonce": "n_77ab01",
+            "ticket_id": null
+          },
+          "similar_names": [
+            {
+              "city": "San José",
+              "connected_hubs": [
+                "Sydney",
+                "Tokyo"
+              ]
+            }
+          ]
+        }
+      ],
+      "created_at": "2026-11-23T08:09:03Z"
     }
   ]
 }
