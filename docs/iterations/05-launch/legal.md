@@ -1,7 +1,7 @@
-# Legal pages for the demo (draft, 2026-11-23)
+# Legal pages for the demo (2026-11-23)
 
-Rendered by the frontend at `/privacy` and `/terms`. Placeholders `Potafree LLC` and `chuxdesign@gmail.com` are filled by the
-coordinator once the user decides. Keep the text short and accurate; it describes what this code actually does.
+Rendered by the frontend at `/privacy` and `/terms`. Operator and contact confirmed by the user on 2026-11-23.
+Keep the text short and accurate; it describes what this code actually does.
 
 ## Privacy Policy
 
@@ -15,7 +15,8 @@ operate, no payments are taken and tickets have no value.
   receive your password and request no other Google data or permissions.
 - If you sign in with an invite code: the name you enter.
 - What you do in the app: your messages, the assistant's replies, quotes and the demo tickets you book.
-- Technical data needed to run the service: request logs (including IP address) kept for up to 14 days, and a session
+- Technical data needed to run the service: request logs (including IP address), rotated automatically and used only to operate
+  the service, and a session
   cookie that keeps you signed in.
 
 **How we use it**
