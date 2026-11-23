@@ -48,6 +48,11 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 
 ## Design
 - [DESIGN.md](DESIGN.md) is the single source of truth; only the coordinator edits it.
+- UI reviews use **Impeccable** (https://github.com/pbakaus/impeccable): `/impeccable critique <target>` (UX,
+  scored) and `/impeccable audit <target>` (a11y, performance, theming, responsive; P0–P3) on narrow targets,
+  plus `npx impeccable detect` on `frontend/` sources and on the running dev-server URL (rendered-only rules
+  such as contrast need the URL). P0–P1 are fixed in the same round. Install once the frontend exists
+  (`npx impeccable install`, project scope, accept the design hook).
 - Every screenshot gets a review; obvious defects are fixed in the same round; advice that conflicts with
   DESIGN.md goes to the user as a "design conflicts" table.
 
@@ -58,6 +63,33 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   first, then a model-based test (`tool/model_check.py` pattern), then a named regression case.
 - Only new failures count (`tool/test_diff.sh`). A wall-clock benchmark that fails in the full run is rerun
   alone before it counts.
+
+## Testing
+- **Deterministic core** (DB loading, distance, graph search, pricing, nearest served city, booking rules):
+  unit tests plus property tests against a brute-force reference on `locations.db` and on generated graphs
+  (pytest + hypothesis). Expected numbers in tests come from the reference, never from an LLM.
+- **LLM layer** has its own eval suite (`backend/evals/`), separate from unit tests because it costs money and
+  is non-deterministic:
+  - *tool-call accuracy*: per scenario, the right tool with valid, correct arguments; report the success rate
+    over N runs per case, with a threshold per tool;
+  - *trajectory tests*: whole multi-turn conversations checked against the expected tool-call sequence and
+    invariants — e.g. `book` never happens without a preceding user confirmation of that exact quote; every
+    number in the reply appears in a tool result; unserved cities lead to the nearest-served suggestion;
+  - deterministic replay: the agent loop runs against a scripted fake LLM in the normal test suite, so loop,
+    tool dispatch and confirmation gating are tested for free; real-model evals run on demand and record
+    model, date, pass rate and cost in the iteration's acceptance notes.
+- Booking/confirmation state rules get numbered invariants in `docs/design/state_invariants.md` and a
+  model-based test.
+
+## Dependencies and prior art
+- Minimal dependencies; no big frameworks. The LLM agent loop (messages, tool schemas, tool dispatch,
+  confirmation gate) is our own code over a plain OpenAI-compatible HTTP client — no LangChain, no agent SDKs.
+- For well-defined deterministic algorithms (shortest path etc.), prefer a stable, fast, well-known library
+  if it fits (e.g. `networkx` / `scipy.sparse.csgraph`) over a hand-rolled one; it must still be covered by
+  our reference tests. State the choice and why in the plan.
+- Before building something non-trivial, search GitHub for a mature solution first and note the result
+  (adopted / rejected and why) in the plan.
+- Every new dependency is named in the plan with its reason.
 
 ## Authorizations
 - Standing (no need to ask): install dependencies locally, run tests / lint / dev servers, commit on branches.

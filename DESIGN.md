@@ -29,4 +29,6 @@ and colour that means two things.
 <Per screen: hierarchy, primary action, empty state, errors.>
 
 ## 7. Exceptions (dated)
+- 2026-11-23: UI is reviewed with Impeccable (critique / audit / detect); its findings that conflict with this
+  file go to the user as a design-conflicts table.
 - <YYYY-MM-DD: decision, why, limits.>
