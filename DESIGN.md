@@ -176,6 +176,10 @@ packages. App components wrap them.
 4. Navy band with the theme switch, then the "Sign in" card.
 
 ## 7. Exceptions (dated)
+- 2026-11-23: **superseded direction.** The user replaced direction A "Timetable" with issue #39 (ChatGPT-inspired soft
+  minimalism: neutral charcoal/zinc dark, warm-neutral light, floating composer, selective rounding, calculation details
+  collapsed). Sections 2–6 will be rewritten from the 07-ui proposal once the user confirms it; until then they
+  describe the shipped UI. #39 is the source of truth for new UI work.
 - 2026-11-23: direction A "Timetable"; Public Sans via `next/font/google`; lucide-react icons (named imports); light + dark
   themes following the system with a System / Light / Dark switch; markdown rendered by our own minimal renderer
   (streamdown removed for bundle size: 353 → 206 KB gzip).
