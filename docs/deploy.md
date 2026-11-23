@@ -53,6 +53,11 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
 - `restart: unless-stopped`.
 
 ## Before the demo goes public (iteration 05)
+- `.env` on the homelab: `TRUST_CF_CONNECTING_IP=1` (required behind Cloudflare, otherwise every client shares one
+  throttle key), `GOOGLE_CLIENT_ID`, `INVITE_CODES` (**one code per reviewer**), `DAILY_MESSAGES_PER_USER`,
+  `DAILY_TOKEN_BUDGET`, `HTTPS_PROXY=http://192.168.1.13:7890` + `NO_PROXY=localhost,127.0.0.1,api,web` (the api
+  container fetches Google's JWKS); remove `DEV_AUTH_USER` / `DEV_AUTH_PASSWORD`.
+- Renaming or removing the dev user does not end its existing sessions: rotate `SESSION_SECRET` when disabling it.
 - Google login works; OAuth app published to **Production**; invite-code login for reviewers.
 - Per-user daily message cap and global daily budget enabled; spend cap set at the LLM provider.
 - Dev fixed-account login disabled on the demo.

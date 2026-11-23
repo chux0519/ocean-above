@@ -37,3 +37,9 @@ Design context: `docs/design/design.md` §6.
   reservation happen in one write transaction; a refused message stores nothing. (Model test:
   `test_reservations_match_a_reference_count`.) Known: the site token budget is checked at message start, so turns
   already running may overshoot it by their own cost; a `conversation_busy` message has already used its slot.
+- **U2 One account per invite code.** An invite code maps to exactly one account, independent of the order of
+  `INVITE_CODES`; the name is a display name only.
+
+## S. Sessions
+- **S1 Revocable sessions.** A session is valid only while its epoch equals `users.session_epoch` and its login method
+  is still enabled; logout bumps the epoch (all of the user's sessions end).
