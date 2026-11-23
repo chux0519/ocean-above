@@ -116,4 +116,15 @@ describe("other cards", () => {
     render(<CardView card={c} />);
     expect(screen.getByRole("status")).toHaveTextContent(c.message);
   });
+
+  it("ambiguous candidates send 'I mean X.' in a live chat and are plain rows when read-only", async () => {
+    const card = cardOf("ambiguous_city");
+    const onAsk = vi.fn();
+    const { unmount } = render(<CardView card={card} onAsk={onAsk} />);
+    await userEvent.click(screen.getByRole("button", { name: new RegExp(card.candidates[1].city) }));
+    expect(onAsk).toHaveBeenCalledWith(`I mean ${card.candidates[1].city}.`);
+    unmount();
+    render(<CardView card={card} onAsk={onAsk} readOnly />);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
 });

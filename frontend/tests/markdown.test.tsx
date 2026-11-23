@@ -42,7 +42,7 @@ describe("minimal markdown", () => {
   });
   it("Chinese mixed text", () => {
     expect(html("从**广州**飞到*利马*，共 `8,928.6 km`。")).toBe(
-      "<p>从<strong>广州</strong>飞到<em>利马</em>，共 <code class=\"rounded-sm bg-rail px-1 text-[0.9em]\">8,928.6 km</code>。</p>");
+      "<p>从<strong>广州</strong>飞到<em>利马</em>，共 <code class=\"rounded-sm bg-sunken px-1 text-[0.9em]\">8,928.6 km</code>。</p>");
   });
   it("char-by-char streaming ends identical to one-shot", () => {
     const text = "Route:\n\n1. **Guangzhou** → *Frankfurt*\n2. [map](https://example.com)\n\n- `a`\n- b\n\n未闭合 **x";

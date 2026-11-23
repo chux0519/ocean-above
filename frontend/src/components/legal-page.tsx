@@ -32,7 +32,7 @@ function inline(nodes: Inline[]): ReactNode {
       case "b": return <strong key={i} className="font-semibold">{inline(n.c)}</strong>;
       case "i": return <em key={i}>{inline(n.c)}</em>;
       case "code": return <code key={i}>{n.v}</code>;
-      case "a": return <a key={i} href={n.href} className="text-primary underline">{inline(n.c)}</a>;
+      case "a": return <a key={i} href={n.href} className="text-accent underline underline-offset-2">{inline(n.c)}</a>;
     }
   });
 }
@@ -48,13 +48,13 @@ export function LegalPage({ title }: { title: "Privacy Policy" | "Terms of Servi
   const s = load(title);
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="flex h-14 shrink-0 items-center justify-between bg-shell px-4 text-shell-ink" data-shell>
-        <Link href="/" className="inline-flex min-h-11 items-center text-base font-bold tracking-[-0.01em]">Ocean Above</Link>
-        <ThemeToggle tone="shell" />
+      <header className="flex h-14 shrink-0 items-center justify-between pr-2 pl-4 sm:px-6">
+        <Link href="/" className="inline-flex min-h-11 items-center text-[0.9375rem] font-semibold tracking-[-0.01em]">Ocean Above</Link>
+        <ThemeToggle />
       </header>
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8 sm:py-12">
-        <article className="space-y-3 text-[15px] leading-relaxed text-ink [&_ul]:list-disc [&_ul]:space-y-1.5 [&_ul]:pl-5">
-          <h1 className="mb-4 text-2xl font-bold tracking-[-0.01em]">{s.title}</h1>
+      <main className="mx-auto w-full max-w-[65ch] flex-1 px-4 pt-6 pb-10 sm:pt-12">
+        <article className="space-y-4 text-md text-ink [&_ul]:list-disc [&_ul]:space-y-1.5 [&_ul]:pl-5">
+          <h1 className="mb-6 text-2xl font-semibold tracking-[-0.02em]">{s.title}</h1>
           {s.blocks.map((b, i) => b.t === "p"
             ? <p key={i} className={/^_.+_$/.test(b.text) ? "text-sm text-ink-2" : undefined}>{text(b.text)}</p>
             : <ul key={i}>{b.items.map((it, j) => <li key={j}>{text(it)}</li>)}</ul>)}

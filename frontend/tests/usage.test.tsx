@@ -45,4 +45,17 @@ describe("account and usage in the header", () => {
     refresh();
     await waitFor(() => expect(screen.getByTestId("usage")).toHaveTextContent("4 of 50"));
   });
+
+  it("phone drawer: focus moves in, Escape closes it and focus returns to the opener", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(fixtureJson("me")))));
+    render(<Shell>{() => <p>child</p>}</Shell>);
+    const opener = await screen.findByRole("button", { name: "Open menu" });
+    await userEvent.click(opener);
+    expect(screen.getByRole("dialog", { name: "Menu" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close menu" })).toHaveFocus();
+    expect(opener).toHaveAttribute("aria-expanded", "true");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
 });

@@ -17,8 +17,8 @@ function send(res, status, body, headers = {}) {
 }
 
 // Scenario switches for screenshots/tests: POST /__mock {"book":"stale","message":"busy","tickets":"empty","history":"error","delay":800,"conversation":"error"}
-// login: google|invite|dev (only that method; default = config fixture); message: limit|site_limit (429)
-// confirm: multileg; book: stale|expired|invalid_nonce|already_booked|conversation_busy|data_unavailable; message: busy|drop; tickets/history/conversation: empty|error
+// login: google|invite|dev (only that method; default = config fixture); message: limit|site_limit (429)|server_busy
+// confirm: multileg; scene: proposal; book: stale|expired|invalid_nonce|already_booked|conversation_busy|data_unavailable; message: busy|drop; tickets/history/conversation: empty|error
 let scn = {};
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const extra = [];
@@ -29,6 +29,15 @@ function conversation() {
     return { ...m, cards: m.cards.map((k) => (k.state ? { ...k, state: { status: "booked", bookable: false, nonce: null, ticket_id: "t_91b2" } } : k)) };
   });
   c.messages = [...c.messages, ...msgs];
+  // scenario {"scene":"proposal"} (07-ui): the first exchange only — a multi-leg quote (not booked) then its
+  // booking request awaiting confirmation.
+  if (scn.scene === "proposal") {
+    c.messages = c.messages.slice(0, 4);
+    for (const m of c.messages) for (const k of m.cards) {
+      if (k.type === "quote") k.state = { status: "quoted", bookable: false, nonce: null, ticket_id: null };
+      if (k.type === "booking_request") k.state = { status: "presented", bookable: true, nonce: "n_mock_ml", ticket_id: null };
+    }
+  }
   // Presented quotes in the fixture expired long ago; keep them live so the countdown and Confirm show.
   const soon = new Date(Date.now() + 10 * 60_000).toISOString();
   for (const m of c.messages) for (const k of m.cards) {
@@ -70,6 +79,7 @@ http.createServer(async (req, res) => {
     scn = JSON.parse(b || "{}"); forced = null; return send(res, 200, scn);
   }
   if (scn.delay && p.startsWith("/api/") && !/messages$/.test(p)) await wait(scn.delay);
+  if (scn.slow && p.startsWith(scn.slow)) await wait(60_000); // {"slow":"/api/tickets"}: hold one endpoint (loading states)
   const auth = loggedIn || process.env.MOCK_OPEN === "1";
   if (p === "/api/health") return send(res, 200, { status: "ok", network_fingerprint: "sha256:mock" });
   if (p === "/api/config") {
@@ -106,6 +116,10 @@ http.createServer(async (req, res) => {
   if (/\/messages$/.test(p)) {
     if (scn.message === "limit") return send(res, 429, json("rate_limited"));
     if (scn.message === "site_limit") return send(res, 429, { error: { code: "rate_limited", message: "The demo has used today's message budget. It resets at 00:00 UTC.", scope: "site", resets_at: "2026-11-24T00:00:00Z" } });
+    if (scn.message === "server_busy") {
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      return res.end('event: error\ndata: {"code":"server_busy","message":"Too many conversations are running right now."}\n\n');
+    }
     if (scn.message === "busy") {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       return res.end('event: error\ndata: {"code":"conversation_busy","message":"A reply is still being generated."}\n\n');

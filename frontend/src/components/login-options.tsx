@@ -27,12 +27,12 @@ function InviteForm({ onDone }: { onDone: () => void }) {
   const f = useSubmit(() => api.loginInvite(code.trim(), name.trim()), onDone, "Sign-in failed");
   return (
     <form onSubmit={f.submit} className="space-y-3" aria-labelledby="invite-h">
-      <h2 id="invite-h" className="text-sm font-semibold">Sign in with an invite code</h2>
-      <label className="block text-sm font-medium">Invite code
-        <Input className="mt-1" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" autoCapitalize="off" spellCheck={false} required />
+      <h2 id="invite-h" className="text-sm font-medium">Sign in with an invite code</h2>
+      <label className="block text-sm text-ink-2">Invite code
+        <Input className="mt-1.5" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" autoCapitalize="off" spellCheck={false} required />
       </label>
-      <label className="block text-sm font-medium">Your name
-        <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" maxLength={40} required />
+      <label className="block text-sm text-ink-2">Your name
+        <Input className="mt-1.5" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" maxLength={40} required />
       </label>
       {f.error && <Alert role="alert">{f.error}</Alert>}
       <Button type="submit" className="w-full" disabled={f.busy || !code.trim() || !name.trim()}>{f.busy ? "Signing in…" : "Continue"}</Button>
@@ -46,12 +46,12 @@ function DevForm({ onDone }: { onDone: () => void }) {
   const f = useSubmit(() => api.login(username, password), onDone, "Login failed");
   return (
     <form onSubmit={f.submit} className="space-y-3" aria-labelledby="dev-h">
-      <h2 id="dev-h" className="text-sm font-semibold">Local account</h2>
-      <label className="block text-sm font-medium">Username
-        <Input className="mt-1" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
+      <h2 id="dev-h" className="text-sm font-medium">Local account</h2>
+      <label className="block text-sm text-ink-2">Username
+        <Input className="mt-1.5" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
       </label>
-      <label className="block text-sm font-medium">Password
-        <Input className="mt-1" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+      <label className="block text-sm text-ink-2">Password
+        <Input className="mt-1.5" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
       </label>
       {f.error && <Alert role="alert">{f.error}</Alert>}
       <Button type="submit" variant="outline" className="w-full" disabled={f.busy}>{f.busy ? "Signing in…" : "Sign in"}</Button>
@@ -72,7 +72,7 @@ function GoogleSection({ clientId, onDone }: { clientId: string; onDone: () => v
 }
 
 const Or = () => (
-  <div className="flex items-center gap-3 text-xs uppercase tracking-[0.06em] text-ink-2" aria-hidden>
+  <div className="flex items-center gap-3 text-xs text-ink-3" aria-hidden>
     <span className="h-px flex-1 bg-hairline" />or<span className="h-px flex-1 bg-hairline" />
   </div>
 );

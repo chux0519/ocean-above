@@ -10,23 +10,21 @@ const OPTIONS: { value: ThemeChoice; label: string; Icon: typeof SunIcon }[] = [
   { value: "dark", label: "Dark theme", Icon: MoonIcon },
 ];
 
-/** Three-state theme switch (system / light / dark), stored in localStorage. `tone="shell"` for the navy header. */
-export function ThemeToggle({ tone = "surface", className }: { tone?: "surface" | "shell"; className?: string }) {
+/** Three-state theme switch (system / light / dark), stored in localStorage. A small segmented control. */
+export function ThemeToggle({ className }: { className?: string }) {
   const [theme, setTheme] = useState<ThemeChoice>("system");
   useEffect(() => setTheme(readTheme()), []);
   function choose(t: ThemeChoice) { applyTheme(t); setTheme(t); }
   return (
-    <div role="group" aria-label="Colour theme" className={cn("inline-flex items-center", className)}>
+    <div role="group" aria-label="Colour theme" className={cn("inline-flex items-center rounded-full bg-sunken p-0.5", className)}>
       {OPTIONS.map(({ value, label, Icon }) => {
         const on = theme === value;
         return (
           <button key={value} type="button" aria-pressed={on} aria-label={label} title={label}
             onClick={() => choose(value)}
-            className={cn("inline-flex size-11 items-center justify-center rounded-md transition-colors duration-150",
-              tone === "shell"
-                ? on ? "bg-white/15 text-shell-ink" : "text-shell-ink-2 hover:bg-white/10 hover:text-shell-ink"
-                : on ? "bg-rail text-ink" : "text-ink-2 hover:bg-ink/5 hover:text-ink")}>
-            <Icon size={18} />
+            className={cn("inline-flex size-11 items-center justify-center rounded-full transition-colors duration-150",
+              on ? "bg-surface text-ink shadow-card" : "text-ink-2 hover:text-ink")}>
+            <Icon size={17} />
           </button>
         );
       })}

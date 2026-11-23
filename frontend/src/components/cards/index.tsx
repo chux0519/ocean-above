@@ -10,7 +10,7 @@ export function CardView({ card, streaming, readOnly, onBooked, onAsk }: { card:
     case "ticket": return <TicketCardView card={card} />;
     case "ticket_list": return <TicketListCardView card={card} />;
     case "no_service": return <NoServiceCardView card={card} />;
-    case "ambiguous_city": return <AmbiguousCityCardView card={card} />;
+    case "ambiguous_city": return <AmbiguousCityCardView card={card} onAsk={readOnly ? undefined : onAsk} streaming={streaming} />;
     case "unknown_city": return <UnknownCityCardView card={card} />;
     case "notice": return <NoticeCardView card={card} />;
   }

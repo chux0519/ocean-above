@@ -2,15 +2,16 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
+/** Pill buttons; ≥ 44 px hit area. `primary` is the ink-filled action (Confirm booking, Send): one per view. */
 const buttonVariants = cva(
-  "inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition-colors duration-150 ease-[var(--ease-out)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-45",
+  "inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-full px-4 text-sm font-medium transition-[background-color,color,box-shadow,opacity] duration-150 ease-[var(--ease-out)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40",
   {
     variants: {
       variant: {
-        default: "bg-accent text-accent-ink hover:bg-accent-hover active:bg-accent-hover",
-        outline: "border border-field bg-surface text-ink hover:bg-ground active:bg-rail",
-        ghost: "text-ink hover:bg-ink/5 active:bg-ink/10",
-        link: "min-w-0 px-0 font-medium text-accent underline underline-offset-4 decoration-1 hover:decoration-2",
+        default: "bg-primary text-primary-ink hover:bg-primary-hover active:bg-primary-hover",
+        outline: "border border-border bg-surface text-ink shadow-card hover:bg-hover active:bg-active",
+        ghost: "rounded-md text-ink hover:bg-hover active:bg-active",
+        link: "min-w-0 px-0 text-accent underline underline-offset-4 decoration-1 hover:decoration-2",
       },
     },
     defaultVariants: { variant: "default" },

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Suspense } from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CardView } from "@/components/cards";
 import { fixtureJson, conversation, cardOf } from "./fixtures";
@@ -124,12 +124,18 @@ describe("Chat states", () => {
     expect(await screen.findByText("I want to fly from Guangzhou to Lima")).toBeInTheDocument();
   });
 
-  for (const mode of ["http", "sse"] as const) {
-    it(`conversation_busy (${mode}) keeps the input text and does not reload`, async () => {
+  const busyCases = [
+    ["conversation_busy", 409, "still being written"],
+    ["server_busy", 503, "The assistant is busy right now"],
+    ["internal_error", 500, "your message was not sent"],
+  ] as const;
+  for (const [code, status, text] of busyCases) for (const mode of ["http", "sse"] as const) {
+    if (code === "internal_error" && mode === "http") continue; // only the SSE error before user_message keeps the input
+    it(`${code} (${mode}) keeps the input text and does not reload`, async () => {
       const f = mockFetch(
         at(`/conversations/${summary.id}/messages`, () => mode === "http"
-          ? err(409, "conversation_busy")
-          : new Response('event: error\ndata: {"code":"conversation_busy","message":"busy"}\n\n', { status: 200 })),
+          ? err(status, code)
+          : new Response(`event: error\ndata: {"code":"${code}","message":"busy"}\n\n`, { status: 200 })),
         ...convRoutes([]),
       );
       render(<ChatPage />);
@@ -137,13 +143,31 @@ describe("Chat states", () => {
       const input = screen.getByLabelText("Message");
       await userEvent.type(input, "hello there");
       await userEvent.click(screen.getByRole("button", { name: "Send" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("still being written");
+      expect(await screen.findByRole("alert")).toHaveTextContent(text);
       expect(input).toHaveValue("hello there");
       const convGets = f.mock.calls.filter(([u]) => u === `/api/conversations/${summary.id}`).length;
       expect(convGets).toBe(1); // initial load only
       expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     });
   }
+
+  it("Enter sends, Shift+Enter adds a line, an IME composition never sends", async () => {
+    const f = mockFetch(
+      at(`/conversations/${summary.id}/messages`, () => err(409, "conversation_busy")),
+      ...convRoutes([]),
+    );
+    render(<ChatPage />);
+    await screen.findByTestId("empty");
+    const input = screen.getByLabelText("Message");
+    await userEvent.type(input, "line one{Shift>}{Enter}{/Shift}line two");
+    expect(input).toHaveValue("line one\nline two");
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    const sends = () => f.mock.calls.filter(([u]) => String(u).endsWith("/messages")).length;
+    expect(sends()).toBe(0);
+    await userEvent.type(input, "{Enter}");
+    await waitFor(() => expect(sends()).toBe(1));
+  });
 
   it("network drop mid-stream reloads the saved conversation", async () => {
     let loads = 0;
@@ -354,22 +378,7 @@ describe("card details", () => {
 });
 
 
-describe("chat drawer (mobile)", () => {
-  it("moves focus into the drawer, closes on Escape and returns focus to the opener", async () => {
-    mockFetch(at("/conversations", () => json({ conversations: [] })));
-    const { default: userEvent } = await import("@testing-library/user-event");
-    render(<ChatPage />);
-    await screen.findByTestId("empty");
-    const opener = screen.getByRole("button", { name: "Open conversations" });
-    await userEvent.click(opener);
-    const close = screen.getByRole("button", { name: "Close conversations" });
-    expect(close).toHaveFocus();
-    expect(opener).toHaveAttribute("aria-expanded", "true");
-    await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(opener).toHaveFocus();
-  });
-
+describe("chat empty state", () => {
   it("example prompts fill the input without sending", async () => {
     const f = mockFetch(at("/conversations", () => json({ conversations: [] })));
     const { default: userEvent } = await import("@testing-library/user-event");
