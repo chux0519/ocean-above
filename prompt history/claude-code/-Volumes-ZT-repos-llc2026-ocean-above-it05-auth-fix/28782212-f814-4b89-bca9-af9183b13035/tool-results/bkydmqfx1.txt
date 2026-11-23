@@ -1,0 +1,636 @@
+"""app.db: the business database (users, conversations, messages, call logs, quotes, tickets).
+
+Plain stdlib sqlite3, no ORM. Every operation opens its own connection, so a `Store` can be shared
+between threads. Writes run inside `BEGIN IMMEDIATE` (`Store.write()`): the write lock is taken
+before the first read, so a check-then-write sequence cannot interleave with another writer.
+
+Times are ISO 8601 UTC strings with second precision (`2026-11-23T08:15:00Z`); sub-seconds are
+truncated when a time is stored. The clock is injectable.
+"""
+from __future__ import annotations
+
+import json
+import secrets
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+Clock = Callable[[], datetime]
+
+SCHEMA_VERSION = 2
+
+_SCHEMA_V1 = """
+CREATE TABLE users (
+    id            TEXT PRIMARY KEY,
+    auth_provider TEXT NOT NULL,
+    provider_sub  TEXT NOT NULL,
+    email         TEXT,
+    display_name  TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    UNIQUE (auth_provider, provider_sub)
+);
+CREATE TABLE conversations (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    title      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX conversations_by_user ON conversations(user_id, updated_at);
+CREATE TABLE messages (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,   -- insertion order within the database
+    id              TEXT NOT NULL UNIQUE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    role            TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    text            TEXT NOT NULL,
+    cards           TEXT NOT NULL DEFAULT '[]',          -- json; quote cards without live state
+    guard_problems  TEXT,                                -- json or NULL
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX messages_by_conversation ON messages(conversation_id, seq);
+CREATE TABLE llm_calls (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              TEXT NOT NULL UNIQUE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    request         TEXT NOT NULL,                       -- json
+    response        TEXT NOT NULL,                       -- json
+    latency_ms      INTEGER,
+    tokens          INTEGER,
+    model           TEXT,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX llm_calls_by_conversation ON llm_calls(conversation_id, seq);
+CREATE TABLE tool_calls (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         TEXT NOT NULL UNIQUE,
+    message_id TEXT NOT NULL REFERENCES messages(id),    -- the user message that triggered the turn
+    name       TEXT NOT NULL,
+    args       TEXT NOT NULL,                            -- json
+    result     TEXT,                                     -- json
+    error      TEXT,
+    latency_ms INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX tool_calls_by_message ON tool_calls(message_id, seq);
+CREATE TABLE quotes (
+    id                  TEXT PRIMARY KEY,
+    conversation_id     TEXT NOT NULL REFERENCES conversations(id),
+    user_id             TEXT NOT NULL REFERENCES users(id),
+    origin              TEXT NOT NULL,
+    destination         TEXT NOT NULL,
+    legs                TEXT NOT NULL,                   -- json: from, to, distance, coords, source
+    distance            TEXT NOT NULL,                   -- km, 30 dp decimal string
+    price               TEXT NOT NULL,                   -- USD, 30 dp decimal string
+    network_fingerprint TEXT NOT NULL,
+    status              TEXT NOT NULL
+                        CHECK (status IN ('quoted', 'presented', 'booked', 'expired', 'stale')),
+    status_reason       TEXT,
+    created_at          TEXT NOT NULL,
+    expires_at          TEXT NOT NULL,
+    presented_at        TEXT,
+    closed_at           TEXT                             -- when it became booked / expired / stale
+);
+CREATE INDEX quotes_by_conversation ON quotes(conversation_id);
+-- One row per (quote, message) whose card was sent to the user with `done`. The one-time
+-- confirmation nonce of that card is derived from (quote, user, message); it is never stored.
+CREATE TABLE quote_cards (
+    quote_id      TEXT NOT NULL REFERENCES quotes(id),
+    message_id    TEXT NOT NULL REFERENCES messages(id),
+    presented_at  TEXT NOT NULL,
+    nonce_used_at TEXT,
+    PRIMARY KEY (quote_id, message_id)
+);
+CREATE TABLE tickets (
+    id                   TEXT PRIMARY KEY,
+    user_id              TEXT NOT NULL REFERENCES users(id),
+    quote_id             TEXT NOT NULL UNIQUE REFERENCES quotes(id),   -- B5: one ticket per quote
+    origin               TEXT NOT NULL,
+    destination          TEXT NOT NULL,
+    legs_snapshot        TEXT NOT NULL,                  -- json, same form as quotes.legs
+    distance             TEXT NOT NULL,
+    price                TEXT NOT NULL,
+    network_fingerprint  TEXT NOT NULL,                  -- locations.db verified at booking time
+    confirmed_message_id TEXT NOT NULL REFERENCES messages(id),        -- the card that was clicked
+    booked_at            TEXT NOT NULL
+);
+CREATE INDEX tickets_by_user ON tickets(user_id, booked_at);
+
+-- Q3: booked / expired / stale never change again, whatever the application code does.
+CREATE TRIGGER quotes_terminal_status BEFORE UPDATE OF status ON quotes
+WHEN OLD.status IN ('booked', 'expired', 'stale') AND NEW.status <> OLD.status
+BEGIN SELECT RAISE(ABORT, 'quote status is terminal'); END;
+-- B2/B7: a ticket can only be written for a quote that is `presented` in the same transaction.
+CREATE TRIGGER tickets_need_presented_quote BEFORE INSERT ON tickets
+WHEN (SELECT status FROM quotes WHERE id = NEW.quote_id) IS NOT 'presented'
+BEGIN SELECT RAISE(ABORT, 'ticket needs a presented quote'); END;
+CREATE TRIGGER tickets_are_immutable BEFORE UPDATE ON tickets
+BEGIN SELECT RAISE(ABORT, 'tickets are immutable'); END;
+"""
+
+# v2 (L2 usage limits): one row per chat message the limits let through, written in the same
+# transaction as the count that allowed it, so two racing requests cannot both take the last slot.
+_SCHEMA_V2 = """
+CREATE TABLE message_usage (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              TEXT NOT NULL UNIQUE,
+    user_id         TEXT NOT NULL REFERENCES users(id),
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX message_usage_by_user ON message_usage(user_id, created_at);
+CREATE INDEX llm_calls_by_time ON llm_calls(created_at);
+"""
+
+_MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2}
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso(moment: datetime) -> str:
+    """Stored / wire form of a time. Sub-seconds are dropped (floor)."""
+    if moment.tzinfo is None:
+        raise ValueError("naive datetime; times must be timezone-aware")
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_iso(text: str) -> datetime:
+    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def day_start(moment: datetime) -> datetime:
+    """00:00 UTC of the moment's UTC day (usage limits count per UTC day)."""
+    utc = moment.astimezone(timezone.utc)
+    return datetime(utc.year, utc.month, utc.day, tzinfo=timezone.utc)
+
+
+def new_id(prefix: str) -> str:
+    """Opaque id with a type prefix (`u_`, `c_`, `m_`, `q_`, `t_`, ...)."""
+    return f"{prefix}_{secrets.token_hex(8)}"
+
+
+def to_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+class NotFound(Exception):
+    """The object does not exist or belongs to another user (the two are not distinguished)."""
+
+    code = "not_found"
+    status = 404
+
+
+class Store:
+    def __init__(self, path: str | Path, clock: Clock = utc_now):
+        self.path = Path(path)
+        self.clock = clock
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        con = self._connect()
+        try:
+            con.execute("PRAGMA journal_mode = WAL")  # readers are not blocked by a writer
+            self._migrate(con)
+        finally:
+            con.close()
+
+    def now(self) -> str:
+        return iso(self.clock())
+
+    def _connect(self) -> sqlite3.Connection:
+        # isolation_level=None: no implicit transactions; `write()` issues BEGIN IMMEDIATE itself.
+        con = sqlite3.connect(self.path, isolation_level=None, timeout=30)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA foreign_keys = ON")
+        return con
+
+    def _migrate(self, con: sqlite3.Connection) -> None:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            version = con.execute("PRAGMA user_version").fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(f"{self.path} has schema {version}, this code knows {SCHEMA_VERSION}")
+            for target in range(version + 1, SCHEMA_VERSION + 1):
+                for statement in _split_statements(_MIGRATIONS[target]):
+                    con.execute(statement)
+                con.execute(f"PRAGMA user_version = {target}")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+        con.execute("COMMIT")
+
+    @contextmanager
+    def read(self) -> Iterator[sqlite3.Connection]:
+        """A connection for reads; several statements see one snapshot."""
+        con = self._connect()
+        try:
+            con.execute("BEGIN")
+            try:
+                yield con
+            finally:
+                con.execute("ROLLBACK")
+        finally:
+            con.close()
+
+    @contextmanager
+    def write(self) -> Iterator[sqlite3.Connection]:
+        """One `BEGIN IMMEDIATE` transaction: commit on normal exit, roll back on any exception."""
+        con = self._connect()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                yield con
+            except BaseException:
+                if con.in_transaction:  # sqlite rolls back by itself on some errors (disk full)
+                    con.execute("ROLLBACK")
+                raise
+            con.execute("COMMIT")
+        finally:
+            con.close()
+
+    # Every method below that takes a conversation or message id also takes the user and checks
+    # ownership in the same transaction; NotFound when it is missing or someone else's.
+    # --- convenience wrappers: one transaction each (see records.py for the composable forms) ---
+    def upsert_user(self, auth_provider: str, provider_sub: str, display_name: str,
+                    email: str | None = None) -> dict:
+        from . import records
+
+        with self.write() as con:
+            return records.upsert_user(con, self.now(), auth_provider, provider_sub, display_name, email)
+
+    def get_user(self, user_id: str) -> dict | None:
+        from . import records
+
+        with self.read() as con:
+            return records.get_user(con, user_id)
+
+    def create_conversation(self, user_id: str, title: str = "") -> dict:
+        from . import records
+
+        with self.write() as con:
+            return records.create_conversation(con, self.now(), user_id, title)
+
+    def get_conversation(self, user_id: str, conversation_id: str) -> dict | None:
+        """The conversation summary, or None when it does not exist or belongs to someone else."""
+        from . import records
+
+        with self.read() as con:
+            return records.get_conversation(con, user_id, conversation_id)
+
+    def list_conversations(self, user_id: str) -> list[dict]:
+        from . import records
+
+        with self.read() as con:
+            return records.list_conversations(con, user_id)
+
+    def set_conversation_title(self, user_id: str, conversation_id: str, title: str) -> bool:
+        from . import records
+
+        with self.write() as con:
+            return records.set_conversation_title(con, user_id, conversation_id, title)
+
+    def first_user_text(self, user_id: str, conversation_id: str) -> str:
+        """The first non-blank user message of a conversation the user owns ("" when none)."""
+        from . import records
+
+        with self.read() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.first_user_text(con, conversation_id)
+
+    def add_message(self, user_id: str, conversation_id: str, role: str, text: str,
+                    cards: list | tuple = (), guard_problems: Any = None) -> dict:
+        """Store a message as is. Assistant messages that carry quote or booking-request cards
+        must go through `Airline.post_assistant_message`, which also presents those quotes."""
+        from . import records
+
+        with self.write() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.add_message(con, self.now(), conversation_id, role, text, cards, guard_problems)
+
+    def list_messages(self, user_id: str, conversation_id: str) -> list[dict]:
+        """Raw messages, oldest first. Quote cards carry no live state here; for the contract
+        `Message` form use `Airline.messages`."""
+        from . import records
+
+        with self.read() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.list_messages(con, conversation_id)
+
+    def add_llm_call(self, user_id: str, conversation_id: str, request: Any, response: Any, *,
+                     latency_ms: int | None = None, tokens: int | None = None,
+                     model: str | None = None) -> str:
+        from . import records
+
+        with self.write() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.add_llm_call(con, self.now(), conversation_id, request, response,
+                                        latency_ms, tokens, model)
+
+    def add_tool_call(self, user_id: str, message_id: str, name: str, args: Any, result: Any = None, *,
+                      error: str | None = None, latency_ms: int | None = None) -> str:
+        from . import records
+
+        with self.write() as con:
+            records.require_message(con, user_id, message_id)
+            return records.add_tool_call(con, self.now(), message_id, name, args, result, error, latency_ms)
+
+    def list_llm_calls(self, user_id: str, conversation_id: str) -> list[dict]:
+        from . import records
+
+        with self.read() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.list_llm_calls(con, conversation_id)
+
+    def list_tool_calls(self, user_id: str, message_id: str) -> list[dict]:
+        from . import records
+
+        with self.read() as con:
+            records.require_message(con, user_id, message_id)
+            return records.list_tool_calls(con, message_id)
+
+    # --- usage limits (L2) ---
+    def reserve_message(self, user_id: str, conversation_id: str, *, daily_limit: int,
+                        token_budget: int) -> tuple[str | None, str | None]:
+        """Count and reserve in one `BEGIN IMMEDIATE` transaction: `(reservation_id, None)` when the
+        message may go to the assistant, else `(None, scope)` with scope "user" (the user's messages
+        today reached `daily_limit`) or "site" (today's `llm_calls.tokens` reached `token_budget`);
+        nothing is written then. Today = the UTC day of the store clock."""
+        from . import records
+
+        now = self.clock()
+        since = iso(day_start(now))
+        with self.write() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            if records.messages_since(con, user_id, since) >= daily_limit:
+                return None, "user"
+            if records.tokens_since(con, since) >= token_budget:
+                return None, "site"
+            return records.add_message_usage(con, iso(now), user_id, conversation_id), None
+
+    def release_message(self, user_id: str, reservation_id: str) -> None:
+        """Undo a reservation whose message was refused before anything was stored (bad text)."""
+        from . import records
+
+        with self.write() as con:
+            records.delete_message_usage(con, user_id, reservation_id)
+
+    def messages_today(self, user_id: str) -> int:
+        from . import records
+
+        with self.read() as con:
+            return records.messages_since(con, user_id, iso(day_start(self.clock())))
+
+    def tokens_today(self) -> int:
+        from . import records
+
+        with self.read() as con:
+            return records.tokens_since(con, iso(day_start(self.clock())))
+
+
+def _split_statements(script: str) -> list[str]:
+    """Split a schema script into statements (executescript would commit our transaction).
+    Trigger bodies contain `;`, so a statement ends only where sqlite says it is complete."""
+    out: list[str] = []
+    buf = ""
+    for line in script.splitlines(keepends=True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            out.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        raise ValueError("incomplete statement at the end of the schema script")
+    return out
+        "INSERT INTO tool_calls (id, message_id, name, args, result, error, latency_ms, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (tid, message_id, name, to_json(args), None if result is None else to_json(result),
+         error, latency_ms, now),
+    )
+    return tid
+
+
+def list_tool_calls(con, message_id: str) -> list[dict]:
+    rows = con.execute(
+        "SELECT id, message_id, name, args, result, error, latency_ms, created_at "
+        "FROM tool_calls WHERE message_id = ? ORDER BY seq",
+        (message_id,),
+    ).fetchall()
+    return [_row(r, ("args", "result")) for r in rows]
+
+
+# --- usage limits ------------------------------------------------------------------------
+def add_message_usage(con, now: str, user_id: str, conversation_id: str) -> str:
+    uid = new_id("mu")
+    con.execute("INSERT INTO message_usage (id, user_id, conversation_id, created_at) VALUES (?, ?, ?, ?)",
+                (uid, user_id, conversation_id, now))
+    return uid
+
+
+def delete_message_usage(con, user_id: str, usage_id: str) -> None:
+    con.execute("DELETE FROM message_usage WHERE id = ? AND user_id = ?", (usage_id, user_id))
+
+
+def messages_since(con, user_id: str, since: str) -> int:
+    """Chat messages the user sent (let through the limits) at or after `since`."""
+    return con.execute("SELECT COUNT(*) FROM message_usage WHERE user_id = ? AND created_at >= ?",
+                       (user_id, since)).fetchone()[0]
+
+
+def tokens_since(con, since: str) -> int:
+    """Site-wide LLM tokens (`llm_calls.tokens`, all users) at or after `since`; NULL counts 0."""
+    return con.execute("SELECT COALESCE(SUM(tokens), 0) FROM llm_calls WHERE created_at >= ?",
+                       (since,)).fetchone()[0]
+
+
+# --- quotes --------------------------------------------------------------------------------
+def insert_quote(con, *, now: str, expires_at: str, conversation_id: str, user_id: str,
+                 origin: str, destination: str, legs: list[dict], distance: str, price: str,
+                 network_fingerprint: str) -> dict:
+    qid = new_id("q")
+    con.execute(
+        "INSERT INTO quotes (id, conversation_id, user_id, origin, destination, legs, distance, "
+        "price, network_fingerprint, status, created_at, expires_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'quoted', ?, ?)",
+        (qid, conversation_id, user_id, origin, destination, to_json(legs), distance, price,
+         network_fingerprint, now, expires_at),
+    )
+    return get_quote(con, qid)
+
+
+def get_quote(con, quote_id: str) -> dict | None:
+    row = con.execute(f"SELECT {_QUOTE_COLS} FROM quotes WHERE id = ?", (quote_id,)).fetchone()
+    return _row(row, ("legs",))
+
+
+def set_quote_status(con, quote: dict, status: str, now: str, reason: str | None = None) -> None:
+    """Move a quote to `status` and update the dict in place. `presented` stamps presented_at;
+    the terminal states stamp closed_at. The row must still hold the status the caller read."""
+    column = "presented_at" if status == "presented" else "closed_at"
+    cur = con.execute(
+        f"UPDATE quotes SET status = ?, status_reason = ?, {column} = ? WHERE id = ? AND status = ?",
+        (status, reason, now, quote["id"], quote["status"]),
+    )
+    if cur.rowcount != 1:
+        raise RuntimeError(f"quote {quote['id']} changed underneath us")
+    quote.update({"status": status, "status_reason": reason, column: now})
+
+
+def add_quote_card(con, quote_id: str, message_id: str, now: str) -> None:
+    con.execute(
+        "INSERT OR IGNORE INTO quote_cards (quote_id, message_id, presented_at) VALUES (?, ?, ?)",
+        (quote_id, message_id, now),
+    )
+
+
+def quote_cards(con, quote_id: str) -> list[dict]:
+    rows = con.execute(
+        "SELECT quote_id, message_id, presented_at, nonce_used_at FROM quote_cards "
+        "WHERE quote_id = ? ORDER BY rowid",
+        (quote_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_nonce_used(con, quote_id: str, message_id: str, now: str) -> bool:
+    """True when this call consumed the nonce; False when it had been used before."""
+    cur = con.execute(
+        "UPDATE quote_cards SET nonce_used_at = ? "
+        "WHERE quote_id = ? AND message_id = ? AND nonce_used_at IS NULL",
+        (now, quote_id, message_id),
+    )
+    return cur.rowcount == 1
+
+
+# --- tickets -------------------------------------------------------------------------------
+def insert_ticket(con, *, now: str, quote: dict, network_fingerprint: str,
+                  confirmed_message_id: str) -> dict:
+    tid = new_id("t")
+    con.execute(
+        "INSERT INTO tickets (id, user_id, quote_id, origin, destination, legs_snapshot, distance, "
+        "price, network_fingerprint, confirmed_message_id, booked_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (tid, quote["user_id"], quote["id"], quote["origin"], quote["destination"],
+         to_json(quote["legs"]), quote["distance"], quote["price"], network_fingerprint,
+         confirmed_message_id, now),
+    )
+    return get_ticket_for_quote(con, quote["id"])
+
+
+def get_ticket_for_quote(con, quote_id: str) -> dict | None:
+    row = con.execute(f"SELECT {_TICKET_COLS} FROM tickets WHERE quote_id = ?", (quote_id,)).fetchone()
+    return _row(row, ("legs_snapshot",))
+
+
+def list_tickets(con, user_id: str) -> list[dict]:
+    """The user's tickets, newest first."""
+    rows = con.execute(
+        f"SELECT {_TICKET_COLS} FROM tickets WHERE user_id = ? ORDER BY booked_at DESC, rowid DESC",
+        (user_id,),
+    ).fetchall()
+    return [_row(r, ("legs_snapshot",)) for r in rows]
+# API and card contract (v1.2, 2026-11-23)
+
+Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
+`contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
+script, not by the production core) — correctness is tested in the backend, not by these files.
+
+## Conventions
+- Same origin, JSON, paths under `/api`. Session cookie `oa_session` (httpOnly, SameSite=Lax, `Secure` by env).
+- Times: ISO 8601 UTC strings. IDs: opaque strings with a type prefix (`u_`, `c_`, `m_`, `q_`, `t_`).
+- **The frontend never formats or computes numbers.** Every number shown comes from a `*_display` field.
+  High-precision values (`distance`, `price`, decimal strings) are only shown in the trace view.
+- Errors: HTTP status + `{"error": {"code": "<snake_case>", "message": "<human text>"}}`.
+  Common codes: `unauthorized` (401), `not_found` (404; also for other users' objects), `bad_request` (400),
+  `rate_limited` (429), `llm_unavailable` (503).
+- Login endpoints are throttled per client IP (10 / minute) → 429 `rate_limited`.
+- `POST /api/conversations/{id}/messages` returns **429 `rate_limited` before any SSE** when the user's daily message
+  limit or the site's daily token budget is reached; nothing is stored; `error.message` says which limit and when it
+  resets (UTC midnight), and the body adds `"scope": "user" | "site"`, `"resets_at"`. Booking, tickets, history
+  are never limited.
+
+## Endpoints
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/api/health` | – | `{"status":"ok","network_fingerprint":"sha256:…"}` |
+| GET | `/api/config` | – | `{"dev_login":bool,"invite_login":bool,"google_client_id":string\|null}` |
+| POST | `/api/auth/dev` | `{"username","password"}` | `User` + sets cookie; 401 `invalid_credentials`; 404 `not_found` when disabled |
+| POST | `/api/auth/google` | `{"credential"}` (GIS ID token) | `User` + sets cookie; 401 `invalid_credentials` (bad signature / aud / iss / expired / email not verified); 404 when not configured; 503 `auth_unavailable` (Google keys unreachable) |
+| POST | `/api/auth/invite` | `{"code","name"}` (name 1–40 chars) | `User` + sets cookie; 401 `invalid_credentials`; 404 when disabled |
+| POST | `/api/auth/logout` | – | `{"ok":true}` |
+| GET | `/api/me` | – | `User & {"usage": Usage}` or 401 |
+| GET | `/api/conversations` | – | `{"conversations":[ConversationSummary]}` newest first |
+| POST | `/api/conversations` | `{}` | `ConversationSummary` |
+| GET | `/api/conversations/{id}` | – | `Conversation` (messages oldest first; card states are current server state) |
+| POST | `/api/conversations/{id}/messages` | `{"text"}` | **SSE stream** (below) |
+| POST | `/api/quotes/{id}/book` | `{"nonce"}` | `{"ticket": TicketCard, "message": Message}` or error (below) |
+| GET | `/api/quotes/{id}/trace` | – | `Trace` |
+| GET | `/api/tickets` | – | `{"tickets":[TicketCard]}` newest first |
+| GET | `/api/debug/sse-ping` | – | SSE: `ping` with `{"seq":n}` immediately, then every 2 s, 5 events total |
+
+Booking errors: `invalid_nonce` (409), `not_presented` (409), `expired` (409), `already_booked` (409),
+`stale` (409; data changed — ask for a new quote), `not_found` (404), `conversation_busy` (409; a reply is still
+being generated — retry after `done`), `data_unavailable` (503; route data could not be read — retry; the quote and
+nonce are unchanged).
+
+## Objects
+
+```ts
+type User = { id: string; display_name: string; auth_provider: "dev" | "google" | "invite"; email: string | null }
+type Usage = { messages_today: number; daily_limit: number; resets_at: string }
+type ConversationSummary = { id: string; title: string /* never empty: first user message, else "New conversation" */
+  created_at: string; updated_at: string; preview: string }
+type Conversation = ConversationSummary & { messages: Message[] }
+type Message = {
+  id: string; role: "user" | "assistant" | "system"   // system = booking results etc.
+  text: string                                        // markdown for assistant; plain for user
+  cards: Card[]; created_at: string
+}
+type Leg = { from: string; to: string; distance_display: string; distance: string }
+type CardState = { status: "quoted" | "presented" | "booked" | "expired" | "stale";
+                   bookable: boolean; nonce: string | null; ticket_id: string | null }
+
+type Card = QuoteCard | BookingRequestCard | TicketCard | TicketListCard | NoServiceCard
+          | AmbiguousCityCard | UnknownCityCard | NoticeCard
+
+type QuoteCard = { type: "quote"; id: string /* q_ */; origin: string; destination: string
+  legs: Leg[]; transfers: string[]; distance_display: string; price_display: string
+  distance: string; price: string; expires_at: string; state: CardState
+  similar_names: { city: string; connected_hubs: string[] }[] }   // other cities equal to an endpoint after accent
+                                                                   // folding (San Jose / San José); [] normally
+type BookingRequestCard = Omit<QuoteCard, "type"> & { type: "booking_request" }   // id is the quote id
+type TicketCard = { type: "ticket"; id: string /* t_ */; quote_id: string; origin: string; destination: string
+  legs: Leg[]; transfers: string[]; distance_display: string; price_display: string; booked_at: string }
+type TicketListCard = { type: "ticket_list"; count: number; filter: Record<string, string>; tickets: TicketCard[] }
+type NoServiceCard = { type: "no_service"; city: string
+  nearest: { city: string; distance_display: string }[] }          // up to 3, nearest first
+type AmbiguousCityCard = { type: "ambiguous_city"; query: string
+  candidates: { city: string; is_hub: boolean; connected_hubs: string[] }[] }
+type UnknownCityCard = { type: "unknown_city"; query: string; suggestions: string[] }
+type NoticeCard = { type: "notice"; code: "same_city" | "unreachable" | "quote_expired" | "stale"; message: string }
+
+type Trace = { quote_id: string; formula: string; algorithm: string; network_fingerprint: string
+  legs: (Leg & { from_coord: [number, number]; to_coord: [number, number]; source: string })[]
+  distance: string; price: string; distance_display: string; price_display: string; note: string }
+```
+
+Card buttons: a quote or booking-request card shows **Confirm booking** only when `state.bookable` is true; clicking
+posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is running, buttons stay disabled until
+`done`; after `done` (or on reload) the card state from the server wins.
+
+## SSE stream (`POST /api/conversations/{id}/messages`)
+
+`Content-Type: text/event-stream`. Each event: `event: <name>\ndata: <json>\n\n`.
+
+| event | data | notes |
+|---|---|---|
+| `user_message` | `Message` | the stored user message, first event |
+| `status` | `{"text":"Looking up routes…"}` | progress, replaceable |
+| `card` | `{"card": Card}` | push immediately; state.bookable is false until `done` |
+| `delta` | `{"text":"…"}` | append; already validated text (one sentence or more) |
+| `replace` | `{"text":"…"}` | replace the whole assistant text so far |
+| `ping` | `{}` | heartbeat every 15 s; ignore |
+| `done` | `{"message": Message}` | final assistant message incl. cards with current states |
+| `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation; sent before `user_message`, nothing stored — keep the input box text and retry) |
+
+Example: `contract/fixtures/sse_quote_turn.txt`.

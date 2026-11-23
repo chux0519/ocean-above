@@ -1,0 +1,614 @@
+"""The agent loop (design §4): one chat turn as a stream of contract SSE events.
+
+    user message stored -> [LLM -> tools -> cards]* -> guarded text -> assistant message stored
+
+The LLM chooses tools and writes text; routes, prices and tickets come from the airline through
+the four tools. Text is released sentence by sentence after the ReplyGuard traced every number
+and city in it; the first problem replaces the whole reply with a code template. The turn's
+quote cards become bookable only when `Airline.post_assistant_message` stores them (`done`).
+
+Nothing here can book: the loop talks to the airline through `Toolbox` (four tools, no booking)
+and `post_assistant_message`. Booking is the HTTP endpoint's call, caused by the user's click.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from contextlib import aclosing
+from dataclasses import dataclass, field, replace
+from typing import Any, AsyncIterator, Awaitable, Callable
+
+from ..airline import ConversationBusy, NotFound
+from .budget import AgentBudget, BudgetTracker, refusal
+from .context import build_context
+from .guard import CityIndex, ReplyGuard, SentenceBuffer
+from .config import EFFORTS
+from .llm import LLM, Completion, LLMError, TextDelta
+from .prompt import system_prompt
+from .templates import CLICK_TO_BOOK, fallback_reply
+from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, MAX_RAW_ARGUMENTS, Outcome, Toolbox
+
+log = logging.getLogger(__name__)
+
+DEFAULT_BUDGET = AgentBudget()
+MAX_STEPS = DEFAULT_BUDGET.max_steps
+TURN_TIMEOUT = DEFAULT_BUDGET.max_turn_seconds  # a whole turn (all LLM calls, tools, retries); then the template reply
+LOCK_TIMEOUT = 10.0  # waiting for another turn of the same conversation; then conversation_busy
+MAX_USER_CHARS = 2000
+TITLE_CHARS = 60
+LLM_UNAVAILABLE = "The assistant is temporarily unavailable. Your message was saved; please try again."
+BUSY = "This conversation is still working on your previous message. Please try again in a moment."
+INTERNAL = "Something went wrong. Your message was saved; please try again."
+
+
+@dataclass(frozen=True)
+class Event:
+    """One SSE event of docs/api/contract.md: `name` and its JSON `data`."""
+
+    name: str
+    data: dict
+
+
+class _GuardFailed(Exception):
+    def __init__(self, problems: list[dict]):
+        super().__init__("reply guard")
+        self.problems = problems
+
+
+@dataclass
+class _Turn:
+    user_id: str
+    conversation_id: str
+    user_message: dict
+    guard: ReplyGuard
+    emit: Callable[[str, dict], None]
+    budget: BudgetTracker = field(default_factory=lambda: BudgetTracker(DEFAULT_BUDGET))
+    reasoning_effort: str | None = None  # per-request thinking level; None = the client's default
+    text: str = ""  # released so far
+    cards: list[dict] = field(default_factory=list)
+    outcomes: list[Outcome] = field(default_factory=list)
+
+
+def message_view(message: dict) -> dict:
+    """Contract `Message` of a stored row without quote cards (user messages)."""
+    return {"id": message["id"], "role": message["role"], "text": message["text"],
+            "cards": list(message["cards"]), "created_at": message["created_at"]}
+
+
+class Agent:
+    def __init__(self, airline: Any, llm: LLM, *, budget: AgentBudget | None = None,
+                 max_steps: int | None = None,
+                 ping_interval: float = 15.0, retries: int = 2, backoff: float = 0.5,
+                 llm_timeout: float = 60.0, turn_timeout: float | None = None,
+                 lock_timeout: float | None = LOCK_TIMEOUT,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+        """`budget`: the per-turn limits (design §4.8; default `AgentBudget()`). `max_steps` and
+        `turn_timeout` override its fields (tests, older callers)."""
+        budget = budget or DEFAULT_BUDGET
+        if max_steps is not None:
+            budget = replace(budget, max_steps=max_steps)
+        if turn_timeout is not None:
+            budget = replace(budget, max_turn_seconds=turn_timeout)
+        self.budget = budget
+        self.llm = llm
+        self.store = airline.store
+        self.ping_interval = ping_interval
+        self.retries = retries
+        self.backoff = backoff
+        self.llm_timeout = llm_timeout
+        self.lock_timeout = lock_timeout
+        self._sleep = sleep
+        self._tools = Toolbox(airline)
+        # The only other things the loop takes from the airline. No reference to the Airline
+        # object itself is kept.
+        self._post_assistant_message = airline.post_assistant_message
+        self._locks = airline.locks
+        self._networks = airline.networks
+        self._index: tuple[str, CityIndex] | None = None
+        self._tasks: set[asyncio.Task] = set()
+
+    @property
+    def max_steps(self) -> int:
+        return self.budget.max_steps
+
+    @property
+    def turn_timeout(self) -> float:
+        return self.budget.max_turn_seconds
+
+    # ------------------------------------------------------------------ public -------------
+    def stream_turn(self, user_id: str, conversation_id: str, text: str, *,
+                    reasoning_effort: str | None = None) -> AsyncIterator[Event]:
+        """Start a turn and return its events: `user_message`, then `status` / `card` / `delta` /
+        `replace` / `ping`, ending with exactly one `done` or `error`.
+
+        `reasoning_effort` overrides the LLM's thinking level for this turn (none / low / high /
+        max; None = configured default).
+
+        Raises before anything is stored: NotFound (not the user's conversation), ValueError
+        (empty or too long text, unknown reasoning_effort). Must be called on the event loop. The turn runs in its own
+        task: it finishes and is stored even when the client stops reading."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text must not be empty")
+        text = text.strip()
+        if len(text) > MAX_USER_CHARS:
+            raise ValueError(f"text is longer than {MAX_USER_CHARS} characters")
+        if reasoning_effort is not None and reasoning_effort not in EFFORTS:
+            raise ValueError(f"reasoning_effort must be one of {', '.join(EFFORTS)}")
+        if self.store.get_conversation(user_id, conversation_id) is None:
+            raise NotFound(conversation_id)
+        queue: asyncio.Queue[Event | None] = asyncio.Queue()
+        task = asyncio.get_running_loop().create_task(
+            self._run(user_id, conversation_id, text, reasoning_effort, queue))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return self._events(queue)
+
+    async def wait_idle(self) -> None:
+        """Wait for every running turn (shutdown, tests)."""
+        while pending := [t for t in self._tasks if not t.done()]:
+            await asyncio.wait(pending)
+
+    async def _events(self, queue: asyncio.Queue) -> AsyncIterator[Event]:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), self.ping_interval)
+            except asyncio.TimeoutError:
+                yield Event("ping", {})
+                continue
+            if event is None:
+                return
+            yield event
+
+    # ------------------------------------------------------------------ one turn -----------
+    async def _run(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+                   queue: asyncio.Queue) -> None:
+        def emit(name: str, data: dict) -> None:
+            queue.put_nowait(Event(name, data))
+
+        try:
+            async with self._locks.hold_async(conversation_id, timeout=self.lock_timeout):
+                await self._turn(user_id, conversation_id, text, reasoning_effort, emit)
+        except ConversationBusy:
+            emit("error", {"code": "conversation_busy", "message": BUSY})
+        except Exception:
+            log.exception("chat turn failed (conversation %s)", conversation_id)
+            emit("error", {"code": "internal_error", "message": INTERNAL})
+        finally:
+            queue.put_nowait(None)
+
+    async def _turn(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+                    emit: Callable[[str, dict], None]) -> None:
+        store = self.store
+        conversation = await asyncio.to_thread(store.get_conversation, user_id, conversation_id)
+        user_message = await asyncio.to_thread(store.add_message, user_id, conversation_id, "user", text)
+        emit("user_message", message_view(user_message))
+        if conversation is not None and not conversation["title"]:
+            await asyncio.to_thread(store.set_conversation_title, user_id, conversation_id,
+                                    " ".join(text.split())[:TITLE_CHARS])
+
+        context = await asyncio.to_thread(build_context, store, user_id, conversation_id)
+        index = await asyncio.to_thread(self._city_index)
+        today = store.clock().date()
+        guard = ReplyGuard(index, records=context.records, user_text=text,
+                           earlier_user_texts=context.user_texts[:-1], today=today)
+        turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
+                     reasoning_effort)
+        messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
+
+        try:
+            async with asyncio.timeout(self.turn_timeout):
+                fallback = await self._steps(turn, messages)
+        except TimeoutError:
+            fallback = [{"kind": "turn_timeout", "value": str(self.turn_timeout)}]
+        except LLMError as exc:
+            fallback = [{"kind": "llm_error", "value": str(exc)[:200]}]
+        except Exception as exc:  # a bug or a store error in the middle of the turn
+            if not turn.outcomes and not turn.text:
+                raise
+            log.exception("chat turn failed after producing output (conversation %s)", conversation_id)
+            fallback = [{"kind": "internal_error", "value": type(exc).__name__}]
+        if fallback is not None and fallback[0]["kind"] in ("max_steps", "token_budget", "tool_budget"):
+            log.warning("chat turn stopped by its budget (conversation %s): %s %s", conversation_id,
+                        fallback[0]["kind"], turn.budget.snapshot())
+        if fallback is not None and fallback[0]["kind"] in ("llm_error", "turn_timeout") \
+                and not turn.outcomes and not turn.text:
+            emit("error", {"code": "llm_unavailable", "message": LLM_UNAVAILABLE})
+            return
+        await self._finish(turn, fallback)
+
+    async def _steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
+        """The LLM / tool steps of a turn. Returns None when the LLM's text can stay, otherwise
+        the problems that make the template reply replace it.
+
+        Budgets (design §4.8): a step starts only while steps and tokens are left; each tool call
+        runs only while calls are left for the step and the turn. A call that is not admitted is
+        never executed: it gets a `tool_budget_exceeded` result (stored like any tool call, so
+        every tool call of the completion has its result and the stored history stays well-formed).
+        Once the turn's calls are used up and a call was refused, the turn ends with the template."""
+        while (stop := turn.budget.stop_before_step()) is None:
+            try:
+                completion = await self._llm_step(turn, messages)
+            except _GuardFailed as failed:
+                return failed.problems
+            if not completion.tool_calls:
+                if completion.finish_reason != "stop":  # "length", "content_filter", ...
+                    return [{"kind": "truncated", "value": str(completion.finish_reason)}]
+                if not turn.text.strip():
+                    return [{"kind": "empty_reply", "value": ""}]
+                return None
+            messages.append(completion.assistant_message())
+            turn_exhausted = False
+            for call in completion.tool_calls:
+                refused = turn.budget.admit_tool_call()
+                if refused is None:
+                    turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
+                    outcome = await asyncio.to_thread(self._tools.run, turn.user_id, turn.conversation_id,
+                                                      call["name"], call["arguments"])
+                else:
+                    turn_exhausted = turn_exhausted or refused == "per_turn"
+                    payload = refusal(refused, self.budget)
+                    outcome = Outcome(call["name"], str(call["arguments"])[:MAX_RAW_ARGUMENTS], payload["code"], payload,
+                                      error=f"budget: {refused}")
+                await asyncio.to_thread(
+                    self.store.add_tool_call, turn.user_id, turn.user_message["id"], outcome.name,
+                    outcome.args, outcome.payload, error=outcome.error, latency_ms=outcome.latency_ms)
+                turn.outcomes.append(outcome)
+                if refused is None:  # a refusal is no record a reply may quote
+                    turn.guard.add_record(outcome.payload)
+                for card in outcome.cards:
+                    turn.cards.append(card)
+                    turn.emit("card", {"card": card})
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
+            if turn_exhausted:
+                return [{"kind": "tool_budget", "value": str(self.budget.max_tool_calls_per_turn)}]
+        return [stop]
+
+    async def _finish(self, turn: _Turn, fallback: list[dict] | None = None) -> None:
+        """Persist the assistant message (the `done` moment: quote cards become bookable)."""
+        text = turn.text.rstrip()
+        if fallback is not None:
+            text = fallback_reply(turn.outcomes)
+            turn.emit("replace", {"text": text})
+        elif CLICK_TO_BOOK not in text and any(
+                o.name == "request_booking" and o.code == "ok" for o in turn.outcomes):
+            # fixed by code, whatever the LLM wrote: the click is what books
+            piece = ("\n\n" if text else "") + CLICK_TO_BOOK
+            turn.emit("delta", {"text": piece})
+            text += piece
+        message = await asyncio.to_thread(
+            self._post_assistant_message, turn.user_id, turn.conversation_id, text, turn.cards, fallback)
+        turn.emit("done", {"message": message})
+
+    # ------------------------------------------------------------------ LLM step -----------
+    def _release(self, turn: _Turn, piece: str, first_of_step: bool) -> None:
+        """Check the reply so far plus `piece`; send `piece` when nothing is wrong. Checking the
+        whole text catches a number or a city name that spans two pieces (`St. | Louis`)."""
+        if not turn.text:
+            piece = piece.lstrip()
+        elif first_of_step and not turn.text[-1].isspace() and not piece[:1].isspace():
+            piece = "\n\n" + piece  # text of a later step starts a new paragraph
+        problems = turn.guard.check(turn.text + piece)
+        if problems:
+            raise _GuardFailed(problems)
+        turn.text += piece
+        turn.emit("delta", {"text": piece})
+
+    async def _llm_step(self, turn: _Turn, messages: list[dict]) -> Completion:
+        """One LLM call with retries. Text is released as it streams. A failed call is retried
+        only while none of its text has been released."""
+        request = {"turn": turn.user_message["id"], "messages": list(messages),
+                   "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
+                   "reasoning_effort": turn.reasoning_effort or getattr(self.llm, "reasoning_effort", None)}
+        for attempt in range(self.retries + 1):
+            started = time.monotonic()
+            buffer = SentenceBuffer()
+            completion: Completion | None = None
+            released = False
+            content = blank = ""
+
+            def log_call(response: dict, tokens: int | None = None, usage: Any = None) -> Awaitable[Any]:
+                # every attempt counts against the turn's tokens, also failed ones and retries
+                charged, estimated = turn.budget.charge(usage, messages)
+                response = {**response, "budget": {"charged_tokens": charged, "estimated": estimated,
+                                                   "turn_tokens": turn.budget.tokens}}
+                return asyncio.to_thread(
+                    self.store.add_llm_call, turn.user_id, turn.conversation_id, request, response,
+                    latency_ms=int((time.monotonic() - started) * 1000), tokens=tokens,
+                    model=getattr(self.llm, "model", None))
+
+            try:
+                # aclosing: a guard failure or a timeout must close the HTTP stream right away
+                async with asyncio.timeout(self.llm_timeout), \
+                        aclosing(self.llm.stream(
+                            messages, TOOL_SCHEMAS, reasoning_effort=turn.reasoning_effort)) as stream:
+                    async for event in stream:
+                        if isinstance(event, TextDelta):
+                            content += event.text
+                            for sentence in buffer.push(event.text):
+                                if sentence.strip():
+                                    self._release(turn, blank + sentence, not released)
+                                    blank, released = "", True
+                                else:
+                                    blank += sentence  # white space is never sent on its own
+                        else:
+                            completion = event
+                if completion is None:
+                    raise LLMError("LLM stream ended without a completion", retryable=True)
+                rest = buffer.flush()
+                if rest.strip():
+                    self._release(turn, blank + rest, not released)
+            except _GuardFailed as failed:
+                await log_call({"content": content, "guard_problems": failed.problems, "aborted": True})
+                raise
+            except (LLMError, TimeoutError) as exc:
+                error = exc if isinstance(exc, LLMError) else LLMError("LLM call timed out", retryable=True)
+                await log_call({"content": content, "error": str(error)[:300], "attempt": attempt + 1})
+                if released or not error.retryable or attempt == self.retries:
+                    raise error from None
+                await self._sleep(self.backoff * 2 ** attempt)
+                continue
+            await log_call(completion.as_record(), completion.total_tokens, completion.usage)
+            return completion
+        raise LLMError("unreachable", retryable=False)  # pragma: no cover
+
+    def _city_index(self) -> CityIndex:
+        """City names for the guard, from the airline's current network (rebuilt when
+        locations.db changes)."""
+        net = self._networks.current()
+        if self._index is None or self._index[0] != net.fingerprint.id:
+            self._index = (net.fingerprint.id, CityIndex(net.cities))
+        return self._index[1]
+"""The four tools the LLM can call: schemas, argument validation, dispatch to the airline.
+
+Arguments are names and ids only - never a distance or a price - so the LLM cannot pass a number
+it made up. Results go back to the LLM as display values; errors are structured records too.
+
+There is no booking tool. `Toolbox` keeps only the four bound methods it dispatches to, not the
+`Airline` object, so nothing in this module can reach `Airline.book` (design P4, rule M04).
+"""
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, replace
+from typing import Any, Callable
+
+MAX_ARG_CHARS = 200
+MAX_RAW_ARGUMENTS = 2000  # the whole JSON of one call
+MAX_TICKETS_FOR_LLM = 20  # the card lists them all; `count` is always the full number
+
+
+def _tool(name: str, description: str, properties: dict[str, str], required: list[str]) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": {k: {"type": "string", "description": v} for k, v in properties.items()},
+                "required": required,
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
+TOOL_SCHEMAS = [
+    _tool("find_city",
+          "Look up one city: whether Ocean Above flies there, and if not, the nearest cities that "
+          "have service. Use it when the user asks about a single city.",
+          {"name": "City name as the user wrote it."}, ["name"]),
+    _tool("quote_route",
+          "Find the cheapest route between two cities and create a quote (legs, transfer cities, "
+          "distance, price). Also reports unknown, ambiguous or unserved cities, with the nearest "
+          "served cities. Shows a route card to the user.",
+          {"origin": "Departure city as the user wrote it.",
+           "destination": "Arrival city as the user wrote it."},
+          ["origin", "destination"]),
+    _tool("request_booking",
+          "Show the user a confirmation card for an existing quote. Call it when the user wants to "
+          "book a quoted route. It does NOT book: the ticket is issued only when the user clicks "
+          "Confirm booking on the card.",
+          {"quote_id": "The quote_id from a quote_route result (starts with q_)."}, ["quote_id"]),
+    _tool("list_my_tickets",
+          "List the tickets the user has booked, with the count. All filters are optional.",
+          {"city": "Only tickets whose origin, destination or a transfer is this city.",
+           "ticket_id": "Only this ticket (starts with t_).",
+           "booked_after": "ISO date or datetime (UTC); tickets booked at or after it.",
+           "booked_before": "ISO date or datetime (UTC); tickets booked before it."},
+          []),
+]
+STATUS_TEXT = {
+    "find_city": "Looking up the city…",
+    "quote_route": "Looking up routes…",
+    "request_booking": "Preparing your confirmation…",
+    "list_my_tickets": "Looking up your tickets…",
+}
+DEFAULT_STATUS = "Working on it…"
+_SPECS = {t["function"]["name"]: t["function"]["parameters"] for t in TOOL_SCHEMAS}
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """One executed (or refused) tool call."""
+
+    name: str
+    args: Any  # parsed arguments, or the raw string when they were not valid JSON
+    code: str
+    payload: dict  # the JSON the LLM gets: {"code": ..., display values, names, ids}
+    cards: tuple[dict, ...] = ()
+    error: str | None = None  # set for calls that did not run or crashed
+    latency_ms: int = 0
+
+    def for_llm(self) -> str:
+        return json.dumps(self.payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def slim(value: Any) -> Any:
+    """Drop the 30-decimal `distance` / `price` strings where a display value sits next to them:
+    the LLM only ever sees display values."""
+    if isinstance(value, dict):
+        return {k: slim(v) for k, v in value.items()
+                if not (k in ("distance", "price") and f"{k}_display" in value)}
+    if isinstance(value, (list, tuple)):
+        return [slim(v) for v in value]
+    return value
+
+
+def _payload(code: str, data: dict) -> dict:
+    out = {"code": code, **slim(data)}
+    if isinstance(out.get("tickets"), list) and len(out["tickets"]) > MAX_TICKETS_FOR_LLM:
+        out["tickets"] = out["tickets"][:MAX_TICKETS_FOR_LLM]  # newest first
+        out["tickets_shown"] = MAX_TICKETS_FOR_LLM
+    if isinstance(out.get("legs"), list) and isinstance(out.get("transfers"), list):
+        # counted here so the LLM never counts (FSR: self-reported counts go wrong)
+        out["leg_count"] = len(out["legs"])
+        out["transfer_count"] = len(out["transfers"])
+    return out
+
+
+def validate(name: str, args: Any) -> tuple[dict | None, str | None]:
+    """(clean arguments, None) or (None, what is wrong)."""
+    spec = _SPECS[name]
+    if not isinstance(args, dict):
+        return None, "arguments must be a JSON object"
+    unknown = sorted(set(args) - set(spec["properties"]))
+    if unknown:
+        return None, f"unknown argument(s): {', '.join(unknown)}; allowed: {', '.join(spec['properties'])}"
+    clean: dict[str, str] = {}
+    for key in spec["properties"]:
+        value = args.get(key)
+        if value is None or (isinstance(value, str) and not value.strip() and key not in spec["required"]):
+            continue
+        if not isinstance(value, str):
+            return None, f"{key} must be a string"
+        value = value.strip()
+        if not value:
+            return None, f"{key} must not be empty"
+        if len(value) > MAX_ARG_CHARS:
+            return None, f"{key} is too long"
+        clean[key] = value
+    missing = [k for k in spec["required"] if k not in clean]
+    if missing:
+        return None, f"missing argument(s): {', '.join(missing)}"
+    return clean, None
+
+
+class Toolbox:
+    def __init__(self, airline: Any):
+        find_city, quote_route = airline.find_city, airline.quote_route
+        request_booking, list_tickets = airline.request_booking, airline.list_tickets
+        self._run: dict[str, Callable[[str, str, dict], Any]] = {
+            "find_city": lambda user, conv, a: find_city(a["name"]),
+            "quote_route": lambda user, conv, a: quote_route(user, conv, a["origin"], a["destination"]),
+            "request_booking": lambda user, conv, a: request_booking(user, conv, a["quote_id"]),
+            "list_my_tickets": lambda user, conv, a: list_tickets(user, **a),
+        }
+
+    def run(self, user_id: str, conversation_id: str, name: str, raw_arguments: str) -> Outcome:
+        """Validate and execute one tool call. Never raises: every failure is an Outcome the LLM
+        can read and correct."""
+        started = time.monotonic()
+
+        def refused(code: str, message: str, args: Any, **extra: Any) -> Outcome:
+            return Outcome(name, args, code, {"code": code, "message": message, **extra},
+                           error=message, latency_ms=int((time.monotonic() - started) * 1000))
+
+        if name not in self._run:
+            return refused("unknown_tool", f"there is no tool named {name!r}", raw_arguments,
+                           available=sorted(self._run))
+        if not isinstance(raw_arguments, str):
+            raw_arguments = ""
+        if len(raw_arguments) > MAX_RAW_ARGUMENTS:
+            return refused("invalid_arguments", "arguments are too long", raw_arguments[:MAX_RAW_ARGUMENTS])
+        try:
+            args = json.loads(raw_arguments) if raw_arguments.strip() else {}
+        except (ValueError, RecursionError):
+            return refused("invalid_arguments", "arguments are not valid JSON", raw_arguments)
+        clean, problem = validate(name, args)
+        if clean is None:
+            return refused("invalid_arguments", problem or "invalid arguments", args)
+        try:
+            result = self._run[name](user_id, conversation_id, clean)
+        except Exception as exc:  # NetworkDataError (locations.db unreadable), NotFound, bugs
+            failed = refused("tool_failed", "the tool could not run; flight data may be unavailable", clean)
+            return replace(failed, error=f"{type(exc).__name__}: {exc}"[:500])
+        return Outcome(name, clean, result.code, _payload(result.code, result.data),
+                       tuple(result.cards), latency_ms=int((time.monotonic() - started) * 1000))
+
+"""LLM settings from the environment. The key is read here and nowhere else; it is never logged
+and never part of a repr."""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Mapping
+
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+# DeepSeek's flash model id on 2026-11-23 (GET /models: "deepseek-flash" = DeepSeek-V4.1-Flash).
+DEFAULT_MODEL = "deepseek-flash"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EFFORTS = ("none", "low", "high", "max")  # what a request may ask for
+
+
+class LLMNotConfigured(Exception):
+    """No API key in the environment or the env file."""
+
+
+def read_env_file(path: str | Path) -> dict[str, str]:
+    """KEY=VALUE lines of a .env file (comments, blank lines and `export ` are skipped)."""
+    out: dict[str, str] = {}
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.removeprefix("export ").split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        out[key.strip()] = value
+    return out
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    api_key: str = field(repr=False)
+    base_url: str = DEFAULT_BASE_URL
+    model: str = DEFAULT_MODEL
+    # Thinking level (DeepSeek: `thinking` + `reasoning_effort`, docs "Thinking Mode"):
+    #   "low" | "high" | "max" -> {"thinking": {"type": "enabled"}, "reasoning_effort": <level>}
+    #   "none"                 -> {"thinking": {"type": "disabled"}}
+    #   "omit"                 -> neither field, for OpenAI-compatible servers that reject them
+    reasoning_effort: str = "high"
+
+    def __post_init__(self) -> None:
+        if self.reasoning_effort not in (*EFFORTS, "omit"):
+            raise ValueError(f"LLM_REASONING_EFFORT must be one of {', '.join(EFFORTS)} or omit")
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "LLMConfig":
+        """`LLM_API_KEY` (fallback `DEEPSEEK_API_KEY`), `LLM_BASE_URL`, `LLM_MODEL`,
+        `LLM_REASONING_EFFORT` (default high). Process environment first; then the file named by `OCEAN_ENV_FILE`
+        (default: `.env` in the repository root), so a worktree can point at the main checkout."""
+        env = os.environ if env is None else env
+        file_values = read_env_file(env.get("OCEAN_ENV_FILE") or REPO_ROOT / ".env")
+
+        def get(name: str) -> str:
+            return (env.get(name) or file_values.get(name) or "").strip()
+
+        key = get("LLM_API_KEY") or get("DEEPSEEK_API_KEY")
+        if not key:
+            raise LLMNotConfigured("set LLM_API_KEY (or DEEPSEEK_API_KEY), or OCEAN_ENV_FILE")
+        return cls(
+            api_key=key,
+            base_url=(get("LLM_BASE_URL") or DEFAULT_BASE_URL).rstrip("/"),
+            model=get("LLM_MODEL") or DEFAULT_MODEL,
+            reasoning_effort=(get("LLM_REASONING_EFFORT") or "high").lower(),
+        )

@@ -1,0 +1,803 @@
+     1	"""The agent loop (design §4): one chat turn as a stream of contract SSE events.
+     2	
+     3	    user message stored -> [LLM -> tools -> cards]* -> guarded text -> assistant message stored
+     4	
+     5	The LLM chooses tools and writes text; routes, prices and tickets come from the airline through
+     6	the four tools. Text is released sentence by sentence after the ReplyGuard traced every number
+     7	and city in it; the first problem replaces the whole reply with a code template. The turn's
+     8	quote cards become bookable only when `Airline.post_assistant_message` stores them (`done`).
+     9	
+    10	Nothing here can book: the loop talks to the airline through `Toolbox` (four tools, no booking)
+    11	and `post_assistant_message`. Booking is the HTTP endpoint's call, caused by the user's click.
+    12	"""
+    13	from __future__ import annotations
+    14	
+    15	import asyncio
+    16	import logging
+    17	import time
+    18	from contextlib import aclosing
+    19	from dataclasses import dataclass, field, replace
+    20	from typing import Any, AsyncIterator, Awaitable, Callable
+    21	
+    22	from ..airline import ConversationBusy, NotFound
+    23	from .budget import AgentBudget, BudgetTracker, refusal
+    24	from .concurrency import ServerBusy, Threads, TurnConcurrency, TurnSlots
+    25	from .context import build_context
+    26	from .guard import CityIndex, ReplyGuard, SentenceBuffer
+    27	from .config import EFFORTS
+    28	from .llm import LLM, Completion, LLMError, TextDelta
+    29	from .prompt import system_prompt
+    30	from .templates import CLICK_TO_BOOK, fallback_reply
+    31	from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, MAX_RAW_ARGUMENTS, Outcome, Toolbox
+    32	
+    33	log = logging.getLogger(__name__)
+    34	
+    35	DEFAULT_BUDGET = AgentBudget()
+    36	MAX_STEPS = DEFAULT_BUDGET.max_steps
+    37	TURN_TIMEOUT = DEFAULT_BUDGET.max_turn_seconds  # a whole turn (all LLM calls, tools, retries); then the template reply
+    38	LOCK_TIMEOUT = 10.0  # waiting for another turn of the same conversation; then conversation_busy
+    39	DRAIN_TIMEOUT = 30.0  # after the turn's time limit: waiting for its worker threads (design §4.9)
+    40	MAX_USER_CHARS = 2000
+    41	TITLE_CHARS = 60
+    42	LLM_UNAVAILABLE = "The assistant is temporarily unavailable. Your message was saved; please try again."
+    43	BUSY = "This conversation is still working on your previous message. Please try again in a moment."
+    44	SERVER_BUSY = "The assistant is busy right now. Your message was not sent; please try again in a moment."
+    45	INTERNAL = "Something went wrong. Your message was saved; please try again."
+    46	
+    47	
+    48	@dataclass(frozen=True)
+    49	class Event:
+    50	    """One SSE event of docs/api/contract.md: `name` and its JSON `data`."""
+    51	
+    52	    name: str
+    53	    data: dict
+    54	
+    55	
+    56	class _GuardFailed(Exception):
+    57	    def __init__(self, problems: list[dict]):
+    58	        super().__init__("reply guard")
+    59	        self.problems = problems
+    60	
+    61	
+    62	@dataclass
+    63	class _Turn:
+    64	    user_id: str
+    65	    conversation_id: str
+    66	    user_message: dict
+    67	    guard: ReplyGuard
+    68	    emit: Callable[[str, dict], None]
+    69	    budget: BudgetTracker = field(default_factory=lambda: BudgetTracker(DEFAULT_BUDGET))
+    70	    reasoning_effort: str | None = None  # per-request thinking level; None = the client's default
+    71	    text: str = ""  # released so far
+    72	    cards: list[dict] = field(default_factory=list)
+    73	    outcomes: list[Outcome] = field(default_factory=list)
+    74	    threads: Threads = field(default_factory=Threads)  # blocking calls inside the time limit
+    75	
+    76	
+    77	def message_view(message: dict) -> dict:
+    78	    """Contract `Message` of a stored row without quote cards (user messages)."""
+    79	    return {"id": message["id"], "role": message["role"], "text": message["text"],
+    80	            "cards": list(message["cards"]), "created_at": message["created_at"]}
+    81	
+    82	
+    83	class Agent:
+    84	    def __init__(self, airline: Any, llm: LLM, *, budget: AgentBudget | None = None,
+    85	                 max_steps: int | None = None,
+    86	                 ping_interval: float = 15.0, retries: int = 2, backoff: float = 0.5,
+    87	                 llm_timeout: float = 60.0, turn_timeout: float | None = None,
+    88	                 lock_timeout: float | None = LOCK_TIMEOUT,
+    89	                 concurrency: TurnConcurrency | None = None, drain_timeout: float = DRAIN_TIMEOUT,
+    90	                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+    91	        """`budget`: the per-turn limits (design §4.8; default `AgentBudget()`). `max_steps` and
+    92	        `turn_timeout` override its fields (tests, older callers). `concurrency`: the server-wide
+    93	        limit on running turns (design §4.9; default `TurnConcurrency()`). `drain_timeout`: how
+    94	        long a cut-short turn waits for its worker threads before it ends anyway."""
+    95	        budget = budget or DEFAULT_BUDGET
+    96	        if max_steps is not None:
+    97	            budget = replace(budget, max_steps=max_steps)
+    98	        if turn_timeout is not None:
+    99	            budget = replace(budget, max_turn_seconds=turn_timeout)
+   100	        self.budget = budget
+   101	        self.llm = llm
+   102	        self.store = airline.store
+   103	        self.ping_interval = ping_interval
+   104	        self.retries = retries
+   105	        self.backoff = backoff
+   106	        self.llm_timeout = llm_timeout
+   107	        self.lock_timeout = lock_timeout
+   108	        self.slots = TurnSlots(concurrency or TurnConcurrency())
+   109	        self.drain_timeout = drain_timeout
+   110	        self._sleep = sleep
+   111	        self._tools = Toolbox(airline)
+   112	        # The only other things the loop takes from the airline. No reference to the Airline
+   113	        # object itself is kept.
+   114	        self._post_assistant_message = airline.post_assistant_message
+   115	        self._locks = airline.locks
+   116	        self._networks = airline.networks
+   117	        self._index: tuple[str, CityIndex] | None = None
+   118	        self._tasks: set[asyncio.Task] = set()
+   119	
+   120	    @property
+   121	    def max_steps(self) -> int:
+   122	        return self.budget.max_steps
+   123	
+   124	    @property
+   125	    def turn_timeout(self) -> float:
+   126	        return self.budget.max_turn_seconds
+   127	
+   128	    # ------------------------------------------------------------------ public -------------
+   129	    def stream_turn(self, user_id: str, conversation_id: str, text: str, *,
+   130	                    reasoning_effort: str | None = None,
+   131	                    on_server_busy: Callable[[], Any] | None = None) -> AsyncIterator[Event]:
+   132	        """Start a turn and return its events: `user_message`, then `status` / `card` / `delta` /
+   133	        `replace` / `ping`, ending with exactly one `done` or `error`.
+   134	
+   135	        `reasoning_effort` overrides the LLM's thinking level for this turn (none / low / high /
+   136	        max; None = configured default). `on_server_busy`: a blocking callable run (in a worker
+   137	        thread, before the event is sent) when the turn is refused with `server_busy` - the API
+   138	        gives the day's message slot back there. It runs even when nobody reads the stream.
+   139	
+   140	        Raises before anything is stored: NotFound (not the user's conversation), ValueError
+   141	        (empty or too long text, unknown reasoning_effort). Must be called on the event loop. The turn runs in its own
+   142	        task: it finishes and is stored even when the client stops reading."""
+   143	        if not isinstance(text, str) or not text.strip():
+   144	            raise ValueError("text must not be empty")
+   145	        text = text.strip()
+   146	        if len(text) > MAX_USER_CHARS:
+   147	            raise ValueError(f"text is longer than {MAX_USER_CHARS} characters")
+   148	        if reasoning_effort is not None and reasoning_effort not in EFFORTS:
+   149	            raise ValueError(f"reasoning_effort must be one of {', '.join(EFFORTS)}")
+   150	        if self.store.get_conversation(user_id, conversation_id) is None:
+   151	            raise NotFound(conversation_id)
+   152	        queue: asyncio.Queue[Event | None] = asyncio.Queue()
+   153	        task = asyncio.get_running_loop().create_task(
+   154	            self._run(user_id, conversation_id, text, reasoning_effort, queue, on_server_busy))
+   155	        self._tasks.add(task)
+   156	        task.add_done_callback(self._tasks.discard)
+   157	        return self._events(queue)
+   158	
+   159	    async def wait_idle(self) -> None:
+   160	        """Wait for every running turn (shutdown, tests)."""
+   161	        while pending := [t for t in self._tasks if not t.done()]:
+   162	            await asyncio.wait(pending)
+   163	
+   164	    async def _events(self, queue: asyncio.Queue) -> AsyncIterator[Event]:
+   165	        while True:
+   166	            try:
+   167	                event = await asyncio.wait_for(queue.get(), self.ping_interval)
+   168	            except asyncio.TimeoutError:
+   169	                yield Event("ping", {})
+   170	                continue
+   171	            if event is None:
+   172	                return
+   173	            yield event
+   174	
+   175	    # ------------------------------------------------------------------ one turn -----------
+   176	    async def _run(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+   177	                   queue: asyncio.Queue, on_server_busy: Callable[[], Any] | None = None) -> None:
+   178	        def emit(name: str, data: dict) -> None:
+   179	            queue.put_nowait(Event(name, data))
+   180	
+   181	        # The conversation lock first, then a server-wide slot: a second message of a busy
+   182	        # conversation waits without taking a slot. Both refusals come before anything is stored.
+   183	        try:
+   184	            async with self._locks.hold_async(conversation_id, timeout=self.lock_timeout), \
+   185	                    self.slots.hold():
+   186	                await self._turn(user_id, conversation_id, text, reasoning_effort, emit)
+   187	        except ConversationBusy:
+   188	            emit("error", {"code": "conversation_busy", "message": BUSY})
+   189	        except ServerBusy:
+   190	            log.warning("chat turn refused: %d turns running, none ended within %gs (conversation %s)",
+   191	                        self.slots.active, self.slots.config.queue_seconds, conversation_id)
+   192	            if on_server_busy is not None:
+   193	                try:
+   194	                    await asyncio.to_thread(on_server_busy)
+   195	                except Exception:
+   196	                    log.exception("server_busy callback failed (conversation %s)", conversation_id)
+   197	            emit("error", {"code": "server_busy", "message": SERVER_BUSY})
+   198	        except Exception:
+   199	            log.exception("chat turn failed (conversation %s)", conversation_id)
+   200	            emit("error", {"code": "internal_error", "message": INTERNAL})
+   201	        finally:
+   202	            queue.put_nowait(None)
+   203	
+   204	    async def _turn(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+   205	                    emit: Callable[[str, dict], None]) -> None:
+   206	        store = self.store
+   207	        conversation = await asyncio.to_thread(store.get_conversation, user_id, conversation_id)
+   208	        user_message = await asyncio.to_thread(store.add_message, user_id, conversation_id, "user", text)
+   209	        emit("user_message", message_view(user_message))
+   210	        if conversation is not None and not conversation["title"]:
+   211	            await asyncio.to_thread(store.set_conversation_title, user_id, conversation_id,
+   212	                                    " ".join(text.split())[:TITLE_CHARS])
+   213	
+   214	        context = await asyncio.to_thread(build_context, store, user_id, conversation_id)
+   215	        index = await asyncio.to_thread(self._city_index)
+   216	        today = store.clock().date()
+   217	        guard = ReplyGuard(index, records=context.records, user_text=text,
+   218	                           earlier_user_texts=context.user_texts[:-1], today=today)
+   219	        turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
+   220	                     reasoning_effort)
+   221	        messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
+   222	
+   223	        try:
+   224	            try:
+   225	                async with asyncio.timeout(self.turn_timeout):
+   226	                    fallback = await self._steps(turn, messages)
+   227	            finally:
+   228	                await self._drain(turn)
+   229	        except TimeoutError:
+   230	            fallback = [{"kind": "turn_timeout", "value": str(self.turn_timeout)}]
+   231	        except LLMError as exc:
+   232	            fallback = [{"kind": "llm_error", "value": str(exc)[:200]}]
+   233	        except Exception as exc:  # a bug or a store error in the middle of the turn
+   234	            if not turn.outcomes and not turn.text:
+   235	                raise
+   236	            log.exception("chat turn failed after producing output (conversation %s)", conversation_id)
+   237	            fallback = [{"kind": "internal_error", "value": type(exc).__name__}]
+   238	        if fallback is not None and fallback[0]["kind"] in ("max_steps", "token_budget", "tool_budget"):
+   239	            log.warning("chat turn stopped by its budget (conversation %s): %s %s", conversation_id,
+   240	                        fallback[0]["kind"], turn.budget.snapshot())
+   241	        if fallback is not None and fallback[0]["kind"] in ("llm_error", "turn_timeout") \
+   242	                and not turn.outcomes and not turn.text:
+   243	            emit("error", {"code": "llm_unavailable", "message": LLM_UNAVAILABLE})
+   244	            return
+   245	        await self._finish(turn, fallback)
+   246	
+   247	    async def _steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
+   248	        """The LLM / tool steps of a turn. Returns None when the LLM's text can stay, otherwise
+   249	        the problems that make the template reply replace it.
+   250	
+   251	        Budgets (design §4.8): a step starts only while steps and tokens are left; each tool call
+   252	        runs only while calls are left for the step and the turn. A call that is not admitted is
+   253	        never executed: it gets a `tool_budget_exceeded` result (stored like any tool call, so
+   254	        every tool call of the completion has its result and the stored history stays well-formed).
+   255	        Once the turn's calls are used up and a call was refused, the turn ends with the template."""
+   256	        while (stop := turn.budget.stop_before_step()) is None:
+   257	            try:
+   258	                completion = await self._llm_step(turn, messages)
+   259	            except _GuardFailed as failed:
+   260	                return failed.problems
+   261	            if not completion.tool_calls:
+   262	                if completion.finish_reason != "stop":  # "length", "content_filter", ...
+   263	                    return [{"kind": "truncated", "value": str(completion.finish_reason)}]
+   264	                if not turn.text.strip():
+   265	                    return [{"kind": "empty_reply", "value": ""}]
+   266	                return None
+   267	            messages.append(completion.assistant_message())
+   268	            turn_exhausted = False
+   269	            for call in completion.tool_calls:
+   270	                refused = turn.budget.admit_tool_call()
+   271	                if refused is None:
+   272	                    turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
+   273	                    outcome = await turn.threads.run(self._tools.run, turn.user_id, turn.conversation_id,
+   274	                                                     call["name"], call["arguments"])
+   275	                else:
+   276	                    turn_exhausted = turn_exhausted or refused == "per_turn"
+   277	                    payload = refusal(refused, self.budget)
+   278	                    outcome = Outcome(call["name"], str(call["arguments"])[:MAX_RAW_ARGUMENTS], payload["code"], payload,
+   279	                                      error=f"budget: {refused}")
+   280	                await turn.threads.run(
+   281	                    self.store.add_tool_call, turn.user_id, turn.user_message["id"], outcome.name,
+   282	                    outcome.args, outcome.payload, error=outcome.error, latency_ms=outcome.latency_ms)
+   283	                turn.outcomes.append(outcome)
+   284	                if refused is None:  # a refusal is no record a reply may quote
+   285	                    turn.guard.add_record(outcome.payload)
+   286	                for card in outcome.cards:
+   287	                    turn.cards.append(card)
+   288	                    turn.emit("card", {"card": card})
+   289	                messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
+   290	            if turn_exhausted:
+   291	                return [{"kind": "tool_budget", "value": str(self.budget.max_tool_calls_per_turn)}]
+   292	        return [stop]
+   293	
+   294	    async def _drain(self, turn: _Turn) -> None:
+   295	        """Wait for worker threads the time limit (or an error) left running. A thread cannot be
+   296	        stopped; until it ends it may still write (a quote, a tool call row), so the reply is not
+   297	        stored and the conversation lock and the slot are not released before it ends - unless it
+   298	        outlives `drain_timeout` (store timeouts make that unlikely), which is logged."""
+   299	        if not turn.threads.running:
+   300	            return
+   301	        log.warning("chat turn cut short with %d worker thread(s) running; waiting up to %gs (conversation %s)",
+   302	                    turn.threads.running, self.drain_timeout, turn.conversation_id)
+   303	        if not await turn.threads.drain(self.drain_timeout):
+   304	            log.error("chat turn: %d worker thread(s) still running after %gs; ending the turn anyway "
+   305	                      "(conversation %s)", turn.threads.running, self.drain_timeout, turn.conversation_id)
+   306	
+   307	    async def _finish(self, turn: _Turn, fallback: list[dict] | None = None) -> None:
+   308	        """Persist the assistant message (the `done` moment: quote cards become bookable)."""
+   309	        text = turn.text.rstrip()
+   310	        if fallback is not None:
+   311	            text = fallback_reply(turn.outcomes)
+   312	            turn.emit("replace", {"text": text})
+   313	        elif CLICK_TO_BOOK not in text and any(
+   314	                o.name == "request_booking" and o.code == "ok" for o in turn.outcomes):
+   315	            # fixed by code, whatever the LLM wrote: the click is what books
+   316	            piece = ("\n\n" if text else "") + CLICK_TO_BOOK
+   317	            turn.emit("delta", {"text": piece})
+   318	            text += piece
+   319	        message = await asyncio.to_thread(
+   320	            self._post_assistant_message, turn.user_id, turn.conversation_id, text, turn.cards, fallback)
+   321	        turn.emit("done", {"message": message})
+   322	
+   323	    # ------------------------------------------------------------------ LLM step -----------
+   324	    def _release(self, turn: _Turn, piece: str, first_of_step: bool) -> None:
+   325	        """Check the reply so far plus `piece`; send `piece` when nothing is wrong. Checking the
+   326	        whole text catches a number or a city name that spans two pieces (`St. | Louis`)."""
+   327	        if not turn.text:
+   328	            piece = piece.lstrip()
+   329	        elif first_of_step and not turn.text[-1].isspace() and not piece[:1].isspace():
+   330	            piece = "\n\n" + piece  # text of a later step starts a new paragraph
+   331	        problems = turn.guard.check(turn.text + piece)
+   332	        if problems:
+   333	            raise _GuardFailed(problems)
+   334	        turn.text += piece
+   335	        turn.emit("delta", {"text": piece})
+   336	
+   337	    async def _llm_step(self, turn: _Turn, messages: list[dict]) -> Completion:
+   338	        """One LLM call with retries. Text is released as it streams. A failed call is retried
+   339	        only while none of its text has been released."""
+   340	        request = {"turn": turn.user_message["id"], "messages": list(messages),
+   341	                   "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
+   342	                   "reasoning_effort": turn.reasoning_effort or getattr(self.llm, "reasoning_effort", None)}
+   343	        for attempt in range(self.retries + 1):
+   344	            started = time.monotonic()
+   345	            buffer = SentenceBuffer()
+   346	            completion: Completion | None = None
+   347	            released = False
+   348	            content = blank = ""
+   349	
+   350	            def log_call(response: dict, tokens: int | None = None, usage: Any = None) -> Awaitable[Any]:
+   351	                # every attempt counts against the turn's tokens, also failed ones and retries
+   352	                charged, estimated = turn.budget.charge(usage, messages)
+   353	                response = {**response, "budget": {"charged_tokens": charged, "estimated": estimated,
+   354	                                                   "turn_tokens": turn.budget.tokens}}
+   355	                return turn.threads.run(
+   356	                    self.store.add_llm_call, turn.user_id, turn.conversation_id, request, response,
+   357	                    latency_ms=int((time.monotonic() - started) * 1000), tokens=tokens,
+   358	                    model=getattr(self.llm, "model", None))
+   359	
+   360	            try:
+   361	                # aclosing: a guard failure or a timeout must close the HTTP stream right away
+   362	                async with asyncio.timeout(self.llm_timeout), \
+   363	                        aclosing(self.llm.stream(
+   364	                            messages, TOOL_SCHEMAS, reasoning_effort=turn.reasoning_effort)) as stream:
+   365	                    async for event in stream:
+   366	                        if isinstance(event, TextDelta):
+   367	                            content += event.text
+   368	                            for sentence in buffer.push(event.text):
+   369	                                if sentence.strip():
+   370	                                    self._release(turn, blank + sentence, not released)
+   371	                                    blank, released = "", True
+   372	                                else:
+   373	                                    blank += sentence  # white space is never sent on its own
+   374	                        else:
+   375	                            completion = event
+   376	                if completion is None:
+   377	                    raise LLMError("LLM stream ended without a completion", retryable=True)
+   378	                rest = buffer.flush()
+   379	                if rest.strip():
+   380	                    self._release(turn, blank + rest, not released)
+   381	            except _GuardFailed as failed:
+   382	                await log_call({"content": content, "guard_problems": failed.problems, "aborted": True})
+   383	                raise
+   384	            except (LLMError, TimeoutError) as exc:
+   385	                error = exc if isinstance(exc, LLMError) else LLMError("LLM call timed out", retryable=True)
+   386	                await log_call({"content": content, "error": str(error)[:300], "attempt": attempt + 1})
+   387	                if released or not error.retryable or attempt == self.retries:
+   388	                    raise error from None
+   389	                await self._sleep(self.backoff * 2 ** attempt)
+   390	                continue
+   391	            await log_call(completion.as_record(), completion.total_tokens, completion.usage)
+   392	            return completion
+   393	        raise LLMError("unreachable", retryable=False)  # pragma: no cover
+   394	
+   395	    def _city_index(self) -> CityIndex:
+   396	        """City names for the guard, from the airline's current network (rebuilt when
+   397	        locations.db changes)."""
+   398	        net = self._networks.current()
+   399	        if self._index is None or self._index[0] != net.fingerprint.id:
+   400	            self._index = (net.fingerprint.id, CityIndex(net.cities))
+   401	        return self._index[1]
+     1	"""Per-turn budgets of the agent loop (design §4.8): LLM steps, tool calls, tokens, wall time.
+     2	
+     3	`AgentBudget` is the configuration (defaults below, env overrides validated by `from_env`).
+     4	`BudgetTracker` is one turn's tally. The loop asks it before every LLM step (`stop_before_step`)
+     5	and before every tool call (`admit_tool_call`); it never executes anything itself.
+     6	
+     7	Token accounting is a **soft** cap and not a dollar cap:
+     8	- the provider's `usage.total_tokens` of a call is only known after the call, so the check runs
+     9	  between LLM requests: a turn that crosses the cap finishes the call in flight and starts no
+    10	  further step;
+    11	- a call (failed or completed) that reports no usage is charged a conservative estimate:
+    12	  `ceil(request characters / CHARS_PER_TOKEN_ESTIMATE) + max_output_tokens_per_call`
+    13	  (every character of the request counted as half a token, plus the whole output allowance);
+    14	- retries are separate calls and are charged too.
+    15	"""
+    16	from __future__ import annotations
+    17	
+    18	import json
+    19	import math
+    20	import os
+    21	from dataclasses import dataclass, fields
+    22	from typing import Any, Mapping
+    23	
+    24	CHARS_PER_TOKEN_ESTIMATE = 2  # conservative: English text and JSON average about 3-4 characters per token
+    25	
+    26	# name -> (environment variable, lowest, highest). Bounds keep a typo from removing a budget
+    27	# (0 or a huge number) or from making every turn fail.
+    28	_BOUNDS: dict[str, tuple[str, float, float]] = {
+    29	    "max_steps": ("AGENT_MAX_STEPS", 1, 20),
+    30	    "max_tool_calls_per_step": ("AGENT_MAX_TOOL_CALLS_PER_STEP", 1, 16),
+    31	    "max_tool_calls_per_turn": ("AGENT_MAX_TOOL_CALLS_PER_TURN", 1, 64),
+    32	    "max_output_tokens_per_call": ("AGENT_MAX_OUTPUT_TOKENS_PER_CALL", 256, 32_768),
+    33	    "max_total_tokens_per_turn": ("AGENT_MAX_TOTAL_TOKENS_PER_TURN", 1_000, 1_000_000),
+    34	    "max_turn_seconds": ("AGENT_MAX_TURN_SECONDS", 5, 600),
+    35	}
+    36	
+    37	
+    38	@dataclass(frozen=True)
+    39	class AgentBudget:
+    40	    max_steps: int = 6  # LLM steps (calls that complete, not counting retries) per turn
+    41	    max_tool_calls_per_step: int = 4  # executed tool calls of one completion
+    42	    max_tool_calls_per_turn: int = 12  # executed tool calls of the whole turn
+    43	    max_output_tokens_per_call: int = 4096  # the request's max_tokens (includes thinking tokens)
+    44	    max_total_tokens_per_turn: int = 20_000  # soft: provider-reported total tokens of all calls
+    45	    max_turn_seconds: float = 90.0  # the whole turn: LLM calls, tools, retries
+    46	
+    47	    def __post_init__(self) -> None:
+    48	        for f in fields(self):
+    49	            value = getattr(self, f.name)
+    50	            whole = f.name != "max_turn_seconds"
+    51	            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+    52	                    or (whole and not isinstance(value, int)) or not math.isfinite(value) or value <= 0:
+    53	                raise ValueError(f"{f.name} must be a positive {'integer' if whole else 'number'}, got {value!r}")
+    54	
+    55	    def checked(self) -> "AgentBudget":
+    56	        """The same budget, also within the bounds the environment may set (startup check)."""
+    57	        for name, (var, low, high) in _BOUNDS.items():
+    58	            value = getattr(self, name)
+    59	            if not low <= value <= high:
+    60	                raise ValueError(f"{var} must be between {low:g} and {high:g}, got {value:g}")
+    61	        return self
+    62	
+    63	    @classmethod
+    64	    def from_env(cls, env: Mapping[str, str] | None = None) -> "AgentBudget":
+    65	        """Defaults, overridden by the `AGENT_*` variables of `_BOUNDS`. A value that is not a
+    66	        number or is out of bounds raises ValueError (the app does not start with a bad budget)."""
+    67	        env = os.environ if env is None else env
+    68	        values: dict[str, Any] = {}
+    69	        for name, (var, low, high) in _BOUNDS.items():
+    70	            raw = (env.get(var) or "").strip().replace("_", "")
+    71	            if not raw:
+    72	                continue
+    73	            try:
+    74	                value = float(raw) if name == "max_turn_seconds" else int(raw)
+    75	            except ValueError:
+    76	                raise ValueError(f"{var} must be {'a number' if name == 'max_turn_seconds' else 'an integer'}, "
+    77	                                 f"got {raw!r}") from None
+    78	            if not low <= value <= high:  # also catches nan
+    79	                raise ValueError(f"{var} must be between {low:g} and {high:g}, got {raw!r}")
+    80	            values[name] = value
+    81	        return cls(**values).checked()
+    82	
+    83	
+    84	def estimate_tokens(messages: Any, max_output_tokens: int) -> int:
+    85	    """Conservative charge for a call without reported usage (see the module docstring)."""
+    86	    chars = len(json.dumps(messages, ensure_ascii=False, separators=(",", ":"), default=str))
+    87	    return math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE) + max_output_tokens
+    88	
+    89	
+    90	def reported_tokens(usage: Any) -> int | None:
+    91	    """`usage.total_tokens` when the provider reported a usable one."""
+    92	    total = usage.get("total_tokens") if isinstance(usage, dict) else None
+    93	    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+    94	        return None
+    95	    return total
+    96	
+    97	
+    98	class BudgetTracker:
+    99	    """One turn's use of an `AgentBudget`. Not thread-safe; owned by the turn's task."""
+   100	
+   101	    def __init__(self, budget: AgentBudget):
+   102	        self.budget = budget
+   103	        self.steps = 0  # LLM steps started
+   104	        self.tool_calls = 0  # tool calls executed (refused ones not counted)
+   105	        self.refused_calls = 0
+   106	        self.tokens = 0  # reported + estimated
+   107	        self.estimated_calls = 0  # calls charged by estimate
+   108	        self._step_calls = 0
+   109	
+   110	    # ---------------------------------------------------------------- LLM steps ------------
+   111	    def stop_before_step(self) -> dict | None:
+   112	        """None when another LLM step may start (and counts it), else the fallback problem."""
+   113	        if self.steps >= self.budget.max_steps:
+   114	            return {"kind": "max_steps", "value": str(self.budget.max_steps)}
+   115	        if self.tokens >= self.budget.max_total_tokens_per_turn:
+   116	            return {"kind": "token_budget", "value": str(self.budget.max_total_tokens_per_turn)}
+   117	        self.steps += 1
+   118	        self._step_calls = 0
+   119	        return None
+   120	
+   121	    def charge(self, usage: Any, request_messages: Any) -> tuple[int, bool]:
+   122	        """Count one LLM call (completed, failed or retried). Returns (tokens charged, estimated)."""
+   123	        total = reported_tokens(usage)
+   124	        if total is None:
+   125	            total = estimate_tokens(request_messages, self.budget.max_output_tokens_per_call)
+   126	            self.estimated_calls += 1
+   127	            self.tokens += total
+   128	            return total, True
+   129	        self.tokens += total
+   130	        return total, False
+   131	
+   132	    # ---------------------------------------------------------------- tool calls -----------
+   133	    def admit_tool_call(self) -> str | None:
+   134	        """None when one more tool call of the current step may run (and counts it), else why
+   135	        not: "per_step" or "per_turn". A refused call is never executed."""
+   136	        if self.tool_calls >= self.budget.max_tool_calls_per_turn:
+   137	            reason = "per_turn"
+   138	        elif self._step_calls >= self.budget.max_tool_calls_per_step:
+   139	            reason = "per_step"
+   140	        else:
+   141	            self.tool_calls += 1
+   142	            self._step_calls += 1
+   143	            return None
+   144	        self.refused_calls += 1
+   145	        return reason
+   146	
+   147	    @property
+   148	    def tool_calls_left(self) -> int:
+   149	        return self.budget.max_tool_calls_per_turn - self.tool_calls
+   150	
+   151	    def snapshot(self) -> dict:
+   152	        """For logs and the llm_calls record (no secrets, small)."""
+   153	        return {"steps": self.steps, "tool_calls": self.tool_calls, "refused_calls": self.refused_calls,
+   154	                "tokens": self.tokens, "estimated_calls": self.estimated_calls}
+   155	
+   156	
+   157	def refusal(reason: str, budget: AgentBudget) -> dict:
+   158	    """The tool result of a call that was not executed (the LLM protocol needs one per call)."""
+   159	    if reason == "per_step":
+   160	        message = (f"Not executed: at most {budget.max_tool_calls_per_step} tool calls are run per step. "
+   161	                   "Call the remaining tools again in a later step if they are still needed.")
+   162	    else:
+   163	        message = (f"Not executed: this turn has used all {budget.max_tool_calls_per_turn} tool calls. "
+   164	                   "Answer with the results you already have.")
+   165	    return {"code": "tool_budget_exceeded", "message": message, "limit": reason}
+     1	"""Server-wide limits on running chat turns, and the bookkeeping of a turn's worker threads
+     2	(06 P0b, design §4.9).
+     3	
+     4	`TurnSlots`: at most `max_active_turns` turns run at once, across all users and conversations, in
+     5	addition to the per-conversation lock. A turn that finds every slot taken waits up to
+     6	`queue_seconds` (first come, first served), then gives up with `ServerBusy`. Waiting is an
+     7	`await` on a future: the event loop is never blocked.
+     8	
+     9	`Threads`: every blocking call a turn makes inside its time limit runs through `Threads.run`, so
+    10	the turn knows which worker threads are still running when the limit cuts it short. A Python
+    11	thread cannot be stopped from outside: a timeout around `asyncio.to_thread` only stops *waiting*
+    12	for it. The turn therefore waits (bounded by `drain_seconds`) for those threads before it stores
+    13	its reply and releases the conversation lock and its slot; the threads themselves are bounded by
+    14	app.db's busy and operation timeouts (`store/db.py`).
+    15	"""
+    16	from __future__ import annotations
+    17	
+    18	import asyncio
+    19	import math
+    20	import os
+    21	from collections import deque
+    22	from contextlib import asynccontextmanager
+    23	from dataclasses import dataclass
+    24	from typing import Any, AsyncIterator, Callable, Mapping
+    25	
+    26	# name -> (environment variable, lowest, highest)
+    27	_BOUNDS: dict[str, tuple[str, float, float]] = {
+    28	    "max_active_turns": ("AGENT_MAX_ACTIVE_TURNS", 1, 256),
+    29	    "queue_seconds": ("AGENT_TURN_QUEUE_SECONDS", 0, 60),
+    30	}
+    31	
+    32	
+    33	class ServerBusy(Exception):
+    34	    """No turn slot became free within the queue time."""
+    35	
+    36	
+    37	@dataclass(frozen=True)
+    38	class TurnConcurrency:
+    39	    max_active_turns: int = 8  # turns running at once, whole server
+    40	    queue_seconds: float = 5.0  # how long a turn waits for a slot, then server_busy
+    41	
+    42	    def __post_init__(self) -> None:
+    43	        n, wait = self.max_active_turns, self.queue_seconds
+    44	        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+    45	            raise ValueError(f"max_active_turns must be a positive integer, got {n!r}")
+    46	        if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait) or wait < 0:
+    47	            raise ValueError(f"queue_seconds must be a number >= 0, got {wait!r}")
+    48	
+    49	    @classmethod
+    50	    def from_env(cls, env: Mapping[str, str] | None = None) -> "TurnConcurrency":
+    51	        """Defaults, overridden by `AGENT_MAX_ACTIVE_TURNS` (integer 1–256) and
+    52	        `AGENT_TURN_QUEUE_SECONDS` (number 0–60). A bad value raises ValueError (startup fails)."""
+    53	        env = os.environ if env is None else env
+    54	        values: dict[str, Any] = {}
+    55	        for name, (var, low, high) in _BOUNDS.items():
+    56	            raw = (env.get(var) or "").strip().replace("_", "")
+    57	            if not raw:
+    58	                continue
+    59	            whole = name == "max_active_turns"
+    60	            try:
+    61	                value = int(raw) if whole else float(raw)
+    62	            except ValueError:
+    63	                raise ValueError(f"{var} must be {'an integer' if whole else 'a number'}, got {raw!r}") from None
+    64	            if not low <= value <= high:  # also catches nan
+    65	                raise ValueError(f"{var} must be between {low:g} and {high:g}, got {raw!r}")
+    66	            values[name] = value
+    67	        return cls(**values)
+    68	
+    69	
+    70	class TurnSlots:
+    71	    """A FIFO counting semaphore for chat turns. Lives on one event loop at a time; not
+    72	    thread-safe (only the event loop touches it). Unlike `asyncio.Semaphore` it is not bound to
+    73	    the loop it first waited on (tests run turns of one agent under several `asyncio.run`)."""
+    74	
+    75	    def __init__(self, config: TurnConcurrency):
+    76	        self.config = config
+    77	        self.active = 0  # slots taken
+    78	        self._waiters: deque[asyncio.Future] = deque()
+    79	
+    80	    @property
+    81	    def waiting(self) -> int:
+    82	        return sum(not f.done() for f in self._waiters)
+    83	
+    84	    @asynccontextmanager
+    85	    async def hold(self) -> AsyncIterator[None]:
+    86	        """Take a slot for the body, waiting up to `queue_seconds`; else raise ServerBusy."""
+    87	        await self._acquire()
+    88	        try:
+    89	            yield
+    90	        finally:
+    91	            self._release()
+    92	
+    93	    async def _acquire(self) -> None:
+    94	        if self.active < self.config.max_active_turns and not self._waiters:
+    95	            self.active += 1
+    96	            return
+    97	        if self.config.queue_seconds <= 0:
+    98	            raise ServerBusy()
+    99	        handover = asyncio.get_running_loop().create_future()
+   100	        self._waiters.append(handover)
+   101	        try:
+   102	            async with asyncio.timeout(self.config.queue_seconds):
+   103	                await handover
+   104	        except BaseException as exc:
+   105	            if handover.done() and not handover.cancelled():
+   106	                # the slot was handed over in the same instant as the timeout / cancellation
+   107	                if isinstance(exc, TimeoutError):
+   108	                    return  # keep it: the turn may run
+   109	                self._release()
+   110	                raise
+   111	            handover.cancel()
+   112	            try:
+   113	                self._waiters.remove(handover)
+   114	            except ValueError:
+   115	                pass
+   116	            if isinstance(exc, TimeoutError):
+   117	                raise ServerBusy() from None
+   118	            raise
+   119	        # handed over by `_release`: `active` already counts this turn
+   120	
+   121	    def _release(self) -> None:
+   122	        while self._waiters:
+   123	            handover = self._waiters.popleft()
+   124	            if not handover.done():
+   125	                handover.set_result(None)  # the slot passes to the oldest waiter
+   126	                return
+   127	        self.active -= 1
+   128	
+   129	
+   130	class Threads:
+   131	    """The worker threads one turn started and may not have finished."""
+   132	
+   133	    def __init__(self) -> None:
+   134	        self._running: set[asyncio.Future] = set()
+   135	
+   136	    @property
+   137	    def running(self) -> int:
+   138	        return sum(not f.done() for f in self._running)
+   139	
+   140	    async def run(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+   141	        """`await asyncio.to_thread(fn, ...)`, but if the caller is cancelled (the turn's time
+   142	        limit), the thread is still tracked until it ends, so `drain` can wait for it."""
+   143	        future = asyncio.ensure_future(asyncio.to_thread(fn, *args, **kwargs))
+   144	        self._running.add(future)
+   145	        future.add_done_callback(self._finished)
+   146	        return await asyncio.shield(future)
+   147	
+   148	    def _finished(self, future: asyncio.Future) -> None:
+   149	        self._running.discard(future)
+   150	        if not future.cancelled():
+   151	            future.exception()  # retrieved: a thread that failed after its caller left is not "never retrieved"
+   152	
+   153	    async def drain(self, timeout: float) -> bool:
+   154	        """Wait up to `timeout` seconds for the tracked threads. True when none is left running."""
+   155	        pending = [f for f in self._running if not f.done()]
+   156	        if not pending:
+   157	            return True
+   158	        done, still = await asyncio.wait(pending, timeout=timeout)
+   159	        return not still
+     1	"""One lock per conversation, shared by chat turns and the booking endpoint (design §4.6, B7).
+     2	
+     3	In-process only: the API runs as a single uvicorn worker. The database does not rely on this lock
+     4	for B5/B7 (those hold through `BEGIN IMMEDIATE` and `tickets.quote_id UNIQUE`); the lock keeps a
+     5	booking click and a running chat turn of the same conversation from interleaving.
+     6	
+     7	The lock is NOT reentrant. `Airline.book` takes it itself; everything else in `Airline` expects
+     8	the caller (the chat turn) to hold it.
+     9	"""
+    10	from __future__ import annotations
+    11	
+    12	import asyncio
+    13	import threading
+    14	import time
+    15	from contextlib import asynccontextmanager, contextmanager
+    16	from typing import AsyncIterator, Iterator
+    17	
+    18	
+    19	class ConversationBusy(Exception):
+    20	    """The conversation lock was not obtained within the timeout."""
+    21	
+    22	
+    23	class ConversationLocks:
+    24	    def __init__(self) -> None:
+    25	        self._mutex = threading.Lock()
+    26	        self._entries: dict[str, list] = {}  # conversation id -> [lock, holders + waiters]
+    27	
+    28	    def _checkout(self, conversation_id: str) -> threading.Lock:
+    29	        with self._mutex:
+    30	            entry = self._entries.setdefault(conversation_id, [threading.Lock(), 0])
+    31	            entry[1] += 1
+    32	            return entry[0]
+    33	
+    34	    def _checkin(self, conversation_id: str) -> None:
+    35	        with self._mutex:
+    36	            entry = self._entries[conversation_id]
+    37	            entry[1] -= 1
+    38	            if entry[1] == 0:
+    39	                del self._entries[conversation_id]
+    40	
+    41	    @contextmanager
+    42	    def hold(self, conversation_id: str, timeout: float | None = None) -> Iterator[None]:
+    43	        """Blocking form, for sync code (threadpool endpoints). Never call it on the event loop:
+    44	        use `hold_async` there."""
+    45	        lock = self._checkout(conversation_id)
+    46	        try:
+    47	            if not lock.acquire(timeout=-1 if timeout is None else timeout):
+    48	                raise ConversationBusy(conversation_id)
+    49	            try:
+    50	                yield
+    51	            finally:
+    52	                lock.release()
+    53	        finally:
+    54	            self._checkin(conversation_id)
+    55	
+    56	    @asynccontextmanager
+    57	    async def hold_async(self, conversation_id: str, timeout: float | None = None,
+    58	                         poll: float = 0.01) -> AsyncIterator[None]:
+    59	        """Async form of the same lock: waits without blocking the event loop, safe to cancel
+    60	        while waiting, and may be held across awaits (a whole streamed turn)."""
+    61	        lock = self._checkout(conversation_id)
+    62	        try:
+    63	            deadline = None if timeout is None else time.monotonic() + timeout
+    64	            while not lock.acquire(blocking=False):
+    65	                if deadline is not None and time.monotonic() >= deadline:
+    66	                    raise ConversationBusy(conversation_id)
+    67	                await asyncio.sleep(poll)
+    68	            try:
+    69	                yield
+    70	            finally:
+    71	                lock.release()
+    72	        finally:
+    73	            self._checkin(conversation_id)
+    74	
+    75	    def locked(self, conversation_id: str) -> bool:
+    76	        with self._mutex:
+    77	            entry = self._entries.get(conversation_id)
+    78	            return entry is not None and entry[0].locked()

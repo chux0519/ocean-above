@@ -13,7 +13,9 @@ Migrated by the user's codex agent (report received over hc, 2026-11-23). Source
   ControlMaster (from the homelab: `~/.ssh/cm-homelab-monitoring-racknerd`).
 - Verified at `main@21d25e4`: home page, `/api/health`, `/api/debug/sse-ping` (first event ≈ 1.15 s), SQLite snapshot
   checksum, locations fingerprint, Google JWKS and DeepSeek reachable, certificate renewal dry run.
-- Every release: record commit, image ids and the checks above in the deploy log below.
+- Every release: `deploy/release_vps.sh` on the build machine (homelab: `SSH_CONTROL=~/.ssh/cm-homelab-monitoring-racknerd
+  BUILD_PROXY=http://192.168.1.13:7890`), then record commit and checks in the deploy log below. app.db is copied to
+  `/tmp/app.db.pre-<commit>` on the VPS before each release.
 
 ## Homelab (previous demo host, retired as the public entry 2026-11-23)
 - 2026-11-24: compose project `ocean-above` stopped on the homelab (`docker compose down`, user decision); `data/` kept.
@@ -45,6 +47,10 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
 - 2026-11-23: compose skeleton (PR #9) verified there: build OK, `/health` 200 through Caddy, `/` → `/login` 200.
 
 ## Deploy log
+- 2026-11-24 `2f6f13e`: first coordinator release to the VPS (06 hardening: budgets, concurrency, runtime fixes; api
+  image only). Public `/api/health` 200, `/api/config` (dev off, invite + Google on), SSE first event 0.78 s then every
+  2 s, live quote Shanghai → Beijing $1,810.21. Invite code 3 rotated after the check; a separate coordinator test code
+  exists (not for reviewers).
 - 2026-11-23 `21d25e4`: moved to the VPS (see top). Homelab compose no longer receives public traffic.
 - 2026-11-23 `bb4488e`: first real deploy (compose project `ocean-above`, `OCEAN_PORT=18765`, `.env` placed by scp,
   mode 600). Public `/api/health` 200; SSE ping through Cloudflare: first event 1.34 s, then every 2 s (no buffering).

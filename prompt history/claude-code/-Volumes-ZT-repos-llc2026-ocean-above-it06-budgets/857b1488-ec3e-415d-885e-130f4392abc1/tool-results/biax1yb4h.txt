@@ -1,0 +1,649 @@
+"""The agent loop (design §4): one chat turn as a stream of contract SSE events.
+
+    user message stored -> [LLM -> tools -> cards]* -> guarded text -> assistant message stored
+
+The LLM chooses tools and writes text; routes, prices and tickets come from the airline through
+the four tools. Text is released sentence by sentence after the ReplyGuard traced every number
+and city in it; the first problem replaces the whole reply with a code template. The turn's
+quote cards become bookable only when `Airline.post_assistant_message` stores them (`done`).
+
+Nothing here can book: the loop talks to the airline through `Toolbox` (four tools, no booking)
+and `post_assistant_message`. Booking is the HTTP endpoint's call, caused by the user's click.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from contextlib import aclosing
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, Awaitable, Callable
+
+from ..airline import ConversationBusy, NotFound
+from .context import build_context
+from .guard import CityIndex, ReplyGuard, SentenceBuffer
+from .config import EFFORTS
+from .llm import LLM, Completion, LLMError, TextDelta
+from .prompt import system_prompt
+from .templates import CLICK_TO_BOOK, fallback_reply
+from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, Outcome, Toolbox
+
+log = logging.getLogger(__name__)
+
+MAX_STEPS = 6
+TURN_TIMEOUT = 90.0  # a whole turn (all LLM calls, tools, retries); then the template reply
+LOCK_TIMEOUT = 10.0  # waiting for another turn of the same conversation; then conversation_busy
+MAX_USER_CHARS = 2000
+TITLE_CHARS = 60
+LLM_UNAVAILABLE = "The assistant is temporarily unavailable. Your message was saved; please try again."
+BUSY = "This conversation is still working on your previous message. Please try again in a moment."
+INTERNAL = "Something went wrong. Your message was saved; please try again."
+
+
+@dataclass(frozen=True)
+class Event:
+    """One SSE event of docs/api/contract.md: `name` and its JSON `data`."""
+
+    name: str
+    data: dict
+
+
+class _GuardFailed(Exception):
+    def __init__(self, problems: list[dict]):
+        super().__init__("reply guard")
+        self.problems = problems
+
+
+@dataclass
+class _Turn:
+    user_id: str
+    conversation_id: str
+    user_message: dict
+    guard: ReplyGuard
+    emit: Callable[[str, dict], None]
+    reasoning_effort: str | None = None  # per-request thinking level; None = the client's default
+    text: str = ""  # released so far
+    cards: list[dict] = field(default_factory=list)
+    outcomes: list[Outcome] = field(default_factory=list)
+
+
+def message_view(message: dict) -> dict:
+    """Contract `Message` of a stored row without quote cards (user messages)."""
+    return {"id": message["id"], "role": message["role"], "text": message["text"],
+            "cards": list(message["cards"]), "created_at": message["created_at"]}
+
+
+class Agent:
+    def __init__(self, airline: Any, llm: LLM, *, max_steps: int = MAX_STEPS,
+                 ping_interval: float = 15.0, retries: int = 2, backoff: float = 0.5,
+                 llm_timeout: float = 60.0, turn_timeout: float = TURN_TIMEOUT,
+                 lock_timeout: float | None = LOCK_TIMEOUT,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+        self.llm = llm
+        self.store = airline.store
+        self.max_steps = max_steps
+        self.ping_interval = ping_interval
+        self.retries = retries
+        self.backoff = backoff
+        self.llm_timeout = llm_timeout
+        self.turn_timeout = turn_timeout
+        self.lock_timeout = lock_timeout
+        self._sleep = sleep
+        self._tools = Toolbox(airline)
+        # The only other things the loop takes from the airline. No reference to the Airline
+        # object itself is kept.
+        self._post_assistant_message = airline.post_assistant_message
+        self._locks = airline.locks
+        self._networks = airline.networks
+        self._index: tuple[str, CityIndex] | None = None
+        self._tasks: set[asyncio.Task] = set()
+
+    # ------------------------------------------------------------------ public -------------
+    def stream_turn(self, user_id: str, conversation_id: str, text: str, *,
+                    reasoning_effort: str | None = None) -> AsyncIterator[Event]:
+        """Start a turn and return its events: `user_message`, then `status` / `card` / `delta` /
+        `replace` / `ping`, ending with exactly one `done` or `error`.
+
+        `reasoning_effort` overrides the LLM's thinking level for this turn (none / low / high /
+        max; None = configured default).
+
+        Raises before anything is stored: NotFound (not the user's conversation), ValueError
+        (empty or too long text, unknown reasoning_effort). Must be called on the event loop. The turn runs in its own
+        task: it finishes and is stored even when the client stops reading."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text must not be empty")
+        text = text.strip()
+        if len(text) > MAX_USER_CHARS:
+            raise ValueError(f"text is longer than {MAX_USER_CHARS} characters")
+        if reasoning_effort is not None and reasoning_effort not in EFFORTS:
+            raise ValueError(f"reasoning_effort must be one of {', '.join(EFFORTS)}")
+        if self.store.get_conversation(user_id, conversation_id) is None:
+            raise NotFound(conversation_id)
+        queue: asyncio.Queue[Event | None] = asyncio.Queue()
+        task = asyncio.get_running_loop().create_task(
+            self._run(user_id, conversation_id, text, reasoning_effort, queue))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return self._events(queue)
+
+    async def wait_idle(self) -> None:
+        """Wait for every running turn (shutdown, tests)."""
+        while pending := [t for t in self._tasks if not t.done()]:
+            await asyncio.wait(pending)
+
+    async def _events(self, queue: asyncio.Queue) -> AsyncIterator[Event]:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), self.ping_interval)
+            except asyncio.TimeoutError:
+                yield Event("ping", {})
+                continue
+            if event is None:
+                return
+            yield event
+
+    # ------------------------------------------------------------------ one turn -----------
+    async def _run(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+                   queue: asyncio.Queue) -> None:
+        def emit(name: str, data: dict) -> None:
+            queue.put_nowait(Event(name, data))
+
+        try:
+            async with self._locks.hold_async(conversation_id, timeout=self.lock_timeout):
+                await self._turn(user_id, conversation_id, text, reasoning_effort, emit)
+        except ConversationBusy:
+            emit("error", {"code": "conversation_busy", "message": BUSY})
+        except Exception:
+            log.exception("chat turn failed (conversation %s)", conversation_id)
+            emit("error", {"code": "internal_error", "message": INTERNAL})
+        finally:
+            queue.put_nowait(None)
+
+    async def _turn(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+                    emit: Callable[[str, dict], None]) -> None:
+        store = self.store
+        conversation = await asyncio.to_thread(store.get_conversation, user_id, conversation_id)
+        user_message = await asyncio.to_thread(store.add_message, user_id, conversation_id, "user", text)
+        emit("user_message", message_view(user_message))
+        if conversation is not None and not conversation["title"]:
+            await asyncio.to_thread(store.set_conversation_title, user_id, conversation_id,
+                                    " ".join(text.split())[:TITLE_CHARS])
+
+        context = await asyncio.to_thread(build_context, store, user_id, conversation_id)
+        index = await asyncio.to_thread(self._city_index)
+        today = store.clock().date()
+        guard = ReplyGuard(index, records=context.records, user_text=text,
+                           earlier_user_texts=context.user_texts[:-1], today=today)
+        turn = _Turn(user_id, conversation_id, user_message, guard, emit, reasoning_effort)
+        messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
+
+        try:
+            async with asyncio.timeout(self.turn_timeout):
+                fallback = await self._steps(turn, messages)
+        except TimeoutError:
+            fallback = [{"kind": "turn_timeout", "value": str(self.turn_timeout)}]
+        except LLMError as exc:
+            fallback = [{"kind": "llm_error", "value": str(exc)[:200]}]
+        except Exception as exc:  # a bug or a store error in the middle of the turn
+            if not turn.outcomes and not turn.text:
+                raise
+            log.exception("chat turn failed after producing output (conversation %s)", conversation_id)
+            fallback = [{"kind": "internal_error", "value": type(exc).__name__}]
+        if fallback is not None and fallback[0]["kind"] in ("llm_error", "turn_timeout") \
+                and not turn.outcomes and not turn.text:
+            emit("error", {"code": "llm_unavailable", "message": LLM_UNAVAILABLE})
+            return
+        await self._finish(turn, fallback)
+
+    async def _steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
+        """The LLM / tool steps of a turn. Returns None when the LLM's text can stay, otherwise
+        the problems that make the template reply replace it."""
+        for _ in range(self.max_steps):
+            try:
+                completion = await self._llm_step(turn, messages)
+            except _GuardFailed as failed:
+                return failed.problems
+            if not completion.tool_calls:
+                if completion.finish_reason != "stop":  # "length", "content_filter", ...
+                    return [{"kind": "truncated", "value": str(completion.finish_reason)}]
+                if not turn.text.strip():
+                    return [{"kind": "empty_reply", "value": ""}]
+                return None
+            messages.append(completion.assistant_message())
+            for call in completion.tool_calls:
+                turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
+                outcome = await asyncio.to_thread(self._tools.run, turn.user_id, turn.conversation_id,
+                                                  call["name"], call["arguments"])
+                await asyncio.to_thread(
+                    self.store.add_tool_call, turn.user_id, turn.user_message["id"], outcome.name,
+                    outcome.args, outcome.payload, error=outcome.error, latency_ms=outcome.latency_ms)
+                turn.outcomes.append(outcome)
+                turn.guard.add_record(outcome.payload)
+                for card in outcome.cards:
+                    turn.cards.append(card)
+                    turn.emit("card", {"card": card})
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
+        return [{"kind": "max_steps", "value": str(self.max_steps)}]
+
+    async def _finish(self, turn: _Turn, fallback: list[dict] | None = None) -> None:
+        """Persist the assistant message (the `done` moment: quote cards become bookable)."""
+        text = turn.text.rstrip()
+        if fallback is not None:
+            text = fallback_reply(turn.outcomes)
+            turn.emit("replace", {"text": text})
+        elif CLICK_TO_BOOK not in text and any(
+                o.name == "request_booking" and o.code == "ok" for o in turn.outcomes):
+            # fixed by code, whatever the LLM wrote: the click is what books
+            piece = ("\n\n" if text else "") + CLICK_TO_BOOK
+            turn.emit("delta", {"text": piece})
+            text += piece
+        message = await asyncio.to_thread(
+            self._post_assistant_message, turn.user_id, turn.conversation_id, text, turn.cards, fallback)
+        turn.emit("done", {"message": message})
+
+    # ------------------------------------------------------------------ LLM step -----------
+    def _release(self, turn: _Turn, piece: str, first_of_step: bool) -> None:
+        """Check the reply so far plus `piece`; send `piece` when nothing is wrong. Checking the
+        whole text catches a number or a city name that spans two pieces (`St. | Louis`)."""
+        if not turn.text:
+            piece = piece.lstrip()
+        elif first_of_step and not turn.text[-1].isspace() and not piece[:1].isspace():
+            piece = "\n\n" + piece  # text of a later step starts a new paragraph
+        problems = turn.guard.check(turn.text + piece)
+        if problems:
+            raise _GuardFailed(problems)
+        turn.text += piece
+        turn.emit("delta", {"text": piece})
+
+    async def _llm_step(self, turn: _Turn, messages: list[dict]) -> Completion:
+        """One LLM call with retries. Text is released as it streams. A failed call is retried
+        only while none of its text has been released."""
+        request = {"turn": turn.user_message["id"], "messages": list(messages),
+                   "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
+                   "reasoning_effort": turn.reasoning_effort or getattr(self.llm, "reasoning_effort", None)}
+        for attempt in range(self.retries + 1):
+            started = time.monotonic()
+            buffer = SentenceBuffer()
+            completion: Completion | None = None
+            released = False
+            content = blank = ""
+
+            def log_call(response: dict, tokens: int | None = None) -> Awaitable[Any]:
+                return asyncio.to_thread(
+                    self.store.add_llm_call, turn.user_id, turn.conversation_id, request, response,
+                    latency_ms=int((time.monotonic() - started) * 1000), tokens=tokens,
+                    model=getattr(self.llm, "model", None))
+
+            try:
+                # aclosing: a guard failure or a timeout must close the HTTP stream right away
+                async with asyncio.timeout(self.llm_timeout), \
+                        aclosing(self.llm.stream(
+                            messages, TOOL_SCHEMAS, reasoning_effort=turn.reasoning_effort)) as stream:
+                    async for event in stream:
+                        if isinstance(event, TextDelta):
+                            content += event.text
+                            for sentence in buffer.push(event.text):
+                                if sentence.strip():
+                                    self._release(turn, blank + sentence, not released)
+                                    blank, released = "", True
+                                else:
+                                    blank += sentence  # white space is never sent on its own
+                        else:
+                            completion = event
+                if completion is None:
+                    raise LLMError("LLM stream ended without a completion", retryable=True)
+                rest = buffer.flush()
+                if rest.strip():
+                    self._release(turn, blank + rest, not released)
+            except _GuardFailed as failed:
+                await log_call({"content": content, "guard_problems": failed.problems, "aborted": True})
+                raise
+            except (LLMError, TimeoutError) as exc:
+                error = exc if isinstance(exc, LLMError) else LLMError("LLM call timed out", retryable=True)
+                await log_call({"content": content, "error": str(error)[:300], "attempt": attempt + 1})
+                if released or not error.retryable or attempt == self.retries:
+                    raise error from None
+                await self._sleep(self.backoff * 2 ** attempt)
+                continue
+            await log_call(completion.as_record(), completion.total_tokens)
+            return completion
+        raise LLMError("unreachable", retryable=False)  # pragma: no cover
+
+    def _city_index(self) -> CityIndex:
+        """City names for the guard, from the airline's current network (rebuilt when
+        locations.db changes)."""
+        net = self._networks.current()
+        if self._index is None or self._index[0] != net.fingerprint.id:
+            self._index = (net.fingerprint.id, CityIndex(net.cities))
+        return self._index[1]
+"""LLM settings from the environment. The key is read here and nowhere else; it is never logged
+and never part of a repr."""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Mapping
+
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+# DeepSeek's flash model id on 2026-11-23 (GET /models: "deepseek-flash" = DeepSeek-V4.1-Flash).
+DEFAULT_MODEL = "deepseek-flash"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EFFORTS = ("none", "low", "high", "max")  # what a request may ask for
+
+
+class LLMNotConfigured(Exception):
+    """No API key in the environment or the env file."""
+
+
+def read_env_file(path: str | Path) -> dict[str, str]:
+    """KEY=VALUE lines of a .env file (comments, blank lines and `export ` are skipped)."""
+    out: dict[str, str] = {}
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.removeprefix("export ").split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        out[key.strip()] = value
+    return out
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    api_key: str = field(repr=False)
+    base_url: str = DEFAULT_BASE_URL
+    model: str = DEFAULT_MODEL
+    # Thinking level (DeepSeek: `thinking` + `reasoning_effort`, docs "Thinking Mode"):
+    #   "low" | "high" | "max" -> {"thinking": {"type": "enabled"}, "reasoning_effort": <level>}
+    #   "none"                 -> {"thinking": {"type": "disabled"}}
+    #   "omit"                 -> neither field, for OpenAI-compatible servers that reject them
+    reasoning_effort: str = "high"
+
+    def __post_init__(self) -> None:
+        if self.reasoning_effort not in (*EFFORTS, "omit"):
+            raise ValueError(f"LLM_REASONING_EFFORT must be one of {', '.join(EFFORTS)} or omit")
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "LLMConfig":
+        """`LLM_API_KEY` (fallback `DEEPSEEK_API_KEY`), `LLM_BASE_URL`, `LLM_MODEL`,
+        `LLM_REASONING_EFFORT` (default high). Process environment first; then the file named by `OCEAN_ENV_FILE`
+        (default: `.env` in the repository root), so a worktree can point at the main checkout."""
+        env = os.environ if env is None else env
+        file_values = read_env_file(env.get("OCEAN_ENV_FILE") or REPO_ROOT / ".env")
+
+        def get(name: str) -> str:
+            return (env.get(name) or file_values.get(name) or "").strip()
+
+        key = get("LLM_API_KEY") or get("DEEPSEEK_API_KEY")
+        if not key:
+            raise LLMNotConfigured("set LLM_API_KEY (or DEEPSEEK_API_KEY), or OCEAN_ENV_FILE")
+        return cls(
+            api_key=key,
+            base_url=(get("LLM_BASE_URL") or DEFAULT_BASE_URL).rstrip("/"),
+            model=get("LLM_MODEL") or DEFAULT_MODEL,
+            reasoning_effort=(get("LLM_REASONING_EFFORT") or "high").lower(),
+        )
+"""Streaming client for an OpenAI-compatible chat completions API (plain httpx, no SDK).
+
+`stream()` yields `TextDelta`s as the model writes and exactly one `Completion` at the end, with
+the tool calls assembled from their fragments. Any failure is an `LLMError` that says whether a
+retry makes sense. The API key only ever goes into the Authorization header.
+"""
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, Protocol
+
+import httpx
+
+from .config import EFFORTS, LLMConfig
+
+MAX_TOKENS = 4096  # includes the reasoning tokens of thinking mode
+
+
+@dataclass(frozen=True)
+class TextDelta:
+    text: str
+
+
+@dataclass
+class Completion:
+    content: str = ""
+    tool_calls: list[dict] = field(default_factory=list)  # [{"id", "name", "arguments": str}]
+    finish_reason: str | None = None
+    usage: dict | None = None
+    reasoning: str = ""
+
+    def assistant_message(self) -> dict:
+        """The message to append to the context before the tool results (tool calls in their
+        wire-safe form, see `wire_tool_call`)."""
+        message: dict[str, Any] = {"role": "assistant", "content": self.content or ""}
+        if self.reasoning:
+            message["reasoning_content"] = self.reasoning
+        if self.tool_calls:
+            message["tool_calls"] = [wire_tool_call(c["id"], c["name"], c["arguments"]) for c in self.tool_calls]
+        return message
+
+    def as_record(self) -> dict:
+        """What is stored in llm_calls: the reasoning is kept verbatim for provenance and to pass
+        it back in later requests; it is never shown to the user and never guarded as reply text."""
+        return {"content": self.content, "reasoning_content": self.reasoning,
+                "tool_calls": self.tool_calls, "finish_reason": self.finish_reason, "usage": self.usage}
+
+    @property
+    def total_tokens(self) -> int | None:
+        return (self.usage or {}).get("total_tokens")
+
+
+_TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+INVALID_TOOL_NAME = "invalid_tool"
+
+
+def wire_tool_call(call_id: str, name: str, arguments: Any) -> dict:
+    """A tool call as it is sent back to the LLM. A name the API may reject (OpenAI:
+    `^[a-zA-Z0-9_-]{1,64}$`) becomes `invalid_tool`, and arguments that are not a JSON object
+    become `{}`, so one broken call cannot make every later request of the conversation fail.
+    The raw values stay in `tool_calls` (app.db) and in the tool result's error."""
+    if not isinstance(name, str) or not _TOOL_NAME.match(name):
+        name = INVALID_TOOL_NAME
+    if not isinstance(arguments, str):
+        arguments = json.dumps(arguments, ensure_ascii=False, separators=(",", ":"))
+    try:
+        ok = isinstance(json.loads(arguments), dict)
+    except (ValueError, RecursionError):
+        ok = False
+    return {"id": call_id, "type": "function",
+            "function": {"name": name, "arguments": arguments if ok else "{}"}}
+
+
+class _ThinkSplitter:
+    """Moves a `<think>...</think>` block at the start of `content` (servers that inline the
+    reasoning instead of using `reasoning_content`) out of the visible text."""
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self) -> None:
+        self.state = "start"  # start -> think -> text
+        self.buf = ""
+
+    def feed(self, text: str) -> tuple[str, str]:
+        """(visible text, reasoning text) for this chunk."""
+        if self.state == "text":
+            return text, ""
+        if self.state == "lead":  # white space right after </think> is dropped
+            text = text.lstrip()
+            if text:
+                self.state = "text"
+            return text, ""
+        self.buf += text
+        if self.state == "start":
+            head = self.buf.lstrip()
+            if self.OPEN.startswith(head):  # may still become "<think>"
+                return "", ""
+            if not head.startswith(self.OPEN):
+                self.state, out, self.buf = "text", self.buf, ""
+                return out, ""
+            self.state, self.buf = "think", head[len(self.OPEN):]
+        end = self.buf.find(self.CLOSE)
+        if end < 0:  # keep a possible partial "</think>" at the end
+            keep = max((k for k in range(1, len(self.CLOSE)) if self.buf.endswith(self.CLOSE[:k])), default=0)
+            reasoning, self.buf = self.buf[:len(self.buf) - keep], self.buf[len(self.buf) - keep:]
+            return "", reasoning
+        reasoning, rest = self.buf[:end], self.buf[end + len(self.CLOSE):].lstrip()
+        self.state, self.buf = ("text" if rest else "lead"), ""
+        return rest, reasoning
+
+    def finish(self) -> tuple[str, str]:
+        rest, self.buf = self.buf, ""
+        if self.state == "think":
+            return "", rest
+        return rest, ""
+
+
+class LLMError(Exception):
+    def __init__(self, message: str, *, retryable: bool, status: int | None = None):
+        super().__init__(message)
+        self.retryable = retryable
+        self.status = status
+
+
+class LLM(Protocol):
+    model: str
+
+    def stream(self, messages: list[dict], tools: list[dict], *,
+               reasoning_effort: str | None = None) -> AsyncIterator[TextDelta | Completion]:
+        """`reasoning_effort`: per-request thinking level (none / low / high / max); None = the
+        client's configured default."""
+        ...
+
+
+class OpenAIChatClient:
+    """One instance per event loop (it keeps an httpx.AsyncClient); `await aclose()` at shutdown."""
+
+    def __init__(self, config: LLMConfig, *, transport: httpx.AsyncBaseTransport | None = None,
+                 timeout: httpx.Timeout | None = None, temperature: float = 0,
+                 max_tokens: int = MAX_TOKENS):
+        self.config = config
+        self.model = config.model
+        self.reasoning_effort = config.reasoning_effort
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self._transport = transport
+        self._timeout = timeout or httpx.Timeout(connect=10, read=60, write=30, pool=10)
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(transport=self._transport, timeout=self._timeout)
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    def body(self, messages: list[dict], tools: list[dict], reasoning_effort: str | None = None) -> dict:
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        effort = reasoning_effort or self.reasoning_effort
+        if reasoning_effort is not None and reasoning_effort not in EFFORTS:
+            raise ValueError(f"reasoning_effort must be one of {', '.join(EFFORTS)}")
+        if effort == "none":
+            body["thinking"] = {"type": "disabled"}
+        elif effort != "omit":
+            # thinking mode ignores `temperature` (DeepSeek docs); it is sent anyway, harmlessly
+            body["thinking"] = {"type": "enabled"}
+            body["reasoning_effort"] = effort
+        return body
+
+    def _scrub(self, text: str) -> str:
+        return text.replace(self.config.api_key, "***") if self.config.api_key else text
+
+    async def stream(self, messages: list[dict], tools: list[dict], *,
+                     reasoning_effort: str | None = None) -> AsyncIterator[TextDelta | Completion]:
+        body = self.body(messages, tools, reasoning_effort)
+        done = Completion()
+        think = _ThinkSplitter()
+        calls: dict[int, dict] = {}
+        headers = {"Authorization": f"Bearer {self.config.api_key}", "Accept": "text/event-stream"}
+        try:
+            async with self._http().stream("POST", f"{self.config.base_url}/chat/completions",
+                                           json=body, headers=headers) as response:
+                if response.status_code != 200:
+                    status = response.status_code
+                    detail = ""
+                    if status not in (401, 403):  # an auth error body may quote the key
+                        detail = ": " + self._scrub((await response.aread()).decode("utf-8", "replace"))[:300]
+                    raise LLMError(f"LLM HTTP {status}{detail}", status=status,
+                                   retryable=status in (408, 409, 429) or status >= 500)
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue  # blank separators, `: keep-alive` comments
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except ValueError:
+                        raise LLMError("LLM sent a chunk that is not JSON", retryable=True) from None
+                    if chunk.get("error"):
+                        raise LLMError("LLM stream error: " + self._scrub(json.dumps(chunk["error"]))[:300],
+                                       retryable=True)
+                    if chunk.get("usage"):
+                        done.usage = chunk["usage"]
+                    for choice in chunk.get("choices") or []:
+                        if choice.get("index", 0) != 0:
+                            continue
+                        delta = choice.get("delta") or {}
+                        if delta.get("reasoning_content"):  # thinking: collected, never yielded
+                            done.reasoning += delta["reasoning_content"]
+                        if delta.get("content"):
+                            visible, thought = think.feed(delta["content"])
+                            done.reasoning += thought
+                            if visible:
+                                done.content += visible
+                                yield TextDelta(visible)
+                        for part in delta.get("tool_calls") or []:
+                            call = calls.setdefault(part.get("index", 0), {"id": "", "name": "", "arguments": ""})
+                            function = part.get("function") or {}
+                            call["id"] = part.get("id") or call["id"]
+                            call["name"] += function.get("name") or ""
+                            call["arguments"] += function.get("arguments") or ""
+                        if choice.get("finish_reason"):
+                            done.finish_reason = choice["finish_reason"]
+        except LLMError:
+            raise
+        except (httpx.HTTPError, httpx.StreamError) as exc:  # timeouts, connections, cut streams
+            raise LLMError(f"LLM transport error: {type(exc).__name__}", retryable=True) from None
+        except Exception as exc:  # a chunk of an unexpected shape, undecodable bytes, ...
+            raise LLMError(f"LLM stream could not be read: {type(exc).__name__}", retryable=True) from None
+        visible, thought = think.finish()
+        done.reasoning += thought
+        if visible:
+            done.content += visible
+            yield TextDelta(visible)
+        if done.finish_reason is None:
+            raise LLMError("LLM stream ended without a finish_reason", retryable=True)
+        for index in sorted(calls):
+            call = calls[index]
+            call["id"] = call["id"] or f"call_{index}"
+            done.tool_calls.append(call)
+        yield done
