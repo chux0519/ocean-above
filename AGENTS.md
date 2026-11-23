@@ -116,9 +116,12 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 
 ## Authorizations
 - Standing (no need to ask): install dependencies locally, run tests / lint / dev servers, commit on branches; deploy
-  the test demo `ocean-above.potafree.net` (homelab via Cloudflare Tunnel: tunnel, DNS record, compose up/restart).
+  releases of `ocean-above.potafree.net` to the production VPS (user, 2026-11-24): only merged `main` commits whose
+  tests pass; build images off the VPS, ship, `up -d --no-build --pull never`, verify, and log commit + checks in
+  docs/deploy.md.
 - Standing since 2026-11-23: push branches and `main` to the private repo `github.com/chux0519/ocean-above`.
-- Always ask: force-push or history rewrites, making the repo public, opening PRs to other repos, any other deploy (other hosts/domains, the VPS), deleting data, anything public or
+- Always ask: force-push or history rewrites, making the repo public, opening PRs to other repos, any other deploy
+  (other hosts/domains/services), deleting data, anything public or
   hard to undo.
 - An authorization never extends to a different context. If the tool refuses an action, ask; don't work around.
 
