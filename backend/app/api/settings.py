@@ -24,7 +24,8 @@ class Settings:
     invite_codes: list[str] = field(default_factory=list, repr=False)
     trusted_proxies: tuple = field(default_factory=lambda: parse_networks(None))
     login_attempts_per_minute: int = 10
-    daily_messages_per_user: int = 50  # shown in /api/me usage; enforced by the limits module (L2)
+    daily_messages_per_user: int = 50  # chat messages per user per UTC day (limits.py)
+    daily_token_budget: int = 2_000_000  # site-wide sum of llm_calls.tokens per UTC day (limits.py)
     ping_interval: float = 2.0  # /api/debug/sse-ping spacing, seconds
 
     @property
@@ -54,4 +55,6 @@ class Settings:
         s.trusted_proxies = parse_networks(env.get("TRUSTED_PROXIES"))
         if env.get("DAILY_MESSAGES_PER_USER", "").strip().isdigit():
             s.daily_messages_per_user = int(env["DAILY_MESSAGES_PER_USER"])
+        if env.get("DAILY_TOKEN_BUDGET", "").strip().replace("_", "").isdigit():
+            s.daily_token_budget = int(env["DAILY_TOKEN_BUDGET"].strip().replace("_", ""))
         return s

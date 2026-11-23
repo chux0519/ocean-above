@@ -11,8 +11,11 @@ from ..core.network import NetworkDataError
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str, headers: dict | None = None):
+    def __init__(self, status: int, code: str, message: str, headers: dict | None = None,
+                 extra: dict | None = None):
+        """`extra`: more keys inside `error` (429 rate_limited adds `scope` and `resets_at`)."""
         self.status, self.code, self.message, self.headers = status, code, message, headers
+        self.extra = extra
 
 
 def body(code: str, message: str) -> dict:
@@ -29,7 +32,9 @@ _BY_STATUS = {401: "unauthorized", 404: "not_found", 405: "method_not_allowed", 
 def install_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api(_: Request, e: ApiError):
-        response = respond(e.status, e.code, e.message)
+        content = body(e.code, e.message)
+        content["error"].update(e.extra or {})
+        response = JSONResponse(content, status_code=e.status)
         response.headers.update(e.headers or {})
         return response
 

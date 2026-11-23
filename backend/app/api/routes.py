@@ -6,7 +6,6 @@ import hmac
 import json
 import logging
 import math
-from datetime import datetime, time as dtime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -22,6 +21,7 @@ from . import session
 from .google import GoogleVerifier, InvalidToken, KeysUnavailable
 from .logins import InviteCodes, Throttle, clean_name, client_ip, name_key
 from .errors import ApiError, install_handlers, respond
+from .limits import reserve_message, usage_view
 from .settings import SESSION_TTL_SECONDS, Settings
 
 PING_COUNT = 5
@@ -70,13 +70,6 @@ def _octets(text: str) -> bytes:
 def user_view(user: dict) -> dict:
     return {"id": user["id"], "display_name": user["display_name"], "auth_provider": user["auth_provider"],
             "email": user["email"]}
-
-
-def usage_view(settings: Settings, now: datetime) -> dict:
-    """Stub until the limits module (L2) counts messages; the shape is the contract's `Usage`."""
-    tomorrow = datetime.combine(now.astimezone(timezone.utc).date() + timedelta(days=1), dtime(0), timezone.utc)
-    return {"messages_today": 0, "daily_limit": settings.daily_messages_per_user,
-            "resets_at": tomorrow.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 def summary_view(store: Store, user_id: str, summary: dict) -> dict:
@@ -180,8 +173,8 @@ def build_router() -> APIRouter:
 
     @r.get("/me")
     def me(request: Request, user: dict = Depends(current_user)) -> dict:
-        store: Store = request.app.state.store
-        return {**user_view(user), "usage": usage_view(request.app.state.settings, store.clock())}
+        return {**user_view(user), "usage": usage_view(request.app.state.store, request.app.state.settings,
+                                                        user["id"])}
 
     @r.get("/conversations")
     def conversations(request: Request, user: dict = Depends(current_user)) -> dict:
@@ -222,10 +215,17 @@ def build_router() -> APIRouter:
         if agent is None:
             raise ApiError(503, "llm_unavailable", "The assistant is not configured on this server.")
         try:
-            events = agent.stream_turn(user["id"], conversation_id, body.text)
+            reservation = await asyncio.to_thread(reserve_message, app.state.store, app.state.settings,
+                                                  user["id"], conversation_id)
         except NotFound:
             raise ApiError(404, "not_found", "Conversation not found.") from None
-        except ValueError as e:
+        try:
+            events = agent.stream_turn(user["id"], conversation_id, body.text)
+        except (NotFound, ValueError) as e:
+            # refused before anything was stored: the slot is given back
+            await asyncio.to_thread(app.state.store.release_message, user["id"], reservation)
+            if isinstance(e, NotFound):
+                raise ApiError(404, "not_found", "Conversation not found.") from None
             raise ApiError(400, "bad_request", str(e) or "The message is not valid.") from None
         return StreamingResponse(encode_stream(events), media_type=SSE_MEDIA_TYPE, headers=SSE_HEADERS)
 

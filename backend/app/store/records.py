@@ -194,6 +194,30 @@ def list_tool_calls(con, message_id: str) -> list[dict]:
     return [_row(r, ("args", "result")) for r in rows]
 
 
+# --- usage limits ------------------------------------------------------------------------
+def add_message_usage(con, now: str, user_id: str, conversation_id: str) -> str:
+    uid = new_id("mu")
+    con.execute("INSERT INTO message_usage (id, user_id, conversation_id, created_at) VALUES (?, ?, ?, ?)",
+                (uid, user_id, conversation_id, now))
+    return uid
+
+
+def delete_message_usage(con, user_id: str, usage_id: str) -> None:
+    con.execute("DELETE FROM message_usage WHERE id = ? AND user_id = ?", (usage_id, user_id))
+
+
+def messages_since(con, user_id: str, since: str) -> int:
+    """Chat messages the user sent (let through the limits) at or after `since`."""
+    return con.execute("SELECT COUNT(*) FROM message_usage WHERE user_id = ? AND created_at >= ?",
+                       (user_id, since)).fetchone()[0]
+
+
+def tokens_since(con, since: str) -> int:
+    """Site-wide LLM tokens (`llm_calls.tokens`, all users) at or after `since`; NULL counts 0."""
+    return con.execute("SELECT COALESCE(SUM(tokens), 0) FROM llm_calls WHERE created_at >= ?",
+                       (since,)).fetchone()[0]
+
+
 # --- quotes --------------------------------------------------------------------------------
 def insert_quote(con, *, now: str, expires_at: str, conversation_id: str, user_id: str,
                  origin: str, destination: str, legs: list[dict], distance: str, price: str,

@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterator
 
 Clock = Callable[[], datetime]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_V1 = """
 CREATE TABLE users (
@@ -129,7 +129,21 @@ CREATE TRIGGER tickets_are_immutable BEFORE UPDATE ON tickets
 BEGIN SELECT RAISE(ABORT, 'tickets are immutable'); END;
 """
 
-_MIGRATIONS = {1: _SCHEMA_V1}
+# v2 (L2 usage limits): one row per chat message the limits let through, written in the same
+# transaction as the count that allowed it, so two racing requests cannot both take the last slot.
+_SCHEMA_V2 = """
+CREATE TABLE message_usage (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              TEXT NOT NULL UNIQUE,
+    user_id         TEXT NOT NULL REFERENCES users(id),
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX message_usage_by_user ON message_usage(user_id, created_at);
+CREATE INDEX llm_calls_by_time ON llm_calls(created_at);
+"""
+
+_MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2}
 
 
 def utc_now() -> datetime:
@@ -145,6 +159,12 @@ def iso(moment: datetime) -> str:
 
 def parse_iso(text: str) -> datetime:
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def day_start(moment: datetime) -> datetime:
+    """00:00 UTC of the moment's UTC day (usage limits count per UTC day)."""
+    utc = moment.astimezone(timezone.utc)
+    return datetime(utc.year, utc.month, utc.day, tzinfo=timezone.utc)
 
 
 def new_id(prefix: str) -> str:
@@ -328,6 +348,44 @@ class Store:
         with self.read() as con:
             records.require_message(con, user_id, message_id)
             return records.list_tool_calls(con, message_id)
+
+    # --- usage limits (L2) ---
+    def reserve_message(self, user_id: str, conversation_id: str, *, daily_limit: int,
+                        token_budget: int) -> tuple[str | None, str | None]:
+        """Count and reserve in one `BEGIN IMMEDIATE` transaction: `(reservation_id, None)` when the
+        message may go to the assistant, else `(None, scope)` with scope "user" (the user's messages
+        today reached `daily_limit`) or "site" (today's `llm_calls.tokens` reached `token_budget`);
+        nothing is written then. Today = the UTC day of the store clock."""
+        from . import records
+
+        now = self.clock()
+        since = iso(day_start(now))
+        with self.write() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            if records.messages_since(con, user_id, since) >= daily_limit:
+                return None, "user"
+            if records.tokens_since(con, since) >= token_budget:
+                return None, "site"
+            return records.add_message_usage(con, iso(now), user_id, conversation_id), None
+
+    def release_message(self, user_id: str, reservation_id: str) -> None:
+        """Undo a reservation whose message was refused before anything was stored (bad text)."""
+        from . import records
+
+        with self.write() as con:
+            records.delete_message_usage(con, user_id, reservation_id)
+
+    def messages_today(self, user_id: str) -> int:
+        from . import records
+
+        with self.read() as con:
+            return records.messages_since(con, user_id, iso(day_start(self.clock())))
+
+    def tokens_today(self) -> int:
+        from . import records
+
+        with self.read() as con:
+            return records.tokens_since(con, iso(day_start(self.clock())))
 
 
 def _split_statements(script: str) -> list[str]:
