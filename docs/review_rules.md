@@ -13,3 +13,7 @@ Pitfalls we have hit. `R*` rules are checked by `tool/review_lint.py` (run one w
 | M04 | No booking path that bypasses explicit confirmation of the exact quoted route, distance and price. | Requirement 7. |
 | M05 | UI changes ship with an Impeccable `critique`/`audit` result and a `detect` run; P0–P1 fixed. | User decision 2026-11-23. |
 | M06 | New dependency named in the plan with a reason; no agent/LLM frameworks. | Minimal-dependency rule. |
+| M07 | Each iteration plan has a "Take-home check" against `Quotr Agent Dev Engineer take-home.md`; the take-home wins on conflict. | User decision 2026-11-23. |
+| M08 | Exact values in computation and storage; rounding only at display. | User decision 2026-11-23: avoid accumulated rounding error. |
+| M09 | Booking re-validates against current `locations.db` and the business DB; mismatch → re-quote + re-confirm. | User decision 2026-11-23. |
+| M10 | UI acceptance includes ego-browser screenshots at desktop and mobile widths. | User decision 2026-11-23. |

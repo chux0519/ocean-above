@@ -23,12 +23,16 @@ and colour that means two things.
 - <Duration, curve>. Reduce Motion → 0. No loops except <the one allowed indeterminate indicator>.
 
 ## 5. Components
-- Own component layer: <list>. New UI uses it, not raw framework widgets.
+- Component layer: shadcn/ui components (copied into `frontend/components/ui`) on Tailwind CSS, wrapped by
+  app components (itinerary card, ticket card, chat message, conversation list). New UI uses these.
 
 ## 6. Screens
 <Per screen: hierarchy, primary action, empty state, errors.>
 
 ## 7. Exceptions (dated)
+- 2026-11-23: mobile is first-class (≥ 360 px wide, no horizontal scroll); screenshots at desktop + mobile.
+- 2026-11-23: numbers are shown rounded (distance 1 decimal km, price to the cent) but always computed and
+  stored exact.
 - 2026-11-23: UI is reviewed with Impeccable (critique / audit / detect); its findings that conflict with this
   file go to the user as a design-conflicts table.
 - <YYYY-MM-DD: decision, why, limits.>

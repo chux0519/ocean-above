@@ -36,11 +36,15 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 
 ## Plan first, bounded rounds
 - Plan + acceptance criteria → user confirms → implement. Scope changes need a new confirmation.
+- **Before every iteration**, check the plan against `Quotr Agent Dev Engineer take-home.md` requirement by
+  requirement; where they conflict the take-home wins — adjust the plan and record the check in the plan's
+  "Take-home check" section.
 - At most 3 implement → accept → review rounds per iteration; then stop and ask the user.
 - An agent saying "done" is not evidence. Record the exact source state that was tested.
 
 ## Evidence tiers
-- **A (default):** host-rendered screenshots + analyze + lint + test diff.
+- **A (default):** host-rendered screenshots + analyze + lint + test diff. Web UI screenshots and UI tests are
+  driven with ego-browser (ego lite), at a desktop and a mobile viewport (e.g. 1440×900 and 390×844).
 - **B:** one device / one theme / relevant scenes, only when A cannot prove it (keyboard, timing, webview,
   gestures, native). Coordinator only. Timing issues: record once, cut frames at PHASE marks.
 - **C:** full matrix once before a store submission or external release.
@@ -53,6 +57,10 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   plus `npx impeccable detect` on `frontend/` sources and on the running dev-server URL (rendered-only rules
   such as contrast need the URL). P0–P1 are fixed in the same round. Install once the frontend exists
   (`npx impeccable install`, project scope, accept the design hook).
+- Component library / CSS framework allowed (e.g. shadcn/ui + Tailwind CSS); UI built with them is also
+  reviewed with the matching skill or guidelines for that library, in addition to Impeccable.
+- Mobile first-class: every screen works at phone width (≥ 360 px), touch targets ≥ 44×44, no horizontal
+  scroll; each UI acceptance includes mobile screenshots.
 - Every screenshot gets a review; obvious defects are fixed in the same round; advice that conflicts with
   DESIGN.md goes to the user as a "design conflicts" table.
 
@@ -78,11 +86,16 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   - deterministic replay: the agent loop runs against a scripted fake LLM in the normal test suite, so loop,
     tool dispatch and confirmation gating are tested for free; real-model evals run on demand and record
     model, date, pass rate and cost in the iteration's acceptance notes.
+- **Numbers:** compute and store exact values (full-precision decimals from integer coordinates); round only
+  when displaying. Never feed a rounded value back into a calculation.
+- **Freshness before booking:** a booking re-reads `locations.db` (fingerprint check), recomputes the quoted
+  route and compares it with the stored quote and the business DB; any difference → no booking, re-quote and
+  ask the user to confirm again.
 - Booking/confirmation state rules get numbered invariants in `docs/design/state_invariants.md` and a
   model-based test.
 
 ## Dependencies and prior art
-- Minimal dependencies; no big frameworks. The LLM agent loop (messages, tool schemas, tool dispatch,
+- Minimal dependencies; no big frameworks (UI component libraries such as shadcn/ui + Tailwind are allowed). The LLM agent loop (messages, tool schemas, tool dispatch,
   confirmation gate) is our own code over a plain OpenAI-compatible HTTP client — no LangChain, no agent SDKs.
 - For well-defined deterministic algorithms (shortest path etc.), prefer a stable, fast, well-known library
   if it fits (e.g. `networkx` / `scipy.sparse.csgraph`) over a hand-rolled one; it must still be covered by

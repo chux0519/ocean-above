@@ -2,6 +2,7 @@
 
 User request (date, verbatim): 「…」
 
+## Take-home check (requirement by requirement; take-home wins on conflict)
 ## Goal
 ## Scope (and out of scope)
 ## Design (screens, states, rules — cite DESIGN.md / invariant ids)
