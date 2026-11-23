@@ -1,0 +1,801 @@
+[project]
+name = "ocean-above-backend"
+version = "0.1.0"
+description = "Ocean Above booking assistant - backend (deterministic core + API)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "networkx>=3.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "hypothesis>=6.100",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-p no:cacheprovider"
+markers = [
+    "slow: exhaustive cross-checks (still part of the default run)",
+]
+"""FastAPI entry point. Run from backend/: `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`."""
+from __future__ import annotations
+
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+
+from .core.network import NetworkProvider
+
+DEFAULT_DB = Path(__file__).resolve().parents[2] / "locations.db"
+
+
+def create_app(db_path: str | Path | None = None) -> FastAPI:
+    path = Path(db_path or os.environ.get("LOCATIONS_DB") or DEFAULT_DB)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.networks = NetworkProvider(path)
+        app.state.networks.current()  # fail at startup, not on the first request, if the db is bad
+        yield
+
+    app = FastAPI(title="Ocean Above API", lifespan=lifespan)
+
+    @app.get("/health")
+    def health(request: Request) -> dict:
+        net = request.app.state.networks.current()
+        return {
+            "status": "ok",
+            "network": {
+                "cities": len(net.cities),
+                "hubs": len(net.hubs),
+                "hub_links": len(net.hub_links),
+                "unserved": len(net.cities) - len(net.served),
+                "fingerprint": net.fingerprint.id,
+            },
+        }
+
+    @app.get("/api/cities")
+    def cities(request: Request) -> dict:
+        """Debug listing straight from the loaded network (database order)."""
+        net = request.app.state.networks.current()
+        return {
+            "fingerprint": net.fingerprint.id,
+            "count": len(net.cities),
+            "cities": [
+                {
+                    "name": c.name,
+                    "coordinate": [str(c.x), str(c.y)],
+                    "is_hub": c.is_hub,
+                    "served": net.is_served(c.name),
+                    "connected_hubs": list(c.connected_hubs),
+                }
+                for c in net.cities.values()
+            ],
+        }
+
+    return app
+
+
+app = create_app()
+"""Read-only view of locations.db: cities, hubs, flights, and a fingerprint of the file.
+
+locations.db is the single source of truth. This module only reads it (sqlite `mode=ro`),
+validates it strictly (bad data raises, nothing is silently repaired) and builds an immutable
+`Network`. Nothing here is hard-coded or copied from the database.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+import sqlite3
+import threading
+from dataclasses import dataclass, field
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+_COORD_RE = re.compile(r"-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?\Z")
+
+
+class NetworkDataError(Exception):
+    """locations.db is missing, unreadable or violates the documented format."""
+
+
+@dataclass(frozen=True)
+class Fingerprint:
+    """Identity of the database file a Network was built from.
+
+    `id` (the content hash) is what quotes store and compare; mtime/size are only the cheap
+    change detector used by `NetworkProvider`.
+    """
+
+    sha256: str
+    size: int
+    mtime_ns: int
+
+    @property
+    def id(self) -> str:
+        return f"sha256:{self.sha256}"
+
+
+@dataclass(frozen=True)
+class City:
+    name: str
+    x: Decimal
+    y: Decimal
+    is_hub: bool
+    connected_hubs: tuple[str, ...]  # non-hub only, in database order
+
+
+@dataclass(frozen=True, eq=False)
+class Network:
+    cities: Mapping[str, City]  # database order
+    hub_links: frozenset[frozenset[str]]
+    fingerprint: Fingerprint
+    # Derived, filled once by `build_network`; never mutated afterwards.
+    neighbors: Mapping[str, frozenset[str]] = field(repr=False, default_factory=dict)
+    hubs: tuple[str, ...] = ()
+    served: tuple[str, ...] = ()
+    fold_index: Mapping[str, tuple[str, ...]] = field(repr=False, default_factory=dict)
+    hub_paths: Mapping[tuple[str, str], tuple[tuple[str, ...], ...]] = field(
+        repr=False, default_factory=dict
+    )
+
+    def has_flight(self, a: str, b: str) -> bool:
+        return b in self.neighbors.get(a, ())
+
+    def is_served(self, name: str) -> bool:
+        """A city has service when at least one direct flight touches it."""
+        return bool(self.neighbors.get(name))
+
+
+def _fail(msg: str) -> None:
+    raise NetworkDataError(msg)
+
+
+def build_network(
+    location_rows: Iterable[tuple[Any, Any, Any, Any]],
+    link_rows: Iterable[tuple[Any, Any]],
+    fingerprint: Fingerprint,
+) -> Network:
+    """Validate raw rows (`city_name, coordinate, is_hub, connected_hubs` and `hub_a, hub_b`)
+    and build the Network. Used for the real database and for generated test graphs alike."""
+    raw: list[tuple[str, Decimal, Decimal, bool, str]] = []
+    seen: set[str] = set()
+    for row in location_rows:
+        if len(row) != 4:
+            _fail(f"locations row has {len(row)} columns, expected 4")
+        name, coord, is_hub, connected = row
+        if not isinstance(name, str) or not name or name != name.strip() or ";" in name:
+            _fail(f"bad city_name: {name!r}")
+        if name in seen:
+            _fail(f"duplicate city_name: {name!r}")
+        seen.add(name)
+        if not isinstance(coord, str) or not _COORD_RE.match(coord):
+            _fail(f"bad coordinate for {name!r}: {coord!r} (expected 'x,y')")
+        if isinstance(is_hub, bool) or is_hub not in (0, 1) or not isinstance(is_hub, int):
+            _fail(f"bad is_hub for {name!r}: {is_hub!r} (expected 0 or 1)")
+        if not isinstance(connected, str):
+            _fail(f"bad connected_hubs for {name!r}: {connected!r}")
+        xs, ys = coord.split(",")
+        raw.append((name, Decimal(xs), Decimal(ys), bool(is_hub), connected))
+
+    hub_names = {name for name, _, _, is_hub, _ in raw if is_hub}
+    cities: dict[str, City] = {}
+    adj: dict[str, set[str]] = {name: set() for name in seen}
+    for name, x, y, is_hub, connected in raw:
+        if is_hub:
+            if connected != "":
+                _fail(f"hub {name!r} must have empty connected_hubs, got {connected!r}")
+            spokes: tuple[str, ...] = ()
+        else:
+            spokes = tuple(connected.split(";")) if connected else ()
+            if len(set(spokes)) != len(spokes):
+                _fail(f"duplicate hub in connected_hubs of {name!r}: {connected!r}")
+            for hub in spokes:
+                if hub not in seen:
+                    _fail(f"connected_hubs of {name!r} names an unknown city: {hub!r}")
+                if hub not in hub_names:
+                    _fail(f"connected_hubs of {name!r} names a non-hub city: {hub!r}")
+                adj[name].add(hub)
+                adj[hub].add(name)
+        cities[name] = City(name, x, y, is_hub, spokes)
+
+    links: set[frozenset[str]] = set()
+    for row in link_rows:
+        if len(row) != 2:
+            _fail(f"hub_links row has {len(row)} columns, expected 2")
+        a, b = row
+        for end in (a, b):
+            if end not in seen:
+                _fail(f"hub_links names an unknown city: {end!r}")
+            if end not in hub_names:
+                _fail(f"hub_links names a non-hub city: {end!r}")
+        if a == b:
+            _fail(f"hub_links has a self-loop: {a!r}")
+        links.add(frozenset((a, b)))  # (a, b) and (b, a) describe the same two-way flight
+        adj[a].add(b)
+        adj[b].add(a)
+
+    # Function-level imports: places and routing depend on this module.
+    from .places import build_fold_index
+    from .routing import build_hub_paths
+
+    net = Network(
+        cities=cities,
+        hub_links=frozenset(links),
+        fingerprint=fingerprint,
+        neighbors={name: frozenset(ns) for name, ns in adj.items()},
+        hubs=tuple(name for name in cities if cities[name].is_hub),
+        served=tuple(name for name in cities if adj[name]),
+        fold_index=build_fold_index(cities),
+    )
+    object.__setattr__(net, "hub_paths", build_hub_paths(net))
+    return net
+
+
+def _stat(path: Path) -> tuple[int, int]:
+    try:
+        st = path.stat()
+    except OSError as exc:
+        raise NetworkDataError(f"cannot stat {path}: {exc}") from exc
+    return st.st_mtime_ns, st.st_size
+
+
+def _sha256(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise NetworkDataError(f"cannot read {path}: {exc}") from exc
+
+
+def _read_rows(path: Path) -> tuple[list[tuple], list[tuple]]:
+    uri = path.resolve().as_uri() + "?mode=ro"
+    try:
+        con = sqlite3.connect(uri, uri=True)
+        try:
+            locations = con.execute(
+                "SELECT city_name, coordinate, is_hub, connected_hubs FROM locations ORDER BY rowid"
+            ).fetchall()
+            links = con.execute("SELECT hub_a, hub_b FROM hub_links ORDER BY rowid").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error as exc:
+        raise NetworkDataError(f"cannot read {path}: {exc}") from exc
+    return locations, links
+
+
+def load_network(path: str | Path) -> Network:
+    """Load and validate the database. The hash and the rows are taken from the same file state:
+    if the file changes while it is being read, the read is repeated."""
+    path = Path(path)
+    for _ in range(3):
+        before = _stat(path)
+        digest = _sha256(path)
+        locations, links = _read_rows(path)
+        if _stat(path) == before and _sha256(path) == digest:
+            return build_network(locations, links, Fingerprint(digest, before[1], before[0]))
+    raise NetworkDataError(f"{path} keeps changing while being read")
+
+
+class NetworkProvider:
+    """Hands out the Network for the current content of the database file.
+
+    `current()` stats the file on every call; when mtime or size differ from the loaded state the
+    content is hashed, and the Network is rebuilt only if the hash differs too. `strict=True`
+    hashes unconditionally (for booking re-validation, where a missed change is not acceptable).
+    A database that became invalid raises instead of serving the previous Network.
+    """
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self._lock = threading.Lock()
+        self._net: Network | None = None
+        self._stat: tuple[int, int] | None = None
+
+    def current(self, strict: bool = False) -> Network:
+        with self._lock:
+            stat = _stat(self.path)
+            if self._net is not None:
+                if stat == self._stat and not strict:
+                    return self._net
+                if _sha256(self.path) == self._net.fingerprint.sha256 and _stat(self.path) == stat:
+                    self._stat = stat
+                    return self._net
+            self._net = None  # never serve a stale network after a failed reload
+            net = load_network(self.path)
+            self._net = net
+            self._stat = (net.fingerprint.mtime_ns, net.fingerprint.size)
+            return net
+"""City name resolution and nearest-served-city lookup. Deterministic; never invents a city."""
+from __future__ import annotations
+
+import difflib
+import unicodedata
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Iterable, Literal, Mapping
+
+from .pricing import new_context, point_distance, stored
+
+if TYPE_CHECKING:
+    from .network import City, Network
+
+MAX_SUGGESTIONS = 5
+SUGGESTION_CUTOFF = 0.6
+
+# Letters that NFKD does not decompose into base letter + combining mark.
+_EXTRA_FOLDS = str.maketrans(
+    {"ø": "o", "ł": "l", "đ": "d", "ð": "d", "þ": "th", "æ": "ae", "œ": "oe", "ı": "i"}
+)
+
+
+def fold(name: str) -> str:
+    """Matching key: case-insensitive, accent-insensitive, whitespace-normalized."""
+    decomposed = unicodedata.normalize("NFKD", name)
+    stripped = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return " ".join(stripped.casefold().translate(_EXTRA_FOLDS).split())
+
+
+def build_fold_index(cities: Iterable[str]) -> Mapping[str, tuple[str, ...]]:
+    """fold key -> every city with that key (a list on purpose: `San Jose` and `San José` share
+    a key, and a one-to-one dict would silently drop one of them)."""
+    index: dict[str, list[str]] = {}
+    for name in cities:
+        index.setdefault(fold(name), []).append(name)
+    return {key: tuple(sorted(names)) for key, names in index.items()}
+
+
+@dataclass(frozen=True)
+class Resolution:
+    status: Literal["ok", "ambiguous", "unknown"]
+    query: str
+    city: str | None = None  # canonical name, status "ok" only
+    similar_names: tuple[str, ...] = ()  # "ok": other cities equal after folding
+    candidates: tuple[str, ...] = ()  # "ambiguous": all matches; "unknown": close names (<= 5)
+
+
+def resolve(net: "Network", name: str) -> Resolution:
+    """Exact name first (NFC, trimmed); then the folded key, which must hit exactly one city.
+    Several hits are returned as `ambiguous`, never auto-picked."""
+    if not isinstance(name, str):
+        return Resolution("unknown", repr(name))
+    exact = unicodedata.normalize("NFC", name).strip()
+    key = fold(exact)
+    same_key = net.fold_index.get(key, ())
+    if exact in net.cities:
+        return Resolution("ok", name, exact, tuple(n for n in same_key if n != exact))
+    if len(same_key) == 1:
+        return Resolution("ok", name, same_key[0])
+    if same_key:
+        return Resolution("ambiguous", name, candidates=same_key)
+    if not key:
+        return Resolution("unknown", name)
+    close = difflib.get_close_matches(
+        key, list(net.fold_index), n=MAX_SUGGESTIONS, cutoff=SUGGESTION_CUTOFF
+    )
+    names = [n for k in close for n in net.fold_index[k]]
+    return Resolution("unknown", name, candidates=tuple(names[:MAX_SUGGESTIONS]))
+
+
+@dataclass(frozen=True)
+class Nearby:
+    city: str
+    distance: str  # straight-line km, 30 dp (same arithmetic as leg distances)
+
+
+def nearest_served(
+    net: "Network", city: str, k: int = 3, exclude: Iterable[str] = ()
+) -> tuple[Nearby, ...]:
+    """The k served cities closest to `city` (a canonical name), nearest first; ties by name.
+    `city` itself and everything in `exclude` are skipped."""
+    origin: "City" = net.cities[city]
+    skip = {city, *exclude}
+    ctx = new_context()
+    ranked = sorted(
+        (
+            (point_distance(origin.x, origin.y, c.x, c.y, ctx), name)
+            for name in net.served
+            if name not in skip
+            for c in (net.cities[name],)
+        ),
+    )
+    return tuple(Nearby(name, stored(d, ctx)) for d, name in ranked[: max(k, 0)])
+"""Canonical distance and price computation.
+
+`price_path` is the ONLY place in the system that turns a city sequence into a distance and a
+price. Quotes, booking re-validation and tests all call it. Everything runs in an explicit Decimal
+context (prec 50, ROUND_HALF_EVEN) that is created per call, so results never depend on the
+calling thread's default context (28 digits).
+
+Stored values are strings with 30 decimal places ("high-precision", not "exact": a leg distance is
+exact only when dx² + dy² is a perfect square). Rounding to display precision happens only in
+`fmt_km` / `fmt_usd`, and a displayed value is never fed back into a calculation.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Context, Decimal
+from typing import TYPE_CHECKING, Sequence
+
+if TYPE_CHECKING:  # no runtime import: network.py depends on this module
+    from .network import Network
+
+PRECISION = 50
+STORED_PLACES = 30
+PRICE_PER_KM = Decimal("0.13")  # US dollars per km (take-home requirement 6)
+FORMULA = (
+    "price = sum(sqrt(dx^2 + dy^2)) * 0.13 USD; Decimal prec 50, ROUND_HALF_EVEN, stored to 30 dp"
+)
+
+_Q_STORED = Decimal(f"1e-{STORED_PLACES}")
+_Q_KM = Decimal("0.1")
+_Q_CENT = Decimal("0.01")
+
+
+class InvalidPathError(ValueError):
+    """The city sequence is not a bookable itinerary on this network."""
+
+
+def new_context() -> Context:
+    """A fresh canonical context. Fresh per computation: Context objects are mutable (flags)."""
+    return Context(prec=PRECISION, rounding=ROUND_HALF_EVEN)
+
+
+def point_distance(ax: Decimal, ay: Decimal, bx: Decimal, by: Decimal, ctx: Context) -> Decimal:
+    """Euclidean distance in km at context precision, not quantized."""
+    dx = ctx.subtract(bx, ax)
+    dy = ctx.subtract(by, ay)
+    return ctx.sqrt(ctx.add(ctx.multiply(dx, dx), ctx.multiply(dy, dy)))
+
+
+def stored(value: Decimal, ctx: Context) -> str:
+    """Quantize to the stored precision (30 dp) and render as a plain decimal string."""
+    return format(value.quantize(_Q_STORED, context=ctx), "f")
+
+
+@dataclass(frozen=True)
+class Leg:
+    origin: str
+    destination: str
+    distance: str  # km, 30 dp
+
+
+@dataclass(frozen=True)
+class Priced:
+    cities: tuple[str, ...]
+    legs: tuple[Leg, ...]
+    distance: str  # km, 30 dp: the sum of the unrounded leg distances, quantized once
+    price: str  # USD, 30 dp: unrounded distance * 0.13, quantized once
+
+    @property
+    def transfers(self) -> tuple[str, ...]:
+        return self.cities[1:-1]
+
+
+def price_path(net: "Network", cities: Sequence[str]) -> Priced:
+    """Price an itinerary given as canonical city names, origin first.
+
+    Refuses anything that is not bookable: unknown names, a leg that is not an operating flight,
+    a transfer at a non-hub, or a city visited twice.
+    """
+    cities = tuple(cities)
+    if len(cities) < 2:
+        raise InvalidPathError("an itinerary needs at least two cities")
+    if len(set(cities)) != len(cities):
+        raise InvalidPathError("an itinerary cannot visit a city twice")
+    for name in cities:
+        if name not in net.cities:
+            raise InvalidPathError(f"unknown city: {name!r}")
+    for name in cities[1:-1]:
+        if not net.cities[name].is_hub:
+            raise InvalidPathError(f"transfer at a non-hub city: {name!r}")
+
+    ctx = new_context()
+    legs: list[Leg] = []
+    total: Decimal | None = None
+    for a, b in zip(cities, cities[1:]):
+        if not net.has_flight(a, b):
+            raise InvalidPathError(f"no direct flight between {a!r} and {b!r}")
+        ca, cb = net.cities[a], net.cities[b]
+        d = point_distance(ca.x, ca.y, cb.x, cb.y, ctx)
+        legs.append(Leg(a, b, stored(d, ctx)))
+        total = d if total is None else ctx.add(total, d)
+    assert total is not None
+    price = ctx.multiply(total, PRICE_PER_KM)
+    return Priced(cities, tuple(legs), stored(total, ctx), stored(price, ctx))
+
+
+def _grouped(value: str, quantum: Decimal) -> str:
+    """Round half up to `quantum` in the canonical context, then add thousands separators."""
+    rounded = Decimal(value).quantize(quantum, rounding=ROUND_HALF_UP, context=new_context())
+    return format(rounded, ",f")  # already rounded: formatting only inserts the commas
+
+
+def fmt_km(distance: str) -> str:
+    """Display only: 1 decimal place, half up, thousands separators. '8928.568…' -> '8,928.6 km'."""
+    return f"{_grouped(distance, _Q_KM)} km"
+
+
+def fmt_usd(price: str) -> str:
+    """Display only: cents, half up, thousands separators. '1160.713…' -> '$1,160.71'."""
+    return f"${_grouped(price, _Q_CENT)}"
+"""Cheapest route between two cities, changing planes only at hubs.
+
+Price is proportional to distance, so cheapest = shortest. A valid route is
+`origin, hub, ..., hub, destination`: every intermediate city is a hub and every leg is an
+operating flight. Selection works in two steps:
+
+1. At network build time, for every ordered hub pair, the candidate hub-to-hub paths
+   (`build_hub_paths`, networkx).
+2. Per query, every "hub the origin can reach directly x hub the destination can reach directly"
+   combination is expanded into full city sequences; each one is priced by the canonical
+   `pricing.price_path`, and the minimum by (price, number of legs, city names) wins.
+
+networkx only proposes paths. Its lengths are never shown, stored or compared against canonical
+prices; the ranking is always done on `price_path` results.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import TYPE_CHECKING, Literal, Mapping
+
+import networkx as nx
+
+from . import places
+from .pricing import Leg, Priced, new_context, point_distance, price_path
+
+if TYPE_CHECKING:
+    from .network import Network
+
+ALGORITHM = "hub all-pairs candidates (networkx) + endpoint enumeration; tie-break: legs, names"
+
+_UNIT_PLACES = 30  # integer edge weights are leg distances in units of 1e-30 km
+
+HubPaths = Mapping[tuple[str, str], tuple[tuple[str, ...], ...]]
+
+
+def build_hub_paths(net: "Network") -> HubPaths:
+    """For every ordered pair of connected hubs (a, b), a != b: all simple hub-only paths whose
+    length is within a few 1e-30 km of the shortest one.
+
+    Why "within a few units" and not just "the shortest": networkx works on integer weights (leg
+    distance rounded to 30 dp), while the canonical price sums unrounded legs and rounds once.
+    The two can disagree by at most (legs/2 + 1) units for the distance and 1/0.13 < 8 units for
+    the price rounding, so a path that is cheapest or tied by canonical price always lies within
+    `slack` units of the integer optimum. Paths that differ by a real amount differ by vastly
+    more than that, so in practice the list has one entry, or the members of an exact tie.
+    """
+    ctx = new_context()
+    graph = nx.Graph()
+    graph.add_nodes_from(net.hubs)
+    for link in net.hub_links:
+        a, b = sorted(link)
+        ca, cb = net.cities[a], net.cities[b]
+        d = point_distance(ca.x, ca.y, cb.x, cb.y, ctx)
+        # ctx.scaleb / ctx.to_integral_exact: the method forms without a context argument would
+        # silently round to the calling thread's default 28 digits.
+        graph.add_edge(a, b, w=int(ctx.to_integral_exact(ctx.scaleb(d, _UNIT_PLACES))))
+
+    slack = 2 * (len(net.hubs) + 2) + 16
+    paths: dict[tuple[str, str], tuple[tuple[str, ...], ...]] = {}
+    for component in nx.connected_components(graph):
+        members = sorted(component)
+        for i, a in enumerate(members):
+            for b in members[i + 1 :]:
+                found: list[tuple[str, ...]] = []
+                best: int | None = None
+                # Yen's algorithm: simple paths in order of non-decreasing weight.
+                for path in nx.shortest_simple_paths(graph, a, b, weight="w"):
+                    weight = nx.path_weight(graph, path, "w")
+                    if best is None:
+                        best = weight
+                    elif weight > best + slack:
+                        break
+                    found.append(tuple(path))
+                paths[(a, b)] = tuple(found)
+                paths[(b, a)] = tuple(p[::-1] for p in found)
+    return paths
+
+
+@dataclass(frozen=True)
+class Route:
+    origin: str
+    destination: str
+    cities: tuple[str, ...]
+    legs: tuple[Leg, ...]  # per leg: origin, destination, distance (km, 30 dp)
+    transfers: tuple[str, ...]  # intermediate cities, all hubs
+    distance: str  # km, 30 dp
+    price: str  # USD, 30 dp
+    fingerprint: str  # id of the network the route was computed on
+    similar_names: Mapping[str, tuple[str, ...]]  # endpoint -> cities with the same folded name
+
+
+@dataclass(frozen=True)
+class CityIssue:
+    """Why one endpoint of a request cannot be used."""
+
+    role: Literal["origin", "destination"]
+    code: Literal["unknown_city", "ambiguous_city", "no_service"]
+    query: str  # what the caller passed
+    city: str | None = None  # canonical name (no_service)
+    candidates: tuple[str, ...] = ()  # ambiguous_city: all matches; unknown_city: close names
+    nearest_served: tuple[places.Nearby, ...] = ()  # no_service: up to 3, other endpoint excluded
+
+
+@dataclass(frozen=True)
+class RouteError:
+    code: Literal["unknown_city", "ambiguous_city", "same_city", "no_service", "unreachable"]
+    issues: tuple[CityIssue, ...] = ()  # per-endpoint details; `code` is the first issue's code
+    cities: tuple[str, ...] = ()  # canonical names involved (same_city, unreachable)
+    fingerprint: str = ""
+
+
+def candidate_paths(net: "Network", origin: str, destination: str) -> list[tuple[str, ...]]:
+    """Every city sequence worth pricing between two distinct served cities (canonical names)."""
+    co, cd = net.cities[origin], net.cities[destination]
+    entry = (origin,) if co.is_hub else co.connected_hubs
+    exit_ = (destination,) if cd.is_hub else cd.connected_hubs
+    out: list[tuple[str, ...]] = []
+    for h1 in entry:
+        head = () if co.is_hub else (origin,)
+        for h2 in exit_:
+            tail = () if cd.is_hub else (destination,)
+            middles = ((h1,),) if h1 == h2 else net.hub_paths.get((h1, h2), ())
+            out.extend(head + middle + tail for middle in middles)
+    return out
+
+
+def _rank(priced: Priced) -> tuple[Decimal, int, tuple[str, ...]]:
+    return (Decimal(priced.price), len(priced.legs), priced.cities)
+
+
+def cheapest_route(net: "Network", origin: str, destination: str) -> Route | RouteError:
+    """Resolve both names and return the cheapest valid route, or a typed error."""
+    fp = net.fingerprint.id
+    resolved = {
+        "origin": places.resolve(net, origin),
+        "destination": places.resolve(net, destination),
+    }
+    issues: list[CityIssue] = []
+    for role, res in resolved.items():
+        if res.status == "unknown":
+            issues.append(CityIssue(role, "unknown_city", res.query, candidates=res.candidates))
+        elif res.status == "ambiguous":
+            issues.append(CityIssue(role, "ambiguous_city", res.query, candidates=res.candidates))
+    if issues:
+        return RouteError(issues[0].code, tuple(issues), fingerprint=fp)
+
+    a, b = resolved["origin"].city, resolved["destination"].city
+    assert a is not None and b is not None
+    if a == b:
+        return RouteError("same_city", cities=(a,), fingerprint=fp)
+
+    for role, city, other in (("origin", a, b), ("destination", b, a)):
+        if not net.is_served(city):
+            nearest = places.nearest_served(net, city, k=3, exclude=(other,))
+            issues.append(
+                CityIssue(role, "no_service", resolved[role].query, city, nearest_served=nearest)
+            )
+    if issues:
+        return RouteError("no_service", tuple(issues), cities=(a, b), fingerprint=fp)
+
+    candidates = candidate_paths(net, a, b)
+    if not candidates:
+        return RouteError("unreachable", cities=(a, b), fingerprint=fp)
+    best = min((price_path(net, path) for path in candidates), key=_rank)
+    similar = {
+        res.city: res.similar_names for res in resolved.values() if res.city and res.similar_names
+    }
+    return Route(
+        origin=a,
+        destination=b,
+        cities=best.cities,
+        legs=best.legs,
+        transfers=best.transfers,
+        distance=best.distance,
+        price=best.price,
+        fingerprint=fp,
+        similar_names=similar,
+    )
+import os
+import sqlite3
+from pathlib import Path
+
+import pytest
+from hypothesis import settings
+
+# Hypothesis profiles. "ci" (used by tool/run_tests.sh) is deterministic: the same examples on
+# every run, no example database. "dev" (default) keeps random exploration and the local database.
+# Select with HYPOTHESIS_PROFILE=ci|dev. Must run before the test modules are imported.
+settings.register_profile("ci", derandomize=True, database=None)
+settings.register_profile("dev")
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
+
+from app.core.network import Fingerprint, build_network, load_network
+
+REAL_DB = Path(__file__).resolve().parents[2] / "locations.db"
+TEST_FP = Fingerprint("test", 0, 0)
+
+
+@pytest.fixture(scope="session")
+def real_db() -> Path:
+    return REAL_DB
+
+
+@pytest.fixture(scope="session")
+def net(real_db):
+    return load_network(real_db)
+
+
+def make_net(locations, links=()):
+    """Network from rows in database format: (name, 'x,y', is_hub, 'Hub1;Hub2')."""
+    return build_network(locations, links, TEST_FP)
+
+
+def make_db(path, locations, links=()):
+    """A sqlite file with the two tables but without constraints, so bad rows can be stored."""
+    con = sqlite3.connect(path)
+    con.execute("create table locations (city_name, coordinate, is_hub, connected_hubs)")
+    con.execute("create table hub_links (hub_a, hub_b)")
+    con.executemany("insert into locations values (?,?,?,?)", locations)
+    con.executemany("insert into hub_links values (?,?)", links)
+    con.commit()
+    con.close()
+    return path
+       0 tests/__init__.py
+      45 tests/conftest.py
+     181 tests/reference.py
+      23 tests/test_api.py
+     179 tests/test_crosscheck.py
+     170 tests/test_network.py
+     127 tests/test_places.py
+     182 tests/test_pricing.py
+     196 tests/test_routing.py
+    1103 total
+../docs/iterations/02-core/round-02:
+STATE.md
+
+../tool:
+export_sessions.py
+model_check.py
+next_build.py
+review_lint.py
+run_tests.sh
+spawn_worker.sh
+test_baseline.txt
+test_diff.sh
+# Review rules
+
+Pitfalls we have hit. `R*` rules are checked by `tool/review_lint.py` (run one with
+`python3 tool/review_lint.py R01`); `M*` rules are checked by reading.
+
+| Id | Rule | Why (the incident) |
+|---|---|---|
+| R01 | No real host or user names in tracked files (except raw `prompt history/`); use `example-*`. | A public export leaked a machine name. |
+| R02 | `rm -rf` only as `rm -rf "${VAR:?}"`. | An empty variable must never delete `/`. |
+| M01 | Timing claims need a recording cut at stable frames, not one screenshot after the action. | A transient state was reported as a persistent failure. |
+| M02 | Build-number bumps go through `tool/next_build.py`, never a blind `sed`. | A sed rewrote a hex id that contained the number. |
+| M03 | Every number shown to the user (distance, price, leg list) comes from a tool result, never from LLM text. | Project rule: the LLM never computes. |
+| M04 | Booking only via the user's click with the card's one-time nonce; the LLM has no booking path. | Requirement 7; design review P0-2. |
+| M05 | UI changes ship with an Impeccable `critique`/`audit` result and a `detect` run; P0–P1 fixed. | User decision 2026-11-23. |
+| M06 | New dependency named in the plan with a reason; no agent/LLM frameworks. | Minimal-dependency rule. |
+| M07 | Each iteration plan has a "Take-home check" against `Quotr Agent Dev Engineer take-home.md`; the take-home wins on conflict. | User decision 2026-11-23. |
+| M08 | One canonical pricing function (explicit Decimal context); rounding only at display. | User decision 2026-11-23; design review P1-4 (thread default context is 28 digits). |
+| M09 | Booking re-validates against current `locations.db` and the business DB; mismatch → re-quote + re-confirm. | User decision 2026-11-23. |
+| M10 | UI acceptance includes ego-browser screenshots at desktop and mobile widths. | User decision 2026-11-23. |
+| M11 | City lookup never auto-picks among names equal after accent folding (`San Jose` / `San José`). | Design review P0-1. |
+| M12 | Every id-bearing endpoint checks ownership, not only booking. | Design review P2-5. |
+| M13 | Sessions exported with `tool/export_sessions.py` and secret-scanned at the end of every iteration. | Design review P1-6. |
+| M14 | No Decimal method or operator without an explicit context in pricing/routing (`ctx.add`, `quantize(..., context=ctx)`). | 02-core: context-less `scaleb` rounded edge weights to 28 digits. |

@@ -1,0 +1,552 @@
+# API and card contract (v1, 2026-11-23)
+
+Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
+`contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
+script, not by the production core) — correctness is tested in the backend, not by these files.
+
+## Conventions
+- Same origin, JSON, paths under `/api`. Session cookie `oa_session` (httpOnly, SameSite=Lax, `Secure` by env).
+- Times: ISO 8601 UTC strings. IDs: opaque strings with a type prefix (`u_`, `c_`, `m_`, `q_`, `t_`).
+- **The frontend never formats or computes numbers.** Every number shown comes from a `*_display` field.
+  High-precision values (`distance`, `price`, decimal strings) are only shown in the trace view.
+- Errors: HTTP status + `{"error": {"code": "<snake_case>", "message": "<human text>"}}`.
+  Common codes: `unauthorized` (401), `not_found` (404; also for other users' objects), `bad_request` (400),
+  `rate_limited` (429), `llm_unavailable` (503).
+
+## Endpoints
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/api/health` | – | `{"status":"ok","network_fingerprint":"sha256:…"}` |
+| GET | `/api/config` | – | `{"dev_login":true,"google_client_id":null}` |
+| POST | `/api/auth/dev` | `{"username","password"}` | `User` + sets cookie; 401 `invalid_credentials` |
+| POST | `/api/auth/logout` | – | `{"ok":true}` |
+| GET | `/api/me` | – | `User` or 401 |
+| GET | `/api/conversations` | – | `{"conversations":[ConversationSummary]}` newest first |
+| POST | `/api/conversations` | `{}` | `ConversationSummary` |
+| GET | `/api/conversations/{id}` | – | `Conversation` (messages oldest first; card states are current server state) |
+| POST | `/api/conversations/{id}/messages` | `{"text"}` | **SSE stream** (below) |
+| POST | `/api/quotes/{id}/book` | `{"nonce"}` | `{"ticket": TicketCard, "message": Message}` or error (below) |
+| GET | `/api/quotes/{id}/trace` | – | `Trace` |
+| GET | `/api/tickets` | – | `{"tickets":[TicketCard]}` newest first |
+| GET | `/api/debug/sse-ping` | – | SSE: `ping` with `{"seq":n}` immediately, then every 2 s, 5 events total |
+
+Booking errors: `invalid_nonce` (409), `not_presented` (409), `expired` (409), `already_booked` (409),
+`stale` (409; data changed — ask for a new quote), `not_found` (404), `conversation_busy` (409; a reply is still
+being generated — retry after `done`), `data_unavailable` (503; route data could not be read — retry; the quote and
+nonce are unchanged).
+
+## Objects
+
+```ts
+type User = { id: string; display_name: string; auth_provider: "dev" | "google" }
+type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string; preview: string }
+type Conversation = ConversationSummary & { messages: Message[] }
+type Message = {
+  id: string; role: "user" | "assistant" | "system"   // system = booking results etc.
+  text: string                                        // markdown for assistant; plain for user
+  cards: Card[]; created_at: string
+}
+type Leg = { from: string; to: string; distance_display: string; distance: string }
+type CardState = { status: "quoted" | "presented" | "booked" | "expired" | "stale";
+                   bookable: boolean; nonce: string | null; ticket_id: string | null }
+
+type Card = QuoteCard | BookingRequestCard | TicketCard | TicketListCard | NoServiceCard
+          | AmbiguousCityCard | UnknownCityCard | NoticeCard
+
+type QuoteCard = { type: "quote"; id: string /* q_ */; origin: string; destination: string
+  legs: Leg[]; transfers: string[]; distance_display: string; price_display: string
+  distance: string; price: string; expires_at: string; state: CardState }
+type BookingRequestCard = Omit<QuoteCard, "type"> & { type: "booking_request" }   // id is the quote id
+type TicketCard = { type: "ticket"; id: string /* t_ */; quote_id: string; origin: string; destination: string
+  legs: Leg[]; transfers: string[]; distance_display: string; price_display: string; booked_at: string }
+type TicketListCard = { type: "ticket_list"; count: number; filter: Record<string, string>; tickets: TicketCard[] }
+type NoServiceCard = { type: "no_service"; city: string
+  nearest: { city: string; distance_display: string }[] }          // up to 3, nearest first
+type AmbiguousCityCard = { type: "ambiguous_city"; query: string
+  candidates: { city: string; is_hub: boolean; connected_hubs: string[] }[] }
+type UnknownCityCard = { type: "unknown_city"; query: string; suggestions: string[] }
+type NoticeCard = { type: "notice"; code: "same_city" | "unreachable" | "quote_expired" | "stale"; message: string }
+
+type Trace = { quote_id: string; formula: string; algorithm: string; network_fingerprint: string
+  legs: (Leg & { from_coord: [number, number]; to_coord: [number, number]; source: string })[]
+  distance: string; price: string; distance_display: string; price_display: string; note: string }
+```
+
+Card buttons: a quote or booking-request card shows **Confirm booking** only when `state.bookable` is true; clicking
+posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is running, buttons stay disabled until
+`done`; after `done` (or on reload) the card state from the server wins.
+
+## SSE stream (`POST /api/conversations/{id}/messages`)
+
+`Content-Type: text/event-stream`. Each event: `event: <name>\ndata: <json>\n\n`.
+
+| event | data | notes |
+|---|---|---|
+| `user_message` | `Message` | the stored user message, first event |
+| `status` | `{"text":"Looking up routes…"}` | progress, replaceable |
+| `card` | `{"card": Card}` | push immediately; state.bookable is false until `done` |
+| `delta` | `{"text":"…"}` | append; already validated text (one sentence or more) |
+| `replace` | `{"text":"…"}` | replace the whole assistant text so far |
+| `ping` | `{}` | heartbeat every 15 s; ignore |
+| `done` | `{"message": Message}` | final assistant message incl. cards with current states |
+| `error` | `{"code","message"}` | stream ends; the user message is kept |
+
+Example: `contract/fixtures/sse_quote_turn.txt`.
+# Implementation — 03-slice T2 store + airline (issue #1)
+
+> round 02 的改动见文末 §6；§1–§5 中与之冲突的地方已就地更新。
+
+- Source state: `it03-airline` @ `6a19410`（被测提交；其后只有文档提交）
+- 环境：macOS，uv，Python 3.12.8；**无新增依赖**（stdlib `sqlite3` / `hmac` / `threading` / `asyncio`）
+- 范围：`backend/app/store/**`、`backend/app/airline/**`、对应测试；没有改 core、契约、`main.py`、`conftest.py`
+
+## 1. 做了什么
+
+### store（`backend/app/store/`）
+- `db.py`：`Store(path, clock=utc_now)`。每次操作开一个连接（线程间可共享 `Store`）；`Store.write()` 是一个
+  `BEGIN IMMEDIATE` 事务（正常退出提交，任何异常回滚），`Store.read()` 是一个只读快照。WAL、`foreign_keys=ON`。
+  schema 版本用 `PRAGMA user_version`（当前 1），重复打开不重复迁移，版本比代码新则拒绝启动。
+  时间一律 ISO 8601 UTC 到秒（`iso()` 向下取整，拒绝无时区的 datetime）；id 为 `前缀_16 位 hex`。
+- `records.py`：接收连接的行级函数（可在一个事务里组合）；`Store` 上有同名的单事务包装
+  （`upsert_user`、`create_conversation`、`get_conversation`（带归属）、`list_conversations`（含 `preview`）、
+  `set_conversation_title`、`add_message`、`list_messages`、`add_llm_call`、`add_tool_call`、`list_*`）。
+- 表：design §7 的 7 张表，外加：
+  - `messages.seq`、`llm_calls.seq`、`tool_calls.seq`（自增，保证同一秒内的顺序）；`llm_calls.created_at`、
+    `tool_calls.created_at`；
+  - `quotes` 增加 `origin`、`destination`、`status_reason`、`created_at`、`presented_at`、`closed_at`；`legs` 的每段含
+    `from / to / distance / from_coord / to_coord / source`（坐标按库里原文存成字符串）；
+  - `tickets` 增加 `origin`、`destination`、`confirmed_message_id`（点的是哪条消息里的卡）；
+    `tickets.network_fingerprint` 是**出票复核时**的库指纹，`quotes.network_fingerprint` 是报价时的；
+  - **`quote_cards(quote_id, message_id, presented_at, nonce_used_at)` 取代 `quotes.nonce_hash`**（见 §3 决定 1）。
+- 库层兜底（应用代码写错也过不去）：`tickets.quote_id UNIQUE`（B5）；触发器「只能给 `presented` 的 quote 写票」
+  （B2/B7）、「`booked / expired / stale` 不能再变」（Q3）、「票不可修改」；`status`、`role` 有 CHECK。
+
+### airline（`backend/app/airline/`）
+- `service.py`：`Airline(store, networks, *, locks=None, nonce_secret=None, quote_ttl=15min)`，时钟取 `store.clock`。
+  - 工具（聊天轮次内调用，返回 `Result(code, data, cards)`）：`find_city`、`quote_route`、`request_booking`、
+    `list_tickets`。`data` 只有名字、id 和显示值，给 LLM 用；`cards` 是契约里的卡片对象。
+  - `post_assistant_message(...)`：`done` 时刻。一个事务里存 assistant 消息并把其中的 quote / booking_request 卡
+    `quoted → presented`，登记 `quote_cards`，返回带 `state.nonce` 的契约 `Message`。
+  - `book(user_id, quote_id, nonce)`：唯一的出票入口；`trace`、`tickets`、`messages`、`get_quote` 为读接口。
+- `cards.py`：8 种卡片 + `CardState` + `Trace` 的构造函数，只从存档记录渲染；显示值只经 `core.pricing.fmt_km / fmt_usd`。
+- `locks.py`：`ConversationLocks`（每会话一把锁，同步 `hold()` 和异步 `hold_async()` 是同一把）。
+
+### 出票 `book` 的检查顺序（全部在会话锁 + 一个 `BEGIN IMMEDIATE` 事务内）
+| 步骤 | 规则 | 不满足时 |
+|---|---|---|
+| quote 存在且属于当前用户 | B1 | `not_found` 404（不区分「不存在」和「别人的」） |
+| 未过 15 分钟（`now >= expires_at` 即过期；`created_at` 取整到秒，所以实际年龄不会超过 15 分钟） | B4 | quote → `expired`，`expired` 409 |
+| 状态 | B5 / Q3 / B2 | `booked` → `already_booked`（带已有票 id）；`expired` / `stale` → 同名错误；`quoted` → `not_presented` |
+| nonce 属于这张 quote 的某张已展示卡片且未用过 | B3 | `invalid_nonce` 409，无任何副作用 |
+| 复核：`NetworkProvider.current(strict=True)`（必算内容哈希）→ 每个城市仍在且坐标相同 → `price_path` 重算，各段距离、总距离、价格字符串逐一相等 → `cheapest_route` 仍是同一城市序列和价格 | B6 | 读到且不一致：quote → `stale`（原因写入 `status_reason`），`stale` 409；**库读不到 / 不合法 / WAL 模式：`data_unavailable` 503，不改 quote、不消耗 nonce，同一次点击可重试** |
+| 写票 → quote → `booked` → 追加 system 消息「Ticket booked.」+ 票卡 | B5 / B7 | 任何异常整体回滚（nonce 也不消耗） |
+
+拒绝且改了状态（expired / stale）时，先 COMMIT 再抛 `BookingError`。
+
+## 2. 给 T3（agent）/ T5（API）的接口
+
+```python
+from app.store import Store
+from app.airline import Airline, BookingError, ConversationBusy, ConversationLocks, NotFound, Result
+from app.core.network import NetworkProvider
+
+store = Store("data/app.db")                       # 时钟可注入：Store(path, clock=fake)
+airline = Airline(store, NetworkProvider(db_path), nonce_secret=os.environ.get("NONCE_SECRET", "").encode() or None)
+```
+
+**T3（一轮对话）**
+```python
+async with airline.locks.hold_async(conversation_id):          # 整轮持有；同步代码用 with airline.locks.hold(...)
+    user_msg = store.add_message(user_id, conversation_id, "user", text)
+    r = airline.quote_route(user_id, conversation_id, origin, destination)   # Result
+    r = airline.request_booking(user_id, conversation_id, quote_id)          # Result，永不出票
+    r = airline.find_city(name); r = airline.list_tickets(user_id, city=..., booked_after=...)
+    #   r.code: "ok" 或错误码；r.data → 给 LLM（无 nonce）；r.cards → 立即发 SSE `card`（state.bookable 恒为 false）
+    store.add_tool_call(user_id, user_msg["id"], name, args, result, latency_ms=...)
+    message = airline.post_assistant_message(user_id, conversation_id, text, cards, guard_problems)
+    #   → 契约 Message，quote 卡此时才有 nonce；原样放进 SSE `done`
+```
+- 工具自己**不拿锁**，调用方（轮次）持锁。锁不可重入。
+- `Result.code`：`find_city`：`ok / unknown_city / ambiguous_city / no_service`；`quote_route`：再加
+  `same_city / unreachable`；`request_booking`：`ok / not_found / quote_expired / stale / already_booked`（带票卡）；
+  `list_tickets`：`ok / bad_request`（时间解析不了）。
+- `quote_route`、`post_assistant_message`、`messages` 对不属于该用户的会话抛 `NotFound`；`locations.db` 不合法时
+  `find_city / quote_route` 抛 `core.network.NetworkDataError`（T3 当作工具失败处理）。
+- **nonce 不能进 LLM 上下文**：`Result` 里永远没有 nonce；发给 LLM 的历史请用 `Result.data`，不要用
+  `post_assistant_message` / `messages` 返回的卡片。
+- quote / booking_request 卡在消息里只存引用 `{"type","id"}`，每次读取时从 quote 行重新渲染（改不了价格）。
+
+**T5（HTTP）**
+```python
+try:
+    out = airline.book(user_id, quote_id, body["nonce"])        # {"ticket": TicketCard, "message": Message}
+except BookingError as e:
+    return JSONResponse(e.as_response(), status_code=e.status)  # 契约错误体；e.ticket_id（already_booked）
+airline.trace(user_id, quote_id)        # Trace；NotFound → 404
+airline.tickets(user_id)                # [TicketCard]，新的在前
+airline.messages(user_id, conv_id)      # [Message]，卡片状态 = 服务端当前状态（含可用的 nonce）；NotFound → 404
+store.get_conversation(user_id, conv_id) / store.list_conversations(user_id) / store.create_conversation(user_id)
+```
+- `book` **自己拿会话锁**，调用时不要已经持有该锁；它是阻塞调用，放在同步路由（线程池）里；`async def` 路由用
+  `await airline.book_async(...)`。等锁默认最多 5 s（`lock_timeout`），超时抛 `BookingError("conversation_busy")` 409。
+- `Store` 上所有收会话 id / 消息 id 的方法第一个参数都是 `user_id`，同一事务里查归属，不是自己的抛 `NotFound`
+  （`app.store.NotFound`，与 `app.airline.NotFound` 是同一个类）。
+- `Conversation` = `store.get_conversation(...)` + `{"messages": airline.messages(...)}`。
+- 单进程内共用**同一个** `Airline`（或同一个 `ConversationLocks`）实例，聊天和出票才是同一把锁。
+
+## 3. 需要协调者知道的决定
+
+1. **nonce 是派生的，不入库**：`nonce = "n_" + HMAC-SHA256(secret, quote_id ␟ user_id ␟ message_id)[:32]`，
+   与设计「绑定 quote、用户、卡片所在消息」一致。库里只记「哪条消息展示过哪张 quote 的卡」和是否已用
+   （`quote_cards`），所以 §7 的 `quotes.nonce_hash` 没有采用。原因：契约要求重新加载会话后卡片仍带可用的 nonce
+   （Q2），只存哈希做不到，存明文又不如不存。`nonce_secret` 默认每进程随机：重启后旧页面上的 nonce 失效
+   （`invalid_nonce`），刷新即可拿到新的；想跨重启保持，T5 / T7 传入环境变量。**design §7 需要协调者同步。**
+2. **nonce 在 `done` 时签发，不在 `request_booking` 时**：契约规定 `card` 事件里 `bookable=false`，`done` 之后才可点。
+   `request_booking` 只校验并返回确认卡；这样工具结果里从来没有 nonce。
+3. 一张 quote 可以有多张卡（行程卡、确认卡、不同消息），各有自己的 nonce，任意一张可点，票只有一张。
+4. `request_booking` 只接受**本会话**的 quote（别的会话的返回 `not_found`）。
+5. 复核通过但库文件变过（无关行、同内容替换文件）照常出票；复核要求「仍是最便宜且**同一条**路线」，
+   出现等价平手导致规范路线变了也算 `stale`。
+6. 复核和提交之间库文件再变的窗口（毫秒级）无法在 SQLite 事务里消除，按「点击时刻的库」处理。
+7. 契约 fixture 与真实库的两处出入（fixture 本来就标注为示意，未改契约）：`trace.json` 最后一段 source 写的是
+   `locations.connected_hubs(Lima)`，真实库里 Lima 是 hub，实际为 `hub_links(Amsterdam, Lima)`；`"San Jose"`
+   精确命中库内城市（core 行为），不产生歧义卡，折叠后才歧义（如 `"san jose"`）。`similar_names` 只在
+   `Result.data` 里，契约的 QuoteCard 没有对应字段。
+8. `Trace.formula / algorithm` 直接用 core 的常量（文字与 fixture 的示意文字不同，形状一致）。
+
+## 4. 测试（新增 128 个；全套 245 passed，约 52 s）
+
+| 文件 | 数量 | 内容 |
+|---|---|---|
+| `tests/test_store.py` | 13 | schema / 版本、时间格式、用户唯一、会话排序与归属、消息顺序、JSON 往返、回滚、`BEGIN IMMEDIATE` 排队、库层兜底（B2/B5/Q3、票不可改）、nonce 只消耗一次 |
+| `tests/test_airline_tools.py` | 37 | 四个工具的结果和卡片、各错误码、真实库上的契约示例（Guangzhou→Lima、Abu Dhabi、san jose）、trace、归属检查、`done` 才有 nonce、重载视图 = 服务端状态、卡片不可伪造、查票筛选 |
+| `tests/test_airline_booking.py` | 51 | 每个出票错误码一例以上；B6 的 11 种「变了」和 5 种「无关变化」、同大小同 mtime 的修改、文件缺失；事务中途失败不留痕；8 线程同 nonce / 两张卡并发 / **不共享锁的 8 个 Airline 实例**都只出一张票；会话锁（阻塞、超时、按会话、异步与同步互斥、取消不泄漏） |
+| `tests/test_booking_model.py` | 27 | 见下 |
+
+**卡片形状校验**：`tests/airline_helpers.py` 从 `contract/fixtures/*` 的全部示例学出每种卡片 / Message / Trace /
+错误体的键集合和叶子类型，产出的对象必须键完全一致、类型在示例出现过（校验器自身有反例测试）。
+
+**模型测试（B1–B7、Q1–Q3）**：固定种子的随机事件序列同时驱动真实 `Airline` 和测试里的参考模型，
+**每个事件之后**比对事件结果（错误码、卡片状态）并在 app.db 的行上检查全部不变式。
+- 事件：`quote`、`done`、`drop`（流在 done 前断开）、`user_message`（含「yes, book it」等）、`llm_request_booking`、
+  `click`（有效 / 乱写 / 别的 quote 的 / 空 / None）、`click_concurrent`（2–4 线程）、`replay`、`other_user_click`、
+  `clock`（含 899 / 900 / 901 s 和 0.5 s）、`db_change`（删航段 / 挪坐标 / 无关行 / 同内容替换文件 / 还原 / 写坏）、`reconnect`。
+- 模型独立判断新鲜度：用 `tests/reference.py`（自己读库、自己的 Bellman-Ford 和 Decimal）在点击时刻的库文件上重算。
+- 规模：小图 60 个种子 × 120 事件（584 张 quote，104 张票，23 stale）；真实库副本 10 个种子 × 100 事件
+  （101 张 quote，15 张票）。另有覆盖检查：5 种状态、7 种点击结果全部出现过。
+- 15 个具名用例（`REGRESSIONS`），失败的种子会被收缩并打印成可直接粘贴的用例。
+- **变异体自检**：9 个故意改坏的 `Airline`（不复核、15:00 整仍可订、任意 nonce、LLM 工具直接出票、新报价取代旧报价、
+  报价即 presented、不查归属、nonce 泄漏到工具结果、stale 不落库）必须全部被同一批种子抓到——全部在种子 0 被抓到。
+- 不用 hypothesis（种子序列自己生成，与 profile 无关，天然确定）；并发事件的线程顺序不确定，但断言只看结果集合。
+
+## 5. 验证
+
+```
+bash tool/test_diff.sh            # no new failures (0 known)
+python3 tool/review_lint.py       # R01 ok, R02 ok
+cd backend && HYPOTHESIS_PROFILE=ci uv run pytest -q    # 245 passed（1 个既有的 starlette 弃用警告，来自 test_api）
+```
+模型测试和并发测试连续跑 3 次结果一致；新增测试在 `-W error` 下通过（无未关闭连接）。
+
+## 6. Round 02（评审报告 `/tmp/ocean-above-review-t2.md` 的 8 条，全部处理）
+
+| # | 改动 | 测试 |
+|---|---|---|
+| 1 WAL | **core（协调者授权）**：`core/network.py` 新增 `_refuse_wal`：文件头第 18/19 字节为 2（WAL）或存在非空 `-wal` 时抛 `NetworkDataError`；`load_network` 和 `NetworkProvider.current()`（含主文件字节没变、直接返回缓存的那条路径）都检查 | `test_network.py::test_wal_mode_database_is_refused`、`::test_leftover_non_empty_wal_file_is_refused`；`test_airline_booking.py::test_a_committed_change_that_sits_in_the_wal_never_books_at_the_old_price`（复现评审的场景：坐标改到 `0,-500` 只在 `-wal` 里 → 点击 `data_unavailable`、不出票；checkpoint 后 → `stale`，新报价 $80.60） |
+| 2 代理字符 | `_match_nonce` 用 `encode("utf-8", "surrogatepass")` | `test_invalid_nonce_values` 增 `"\ud800"` 等两例；模型测试 `click` 增 `surrogate` 种类 + 具名用例 |
+| 3 等锁 | `book(..., lock_timeout=5.0)` 默认有限；超时 → `BookingError("conversation_busy")` 409；新增 `book_async`（`asyncio.to_thread`） | `test_book_gives_up_waiting_by_default`、`test_book_async_does_not_block_the_event_loop_while_a_turn_holds_the_lock`、原等锁测试改断言错误码 |
+| 4 读不到 ≠ 变了 | `_recheck` 不再吞 `NetworkDataError`；`_book` 返回 `data_unavailable` 503，且复核挪到 `mark_nonce_used` 之前：quote 不变、nonce 不消耗 | `test_unreadable_locations_db_refuses_without_touching_the_quote`（文件缺失 / 数据不合法 / 缺表 / 不是数据库，各点两次，恢复后同一 nonce 出票）、`test_unreadable_then_changed_data_is_stale`；原 `test_missing_locations_db_makes_the_quote_stale` 已删除；模型和 2 个具名用例同步 |
+| 5 时钟 | `quote_route`、`request_booking`、`post_assistant_message` 的 `now` 在拿到写锁之后读取 | `test_the_clock_is_read_after_the_write_lock_was_obtained`（进入写事务前把时钟推过有效期 → 卡片 `expired`，不 present） |
+| 6 归属 | `Store.add_message / list_messages / add_llm_call / list_llm_calls / add_tool_call / list_tool_calls` 增加 `user_id`，同一事务查归属 → `NotFound`。**签名变了，T3 / T5 需按新签名调用** | `test_conversation_level_methods_check_the_owner_in_the_same_call` |
+| 7 小修 | `Store.write()` 只在 `con.in_transaction` 时 ROLLBACK（不盖掉原始异常）；`nonce_secret` 必须是 ≥ 16 字节的 `bytes`，否则构造时 `ValueError` | `test_an_error_that_already_rolled_back_is_not_masked`、`test_nonce_secret_must_be_bytes_of_a_useful_length` |
+| 8 变异体 | 新增 `SkipsBookedCheck`（B5）、`TicketWithoutStatusChange`（B7）、`UnreadableMeansFresh`（B6），共 12 个；断言失败信息带规则号，变异体测试核对「第一次被抓到的失败」含预期规则号 | `test_the_model_test_catches_a_broken_implementation[*]` 12 例 |
+
+- 结果（被测提交见 round-02 STATE）：全套 263 passed（本任务 144 + core 新增 2 + 原有 117），`tool/test_diff.sh` 无新失败，
+  `tool/review_lint.py` 全过；新增 / 改动的五个测试文件在 `-W error` 下 174 passed。
+- 模型测试规模（加入 `surrogate` 后种子序列有变化）：小图 583 张 quote / 100 张票 / 16 stale；真实库 102 张 quote / 15 张票。
+- 没做的：评审 #8 里「模型里的假时钟在一次操作内不前进」仍然如此，第 5 条用单独的具名单元测试覆盖，没有进模型事件表。
+- 注意：合并 main 后仓库里有了 `frontend/`，本 worktree 没装前端依赖，`tool/test_diff.sh` 的前端部分在这里没有实际跑到
+  （它只统计能识别的失败行）；后端 263 个是实跑结果。
+== booking_error_stale.json
+{
+  "error": {
+    "code": "stale",
+    "message": "Route data changed since this quote. Please ask for a new quote."
+  }
+}
+
+== booking_ok.json
+{
+  "ticket": {
+    "type": "ticket",
+    "id": "t_91b2",
+    "quote_id": "q_7f3a",
+    "origin": "Guangzhou",
+    "destination": "Lima",
+    "legs": [
+      {
+        "from": "Guangzhou",
+        "to": "Frankfurt",
+        "distance_display": "1,362.1 km",
+        "distance": "1362.100000000000000000000000000000"
+      },
+      {
+        "from": "Frankfurt",
+        "to": "Singapore",
+        "distance_display": "1,872.4 km",
+        "distance": "1872.400000000000000000000000000000"
+      },
+      {
+        "from": "Singapore",
+        "to": "Amsterdam",
+        "distance_display": "4,097.1 km",
+        "distance": "4097.100000000000000000000000000000"
+      },
+      {
+        "from": "Amsterdam",
+        "to": "Lima",
+        "distance_display": "1,597.0 km",
+        "distance": "1597.000000000000000000000000000000"
+      }
+    ],
+    "transfers": [
+      "Frankfurt",
+      "Singapore",
+      "Amsterdam"
+    ],
+    "distance_display": "8,928.6 km",
+    "price_display": "$1,160.71",
+    "booked_at": "2026-11-23T08:03:12Z"
+  },
+  "message": {
+    "id": "m_5",
+    "role": "system",
+    "text": "Ticket booked.",
+    "cards": [
+      {
+        "type": "ticket",
+        "id": "t_91b2",
+        "quote_id": "q_7f3a",
+        "origin": "Guangzhou",
+        "destination": "Lima",
+        "legs": [
+          {
+            "from": "Guangzhou",
+            "to": "Frankfurt",
+            "distance_display": "1,362.1 km",
+            "distance": "1362.100000000000000000000000000000"
+     
+== config.json
+{
+  "dev_login": true,
+  "google_client_id": null
+}
+
+== conversation.json
+{
+  "id": "c_01",
+  "title": "Guangzhou to Lima",
+  "created_at": "2026-11-23T08:00:00Z",
+  "updated_at": "2026-11-23T08:03:12Z",
+  "preview": "Your ticket is booked.",
+  "messages": [
+    {
+      "id": "m_1",
+      "role": "user",
+      "text": "I want to fly from Guangzhou to Lima",
+      "cards": [],
+      "created_at": "2026-11-23T08:00:00Z"
+    },
+    {
+      "id": "m_2",
+      "role": "assistant",
+      "text": "There is no direct flight, so the cheapest route goes through **Frankfurt**, **Singapore** and **Amsterdam**: 8,928.6 km for $1,160.71. Shall I book it?",
+      "cards": [
+        {
+          "type": "quote",
+          "id": "q_7f3a",
+          "origin": "Guangzhou",
+          "destination": "Lima",
+          "legs": [
+            {
+              "from": "Guangzhou",
+              "to": "Frankfurt",
+              "distance_display": "1,362.1 km",
+              "distance": "1362.100000000000000000000000000000"
+            },
+            {
+              "from": "Frankfurt",
+              "to": "Singapore",
+              "distance_display": "1,872.4 km",
+              "distance": "1872.400000000000000000000000000000"
+            },
+            {
+              "from": "Singapore",
+              "to": "Amsterdam",
+              "distance_display": "4,097.1 km",
+              "distance": "4097.100000000000000000000000000000"
+            },
+            {
+              "from": "Amsterdam",
+              "to": "Lima",
+              "distance_display": "1,597.0 km",
+     
+== conversations.json
+{
+  "conversations": [
+    {
+      "id": "c_01",
+      "title": "Guangzhou to Lima",
+      "created_at": "2026-11-23T08:00:00Z",
+      "updated_at": "2026-11-23T08:03:12Z",
+      "preview": "Your ticket is booked."
+    },
+    {
+      "id": "c_00",
+      "title": "Abu Dhabi",
+      "created_at": "2026-11-22T10:00:00Z",
+      "updated_at": "2026-11-22T10:01:00Z",
+      "preview": "Abu Dhabi has no service yet."
+    }
+  ]
+}
+
+== me.json
+{
+  "id": "u_dev",
+  "display_name": "demo",
+  "auth_provider": "dev"
+}
+
+== tickets.json
+{
+  "tickets": [
+    {
+      "type": "ticket",
+      "id": "t_91b2",
+      "quote_id": "q_7f3a",
+      "origin": "Guangzhou",
+      "destination": "Lima",
+      "legs": [
+        {
+          "from": "Guangzhou",
+          "to": "Frankfurt",
+          "distance_display": "1,362.1 km",
+          "distance": "1362.100000000000000000000000000000"
+        },
+        {
+          "from": "Frankfurt",
+          "to": "Singapore",
+          "distance_display": "1,872.4 km",
+          "distance": "1872.400000000000000000000000000000"
+        },
+        {
+          "from": "Singapore",
+          "to": "Amsterdam",
+          "distance_display": "4,097.1 km",
+          "distance": "4097.100000000000000000000000000000"
+        },
+        {
+          "from": "Amsterdam",
+          "to": "Lima",
+          "distance_display": "1,597.0 km",
+          "distance": "1597.000000000000000000000000000000"
+        }
+      ],
+      "transfers": [
+        "Frankfurt",
+        "Singapore",
+        "Amsterdam"
+      ],
+      "distance_display": "8,928.6 km",
+      "price_display": "$1,160.71",
+      "booked_at": "2026-11-23T08:03:12Z"
+    }
+  ]
+}
+
+== trace.json
+{
+  "quote_id": "q_7f3a",
+  "formula": "price = Σ sqrt(dx²+dy²) × 0.13 USD; Decimal prec 50, stored to 30 dp",
+  "algorithm": "hub all-pairs (networkx) + endpoint enumeration; tie-break: legs, names",
+  "network_fingerprint": "sha256:0f1e2d…",
+  "legs": [
+    {
+      "from": "Guangzhou",
+      "to": "Frankfurt",
+      "distance_display": "1,362.1 km",
+      "distance": "1362.100000000000000000000000000000",
+      "from_coord": [
+        -9278,
+        3445
+      ],
+      "to_coord": [
+        -7957,
+        3113
+      ],
+      "source": "locations.connected_hubs(Guangzhou)"
+    },
+    {
+      "from": "Frankfurt",
+      "to": "Singapore",
+      "distance_display": "1,872.4 km",
+      "distance": "1872.400000000000000000000000000000",
+      "from_coord": [
+        -7957,
+        3113
+      ],
+      "to_coord": [
+        -6991,
+        1509
+      ],
+      "source": "hub_links(Frankfurt, Singapore)"
+    },
+    {
+      "from": "Singapore",
+      "to": "Amsterdam",
+      "distance_display": "4,097.1 km",
+      "distance": "4097.100000000000000000000000000000",
+      "from_coord": [
+        -6991,
+        1509
+      ],
+      "to_coord": [
+        -7318,
+        -2575
+      ],
+      "source": "hub_links(Singapore, Amsterdam)"
+    },
+    {
+      "from": "Amsterdam",
+      "to": "Lima",
+      "distance_display": "1,597.0 km",
+      "distance": "1597.000000000000000000000000000000",
+      "from_coord": [
+        -7318,
+        -2575
+      ],
+      "to_coord": [
+        -6546,
+    
+event: user_message
+data: {"id": "m_1", "role": "user", "text": "I want to fly from Guangzhou to Lima", "cards": [], "created_at": "2026-11-23T08:00:00Z"}
+
+event: status
+data: {"text": "Looking up routes…"}
+
+event: card
+data: {"card": {"type": "quote", "id": "q_7f3a", "origin": "Guangzhou", "destination": "Lima", "legs": [{"from": "Guangzhou", "to": "Frankfurt", "distance_display": "1,362.1 km", "distance": "1362.100000000000000000000000000000"}, {"from": "Frankfurt", "to": "Singapore", "distance_display": "1,872.4 km", "distance": "1872.400000000000000000000000000000"}, {"from": "Singapore", "to": "Amsterdam", "distance_display": "4,097.1 km", "distance": "4097.100000000000000000000000000000"}, {"from": "Amsterdam", "to": "Lima", "distance_display": "1,597.0 km", "distance": "1597.000000000000000000000000000000"}], "transfers": ["Frankfurt", "Singapore", "Amsterdam"], "distance_display": "8,928.6 km", "price_display": "$1,160.71", "distance": "8928.600000000000000000000000000000", "price": "1160.718000000000000000000000000000", "expires_at": "2026-11-23T08:15:00Z", "state": {"status": "quoted", "bookable": false, "nonce": null, "ticket_id": null}}}
+
+event: delta
+data: {"text": "There is no direct flight, so the cheapest route goes through **Frankfurt**, **Singapore** and **Amsterdam**: "}
+
+event: delta
+data: {"text": "8,928.6 km for $1,160.71. Shall I book it?"}
+
+event: ping
+data: {}
+
+event: done
+data: {"message": {"id": "m_2", "role": "assistant", "text": "There is no dir

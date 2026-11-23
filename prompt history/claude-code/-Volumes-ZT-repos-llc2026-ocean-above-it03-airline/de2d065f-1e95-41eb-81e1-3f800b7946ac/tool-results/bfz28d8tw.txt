@@ -1,0 +1,821 @@
+# State invariants
+
+Booking and confirmation rules are checked by model-based tests: a small reference model plus seeded random event
+sequences, every invariant asserted after every event. A new state bug gets a new rule id here first, then a test.
+Design context: `docs/design/design.md` §6.
+
+## Event alphabet
+`quote(user, conv, origin, dest)`, `stream_done(conv)` (cards presented, nonces issued),
+`user_message(conv, text)` (incl. negations and questions), `llm_request_booking(conv, quote)`,
+`click_book(user, quote, nonce)`, `click_book_concurrent(user, quote, nonce)`, `replay_nonce(quote, nonce)`,
+`clock(+Δ)`, `db_change(kind)` (leg removed / coordinate moved / unrelated row changed / file replaced),
+`other_user_click(quote, nonce)`, `disconnect_reconnect(conv)`.
+
+## B. Booking
+- **B1 Ownership.** A ticket exists only if its quote belongs to the user who clicked.
+- **B2 Presented.** A ticket exists only if its quote reached `presented` (its full card was sent with `done`) before the click.
+- **B3 Click only.** Every ticket is caused by exactly one `click_book` with a valid, unused nonce for that quote; no
+  other event (in particular `llm_request_booking`, any `user_message`) ever creates a ticket.
+- **B4 Validity.** No ticket for a quote older than 15 minutes at click time.
+- **B5 Idempotent.** At most one ticket per quote, under replay and concurrent clicks.
+- **B6 Fresh.** A ticket's legs, coordinates, distance and price strings equal a fresh recomputation on the
+  `locations.db` current at click time, and the route is still the cheapest; otherwise the quote is `stale` and no ticket.
+- **B7 Atomic.** Quote status and tickets never disagree: `booked` ⇔ exactly one ticket.
+
+## Q. Quotes
+- **Q1 No supersede.** Creating a quote never changes the status of another quote.
+- **Q2 Button state.** The button state a client sees (after `done` or reconnect) equals the server's quote state.
+- **Q3 Terminal.** `booked`, `expired`, `stale` never change again.
+
+## Process
+- Seeds are fixed in CI. A failing seed prints its shrunk sequence and is kept as a named regression case.
+- Layers: pure model test over `airline/` → API driven with fakes (clock, LLM, locations.db copy) → UI scenario
+  (ego-browser) for the click path.
+# API and card contract (v1, 2026-11-23)
+
+Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
+`contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
+script, not by the production core) — correctness is tested in the backend, not by these files.
+
+## Conventions
+- Same origin, JSON, paths under `/api`. Session cookie `oa_session` (httpOnly, SameSite=Lax, `Secure` by env).
+- Times: ISO 8601 UTC strings. IDs: opaque strings with a type prefix (`u_`, `c_`, `m_`, `q_`, `t_`).
+- **The frontend never formats or computes numbers.** Every number shown comes from a `*_display` field.
+  High-precision values (`distance`, `price`, decimal strings) are only shown in the trace view.
+- Errors: HTTP status + `{"error": {"code": "<snake_case>", "message": "<human text>"}}`.
+  Common codes: `unauthorized` (401), `not_found` (404; also for other users' objects), `bad_request` (400),
+  `rate_limited` (429), `llm_unavailable` (503).
+
+## Endpoints
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| GET | `/api/health` | – | `{"status":"ok","network_fingerprint":"sha256:…"}` |
+| GET | `/api/config` | – | `{"dev_login":true,"google_client_id":null}` |
+| POST | `/api/auth/dev` | `{"username","password"}` | `User` + sets cookie; 401 `invalid_credentials` |
+| POST | `/api/auth/logout` | – | `{"ok":true}` |
+| GET | `/api/me` | – | `User` or 401 |
+| GET | `/api/conversations` | – | `{"conversations":[ConversationSummary]}` newest first |
+| POST | `/api/conversations` | `{}` | `ConversationSummary` |
+| GET | `/api/conversations/{id}` | – | `Conversation` (messages oldest first; card states are current server state) |
+| POST | `/api/conversations/{id}/messages` | `{"text"}` | **SSE stream** (below) |
+| POST | `/api/quotes/{id}/book` | `{"nonce"}` | `{"ticket": TicketCard, "message": Message}` or error (below) |
+| GET | `/api/quotes/{id}/trace` | – | `Trace` |
+| GET | `/api/tickets` | – | `{"tickets":[TicketCard]}` newest first |
+| GET | `/api/debug/sse-ping` | – | SSE: `ping` with `{"seq":n}` immediately, then every 2 s, 5 events total |
+
+Booking errors: `invalid_nonce` (409), `not_presented` (409), `expired` (409), `already_booked` (409),
+`stale` (409; data changed — ask for a new quote), `not_found` (404).
+
+## Objects
+
+```ts
+type User = { id: string; display_name: string; auth_provider: "dev" | "google" }
+type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string; preview: string }
+type Conversation = ConversationSummary & { messages: Message[] }
+type Message = {
+  id: string; role: "user" | "assistant" | "system"   // system = booking results etc.
+  text: string                                        // markdown for assistant; plain for user
+  cards: Card[]; created_at: string
+}
+type Leg = { from: string; to: string; distance_display: string; distance: string }
+type CardState = { status: "quoted" | "presented" | "booked" | "expired" | "stale";
+                   bookable: boolean; nonce: string | null; ticket_id: string | null }
+
+type Card = QuoteCard | BookingRequestCard | TicketCard | TicketListCard | NoServiceCard
+          | AmbiguousCityCard | UnknownCityCard | NoticeCard
+
+type QuoteCard = { type: "quote"; id: string /* q_ */; origin: string; destination: string
+  legs: Leg[]; transfers: string[]; distance_display: string; price_display: string
+  distance: string; price: string; expires_at: string; state: CardState }
+type BookingRequestCard = Omit<QuoteCard, "type"> & { type: "booking_request" }   // id is the quote id
+type TicketCard = { type: "ticket"; id: string /* t_ */; quote_id: string; origin: string; destination: string
+  legs: Leg[]; transfers: string[]; distance_display: string; price_display: string; booked_at: string }
+type TicketListCard = { type: "ticket_list"; count: number; filter: Record<string, string>; tickets: TicketCard[] }
+type NoServiceCard = { type: "no_service"; city: string
+  nearest: { city: string; distance_display: string }[] }          // up to 3, nearest first
+type AmbiguousCityCard = { type: "ambiguous_city"; query: string
+  candidates: { city: string; is_hub: boolean; connected_hubs: string[] }[] }
+type UnknownCityCard = { type: "unknown_city"; query: string; suggestions: string[] }
+type NoticeCard = { type: "notice"; code: "same_city" | "unreachable" | "quote_expired" | "stale"; message: string }
+
+type Trace = { quote_id: string; formula: string; algorithm: string; network_fingerprint: string
+  legs: (Leg & { from_coord: [number, number]; to_coord: [number, number]; source: string })[]
+  distance: string; price: string; distance_display: string; price_display: string; note: string }
+```
+
+Card buttons: a quote or booking-request card shows **Confirm booking** only when `state.bookable` is true; clicking
+posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is running, buttons stay disabled until
+`done`; after `done` (or on reload) the card state from the server wins.
+
+## SSE stream (`POST /api/conversations/{id}/messages`)
+
+`Content-Type: text/event-stream`. Each event: `event: <name>\ndata: <json>\n\n`.
+
+| event | data | notes |
+|---|---|---|
+| `user_message` | `Message` | the stored user message, first event |
+| `status` | `{"text":"Looking up routes…"}` | progress, replaceable |
+| `card` | `{"card": Card}` | push immediately; state.bookable is false until `done` |
+| `delta` | `{"text":"…"}` | append; already validated text (one sentence or more) |
+| `replace` | `{"text":"…"}` | replace the whole assistant text so far |
+| `ping` | `{}` | heartbeat every 15 s; ignore |
+| `done` | `{"message": Message}` | final assistant message incl. cards with current states |
+| `error` | `{"code","message"}` | stream ends; the user message is kept |
+
+Example: `contract/fixtures/sse_quote_turn.txt`.
+# 03-slice — 本地可运行的端到端版本（任务拆分）
+
+User request (2026-11-23, verbatim): 「同时你可以拆分计划了，比如前后端相对比较独立的部分，依旧走 pfstack issue / pr /
+验收的 loop，根据任务难易程度选取适当的模型做，需要控制预算。」
+
+## Take-home check（2026-11-23）
+| 要求 | 本迭代落点 | 结论 |
+|---|---|---|
+| 1 自然语言输入 | T3 agent loop + T6 聊天页 | 一致 |
+| 2/3/4/5/6 数据、路线、价格 | 02-core（进行中）+ T2 `airline/` 复用，不重算 | 一致 |
+| 7 下单前确认完整路线 / 距离 / 价格 | T2 出票条件 B1–B7 + T3 `request_booking` + T6 确认卡按钮 | 一致 |
+| 8 无服务城市告知 + 最近有服务城市 | T2/T3 无服务记录 + T6 无服务卡 | 一致 |
+| 9 已购票可自然语言查询 | T3 `list_my_tickets` + T5 `/api/tickets` + T6 我的机票 | 一致 |
+| 10 可查看全部对话 | T5 会话接口 + T6 历史 | 一致 |
+| 交付：本地可运行 + README | T7 compose + README「运行」 | 一致 |
+无冲突。
+
+## Goal
+迭代结束时：`docker compose up` → 打开 `http://localhost:3000` → 固定账号登录 → 自然语言询价 → 确认卡点击出票 → 查票 → 看历史会话，
+全程可演示；首版部署到 homelab（不公开）。界面只要求可用和移动端不破，打磨在 04。
+
+## 流程（issue / PR / 验收 loop）
+1. 协调者为每个任务开 GitHub issue：范围、拥有的文件、依赖、验收标准、模型、链接本计划。
+2. worker：一个任务 = 一个 issue = 一个分支 `it03-<task>` = 一个 worktree；每个可验证单元 commit + push；
+   完成后开 PR（`Closes #n`），PR 描述写验证结果；写 `docs/iterations/03-slice/<task>/STATE.md`。
+3. 协调者验收：读 diff、`tool/review_lint.py`、`tool/test_diff.sh`、前端截图（ego-browser 桌面 + 手机）、对照 issue 验收标准；
+   高风险 PR（T2、T3）另开一次只读评审。通过 → squash merge 到 `main` → 关 issue → 导出会话。
+4. 每个任务最多 3 轮「实施 → 验收 → 修改」，超过就停下交给用户裁决。
+
+## 任务拆分
+
+| # | 任务 | 依赖 | 拥有的文件 | 模型（理由） |
+|---|---|---|---|---|
+| T1 | **API 与卡片契约**：HTTP 接口、SSE 事件、各类卡片 JSON 结构、错误码；`contract/fixtures/*.json` 示例，前后端测试共用 | 无 | `docs/api/contract.md`、`contract/**` | 协调者自己写（决定接口，不外包） |
+| T2 | **store + airline**：app.db 表、迁移、`airline/`（报价、request_booking、nonce、出票 B1–B7、查票、trace）、出票不变式模型测试 | 02-core 合并 | `backend/app/store/**`、`backend/app/airline/**`、对应测试 | Fable 5.2（并发、状态、正确性，P0 风险） |
+| T3 | **agent**：httpx OpenAI 兼容流式 client、agent loop、4 个工具、ReplyGuard、模板回退、SSE 事件生成、假 LLM 回放测试；先做约 20 例真模型的 ReplyGuard 实测 | T2 接口（可先对接口桩） | `backend/app/agent/**`、对应测试 | Fable 5.2（设计核心、P0 风险） |
+| T4 | **LLM 评测**：`backend/evals/` 用例格式、运行器、工具调用成功率与轨迹检查、报告；首批用例（含 Abu Dhabi、San Jose、否定句不请求下单） | T3 | `backend/evals/**` | Sonnet 5.5（框架代码中等难度） |
+| T5 | **HTTP API**：固定账号登录、会话 / 消息（SSE 包装 T3）、出票按钮接口、trace、tickets、`/api/health`、`/api/debug/sse-ping`、`/api/config`、归属检查、API 测试 | T2、T3 | `backend/app/api/**`、`backend/app/main.py`、对应测试 | Sonnet 5.5（按契约实现，中等） |
+| T6 | **最简前端**：Next.js + TS + Tailwind + shadcn 基础组件；登录、聊天（SSE 读取、streamdown 渲染、卡片组件按契约 fixtures）、我的机票、历史会话；开发时 `/api` 转发；移动端不破；vitest 组件测试 | T1 | `frontend/**` | Sonnet 5.5（前端常规工作） |
+| T7 | **compose + README**：`api` / `web` / `proxy`（Caddy）Dockerfile 与 compose、日志轮转、`.env.example`、README「本地运行」、homelab 首次部署 | T5、T6 | `docker-compose.yml`、`deploy/**`、`*/Dockerfile`、`.env.example`、README 运行一节 | Haiku 5.5（机械配置；部署由协调者执行） |
+
+### 排期（同时最多 2 个 worker）
+| 波次 | worker 1 | worker 2 | 协调者 |
+|---|---|---|---|
+| A（现在） | 02-core（进行中，Fable） | T6 前端（Sonnet，对 T1 fixtures 开发） | 先写 T1 契约，再开 T6 |
+| B | T2 store + airline（Fable） | T6 继续 / T7 先做 Dockerfile 骨架（Haiku） | 审 02-core，合并 |
+| C | T3 agent（Fable） | T5 API（Sonnet，T2 合并后） | 审 T2（含只读评审） |
+| D | T4 评测（Sonnet） | T7 收尾（Haiku） | 审 T3（含只读评审）、T5；端到端联调；部署 homelab |
+
+## 预算控制
+- 模型按难度：Fable 5.2 只用于 02-core、T2、T3（正确性和 P0 风险集中处）；T4 / T5 / T6 用 Sonnet 5.5；T7 用 Haiku 5.5。
+- 只读评审只给 T2、T3 各一次（Fable），其他 PR 由协调者审。
+- worker 任务描述写清范围和拥有的文件，禁止扩需求；每任务最多 3 轮。
+- 真模型评测：单次估算 < $1 直接跑，超出先问；平时测试一律用假 LLM。
+- 同时最多 2 个 worker；任务卡住时先问协调者，不自己大范围探索。
+
+## Acceptance（迭代级，tier A）
+- 本地 `docker compose up` 后完成上面 Goal 里的完整流程，录一段 ego-browser 操作（桌面 + 手机截图各一套）。
+- `tool/test_diff.sh` 无新失败；`tool/review_lint.py` 全过；出票不变式模型测试固定种子通过。
+- 一次真模型评测报告（工具调用成功率、轨迹通过率、ReplyGuard 回退率、费用）。
+- homelab 首次部署：`https://ocean-above.potafree.net/api/health` 200；`/api/debug/sse-ping` 首条事件及时到达。
+- README「本地运行」可照做；设计文档同步更新；会话已导出。
+
+## Open questions for the user
+- 无（按上面的模型分配和排期执行，除非你要调整）。
+=== contract/fixtures/booking_error_stale.json
+{
+  "error": {
+    "code": "stale",
+    "message": "Route data changed since this quote. Please ask for a new quote."
+  }
+}
+
+=== contract/fixtures/booking_ok.json
+{
+  "ticket": {
+    "type": "ticket",
+    "id": "t_91b2",
+    "quote_id": "q_7f3a",
+    "origin": "Guangzhou",
+    "destination": "Lima",
+    "legs": [
+      {
+        "from": "Guangzhou",
+        "to": "Frankfurt",
+        "distance_display": "1,362.1 km",
+        "distance": "1362.100000000000000000000000000000"
+      },
+      {
+        "from": "Frankfurt",
+        "to": "Singapore",
+        "distance_display": "1,872.4 km",
+        "distance": "1872.400000000000000000000000000000"
+      },
+      {
+        "from": "Singapore",
+        "to": "Amsterdam",
+        "distance_display": "4,097.1 km",
+        "distance": "4097.100000000000000000000000000000"
+      },
+      {
+        "from": "Amsterdam",
+        "to": "Lima",
+        "distance_display": "1,597.0 km",
+        "distance": "1597.000000000000000000000000000000"
+      }
+    ],
+    "transfers": [
+      "Frankfurt",
+      "Singapore",
+      "Amsterdam"
+    ],
+    "distance_display": "8,928.6 km",
+    "price_display": "$1,160.71",
+    "booked_at": "2026-11-23T08:03:12Z"
+  },
+  "message": {
+    "id": "m_5",
+    "role": "system",
+    "text": "Ticket booked.",
+    "cards": [
+      {
+        "type": "ticket",
+        "id": "t_91b2",
+        "quote_id": "q_7f3a",
+        "origin": "Guangzhou",
+        "destination": "Lima",
+        "legs": [
+          {
+            "from": "Guangzhou",
+            "to": "Frankfurt",
+            "distance_display": "1,362.1 km",
+            "distance": "1362.100000000000000000000000000000"
+          },
+          {
+            "from": "Frankfurt",
+            "to": "Singapore",
+            "distance_display": "1,872.4 km",
+            "distance": "1872.400000000000000000000000000000"
+          },
+          {
+            "from": "Singapore",
+            "to": "Amsterdam",
+            "distance_display": "4,097.1 km",
+            "distance": "4097.100000000000000000000000000000"
+          },
+          {
+            "from": "Amsterdam",
+            "to": "Lima",
+            "distance_display": "1,597.0 km",
+            "distance": "1597.000000000000000000000000000000"
+          }
+        ],
+        "transfers": [
+          "Frankfurt",
+          "Singapore",
+          "Amsterdam"
+        ],
+        "distance_display": "8,928.6 km",
+        "price_display": "$1,160.71",
+        "booked_at": "2026-11-23T08:03:12Z"
+      }
+    ],
+    "created_at": "2026-11-23T08:03:12Z"
+  }
+}
+
+=== contract/fixtures/config.json
+{
+  "dev_login": true,
+  "google_client_id": null
+}
+
+=== contract/fixtures/conversation.json
+{
+  "id": "c_01",
+  "title": "Guangzhou to Lima",
+  "created_at": "2026-11-23T08:00:00Z",
+  "updated_at": "2026-11-23T08:03:12Z",
+  "preview": "Your ticket is booked.",
+  "messages": [
+    {
+      "id": "m_1",
+      "role": "user",
+      "text": "I want to fly from Guangzhou to Lima",
+      "cards": [],
+      "created_at": "2026-11-23T08:00:00Z"
+    },
+    {
+      "id": "m_2",
+      "role": "assistant",
+      "text": "There is no direct flight, so the cheapest route goes through **Frankfurt**, **Singapore** and **Amsterdam**: 8,928.6 km for $1,160.71. Shall I book it?",
+      "cards": [
+        {
+          "type": "quote",
+          "id": "q_7f3a",
+          "origin": "Guangzhou",
+          "destination": "Lima",
+          "legs": [
+            {
+              "from": "Guangzhou",
+              "to": "Frankfurt",
+              "distance_display": "1,362.1 km",
+              "distance": "1362.100000000000000000000000000000"
+            },
+            {
+              "from": "Frankfurt",
+              "to": "Singapore",
+              "distance_display": "1,872.4 km",
+              "distance": "1872.400000000000000000000000000000"
+            },
+            {
+              "from": "Singapore",
+              "to": "Amsterdam",
+              "distance_display": "4,097.1 km",
+              "distance": "4097.100000000000000000000000000000"
+            },
+            {
+              "from": "Amsterdam",
+              "to": "Lima",
+              "distance_display": "1,597.0 km",
+              "distance": "1597.000000000000000000000000000000"
+            }
+          ],
+          "transfers": [
+            "Frankfurt",
+            "Singapore",
+            "Amsterdam"
+          ],
+          "distance_display": "8,928.6 km",
+          "price_display": "$1,160.71",
+          "distance": "8928.600000000000000000000000000000",
+          "price": "1160.718000000000000000000000000000",
+          "expires_at": "2026-11-23T08:15:00Z",
+          "state": {
+            "status": "booked",
+            "bookable": false,
+            "nonce": null,
+            "ticket_id": "t_91b2"
+          }
+        }
+      ],
+      "created_at": "2026-11-23T08:00:04Z"
+    },
+    {
+      "id": "m_3",
+      "role": "user",
+      "text": "Yes, book it",
+      "cards": [],
+      "created_at": "2026-11-23T08:02:50Z"
+    },
+    {
+      "id": "m_4",
+      "role": "assistant",
+      "text": "Please check the route below and press **Confirm booking** to buy the ticket.",
+      "cards": [
+        {
+          "type": "booking_request",
+          "id": "q_7f3a",
+          "origin": "Guangzhou",
+          "destination": "Lima",
+          "legs": [
+            {
+              "from": "Guangzhou",
+              "to": "Frankfurt",
+              "distance_display": "1,362.1 km",
+              "distance": "1362.100000000000000000000000000000"
+            },
+            {
+              "from": "Frankfurt",
+              "to": "Singapore",
+              "distance_display": "1,872.4 km",
+              "distance": "1872.400000000000000000000000000000"
+            },
+            {
+              "from": "Singapore",
+              "to": "Amsterdam",
+              "distance_display": "4,097.1 km",
+              "distance": "4097.100000000000000000000000000000"
+            },
+            {
+              "from": "Amsterdam",
+              "to": "Lima",
+              "distance_display": "1,597.0 km",
+              "distance": "1597.000000000000000000000000000000"
+            }
+          ],
+          "transfers": [
+            "Frankfurt",
+            "Singapore",
+            "Amsterdam"
+          ],
+          "distance_display": "8,928.6 km",
+          "price_display": "$1,160.71",
+          "distance": "8928.600000000000000000000000000000",
+          "price": "1160.718000000000000000000000000000",
+          "expires_at": "2026-11-23T08:15:00Z",
+          "state": {
+            "status": "booked",
+            "bookable": false,
+            "nonce": null,
+            "ticket_id": "t_91b2"
+          }
+        }
+      ],
+      "created_at": "2026-11-23T08:02:53Z"
+    },
+    {
+      "id": "m_5",
+      "role": "system",
+      "text": "Ticket booked.",
+      "cards": [
+        {
+          "type": "ticket",
+          "id": "t_91b2",
+          "quote_id": "q_7f3a",
+          "origin": "Guangzhou",
+          "destination": "Lima",
+          "legs": [
+            {
+              "from": "Guangzhou",
+              "to": "Frankfurt",
+              "distance_display": "1,362.1 km",
+              "distance": "1362.100000000000000000000000000000"
+            },
+            {
+              "from": "Frankfurt",
+              "to": "Singapore",
+              "distance_display": "1,872.4 km",
+              "distance": "1872.400000000000000000000000000000"
+            },
+            {
+              "from": "Singapore",
+              "to": "Amsterdam",
+              "distance_display": "4,097.1 km",
+              "distance": "4097.100000000000000000000000000000"
+            },
+            {
+              "from": "Amsterdam",
+              "to": "Lima",
+              "distance_display": "1,597.0 km",
+              "distance": "1597.000000000000000000000000000000"
+            }
+          ],
+          "transfers": [
+            "Frankfurt",
+            "Singapore",
+            "Amsterdam"
+          ],
+          "distance_display": "8,928.6 km",
+          "price_display": "$1,160.71",
+          "booked_at": "2026-11-23T08:03:12Z"
+        }
+      ],
+      "created_at": "2026-11-23T08:03:12Z"
+    },
+    {
+      "id": "m_6",
+      "role": "user",
+      "text": "Can I fly from Abu Dhabi? And to San Jose?",
+      "cards": [],
+      "created_at": "2026-11-23T08:05:00Z"
+    },
+    {
+      "id": "m_7",
+      "role": "assistant",
+      "text": "Abu Dhabi has no service yet; the nearest city with service is Tirana. There are two cities called San Jose — which one do you mean?",
+      "cards": [
+        {
+          "type": "no_service",
+          "city": "Abu Dhabi",
+          "nearest": [
+            {
+              "city": "Tirana",
+              "distance_display": "350.9 km"
+            },
+            {
+              "city": "Odesa",
+              "distance_display": "464.7 km"
+            },
+            {
+              "city": "Whitehorse",
+              "distance_display": "541.0 km"
+            }
+          ]
+        },
+        {
+          "type": "ambiguous_city",
+          "query": "San Jose",
+          "candidates": [
+            {
+              "city": "San Jose",
+              "is_hub": false,
+              "connected_hubs": [
+                "Tokyo"
+              ]
+            },
+            {
+              "city": "San José",
+              "is_hub": false,
+              "connected_hubs": [
+                "Sydney",
+                "Tokyo"
+              ]
+            }
+          ]
+        }
+      ],
+      "created_at": "2026-11-23T08:05:04Z"
+    },
+    {
+      "id": "m_8",
+      "role": "user",
+      "text": "Which tickets do I have?",
+      "cards": [],
+      "created_at": "2026-11-23T08:06:00Z"
+    },
+    {
+      "id": "m_9",
+      "role": "assistant",
+      "text": "You have 1 ticket.",
+      "cards": [
+        {
+          "type": "ticket_list",
+          "count": 1,
+          "filter": {},
+          "tickets": [
+            {
+              "type": "ticket",
+              "id": "t_91b2",
+              "quote_id": "q_7f3a",
+              "origin": "Guangzhou",
+              "destination": "Lima",
+              "legs": [
+                {
+                  "from": "Guangzhou",
+                  "to": "Frankfurt",
+                  "distance_display": "1,362.1 km",
+                  "distance": "1362.100000000000000000000000000000"
+                },
+                {
+                  "from": "Frankfurt",
+                  "to": "Singapore",
+                  "distance_display": "1,872.4 km",
+                  "distance": "1872.400000000000000000000000000000"
+                },
+                {
+                  "from": "Singapore",
+                  "to": "Amsterdam",
+                  "distance_display": "4,097.1 km",
+                  "distance": "4097.100000000000000000000000000000"
+                },
+                {
+                  "from": "Amsterdam",
+                  "to": "Lima",
+                  "distance_display": "1,597.0 km",
+                  "distance": "1597.000000000000000000000000000000"
+                }
+              ],
+              "transfers": [
+                "Frankfurt",
+                "Singapore",
+                "Amsterdam"
+              ],
+              "distance_display": "8,928.6 km",
+              "price_display": "$1,160.71",
+              "booked_at": "2026-11-23T08:03:12Z"
+            }
+          ]
+        }
+      ],
+      "created_at": "2026-11-23T08:06:02Z"
+    },
+    {
+      "id": "m_10",
+      "role": "user",
+      "text": "Gotham City to Atlantis",
+      "cards": [],
+      "created_at": "2026-11-23T08:07:00Z"
+    },
+    {
+      "id": "m_11",
+      "role": "assistant",
+      "text": "I couldn't find those cities.",
+      "cards": [
+        {
+          "type": "unknown_city",
+          "query": "Gotham City",
+          "suggestions": []
+        },
+        {
+          "type": "unknown_city",
+          "query": "Atlantis",
+          "suggestions": [
+            "Atlanta"
+          ]
+        }
+      ],
+      "created_at": "2026-11-23T08:07:02Z"
+    },
+    {
+      "id": "m_12",
+      "role": "user",
+      "text": "Shanghai to Shanghai",
+      "cards": [],
+      "created_at": "2026-11-23T08:08:00Z"
+    },
+    {
+      "id": "m_13",
+      "role": "assistant",
+      "text": "Origin and destination are the same city.",
+      "cards": [
+        {
+          "type": "notice",
+          "code": "same_city",
+          "message": "Origin and destination are the same city."
+        }
+      ],
+      "created_at": "2026-11-23T08:08:01Z"
+    }
+  ]
+}
+
+=== contract/fixtures/conversations.json
+{
+  "conversations": [
+    {
+      "id": "c_01",
+      "title": "Guangzhou to Lima",
+      "created_at": "2026-11-23T08:00:00Z",
+      "updated_at": "2026-11-23T08:03:12Z",
+      "preview": "Your ticket is booked."
+    },
+    {
+      "id": "c_00",
+      "title": "Abu Dhabi",
+      "created_at": "2026-11-22T10:00:00Z",
+      "updated_at": "2026-11-22T10:01:00Z",
+      "preview": "Abu Dhabi has no service yet."
+    }
+  ]
+}
+
+=== contract/fixtures/me.json
+{
+  "id": "u_dev",
+  "display_name": "demo",
+  "auth_provider": "dev"
+}
+
+=== contract/fixtures/sse_quote_turn.txt
+event: user_message
+data: {"id": "m_1", "role": "user", "text": "I want to fly from Guangzhou to Lima", "cards": [], "created_at": "2026-11-23T08:00:00Z"}
+
+event: status
+data: {"text": "Looking up routes…"}
+
+event: card
+data: {"card": {"type": "quote", "id": "q_7f3a", "origin": "Guangzhou", "destination": "Lima", "legs": [{"from": "Guangzhou", "to": "Frankfurt", "distance_display": "1,362.1 km", "distance": "1362.100000000000000000000000000000"}, {"from": "Frankfurt", "to": "Singapore", "distance_display": "1,872.4 km", "distance": "1872.400000000000000000000000000000"}, {"from": "Singapore", "to": "Amsterdam", "distance_display": "4,097.1 km", "distance": "4097.100000000000000000000000000000"}, {"from": "Amsterdam", "to": "Lima", "distance_display": "1,597.0 km", "distance": "1597.000000000000000000000000000000"}], "transfers": ["Frankfurt", "Singapore", "Amsterdam"], "distance_display": "8,928.6 km", "price_display": "$1,160.71", "distance": "8928.600000000000000000000000000000", "price": "1160.718000000000000000000000000000", "expires_at": "2026-11-23T08:15:00Z", "state": {"status": "quoted", "bookable": false, "nonce": null, "ticket_id": null}}}
+
+event: delta
+data: {"text": "There is no direct flight, so the cheapest route goes through **Frankfurt**, **Singapore** and **Amsterdam**: "}
+
+event: delta
+data: {"text": "8,928.6 km for $1,160.71. Shall I book it?"}
+
+event: ping
+data: {}
+
+event: done
+data: {"message": {"id": "m_2", "role": "assistant", "text": "There is no direct flight, so the cheapest route goes through **Frankfurt**, **Singapore** and **Amsterdam**: 8,928.6 km for $1,160.71. Shall I book it?", "cards": [{"type": "quote", "id": "q_7f3a", "origin": "Guangzhou", "destination": "Lima", "legs": [{"from": "Guangzhou", "to": "Frankfurt", "distance_display": "1,362.1 km", "distance": "1362.100000000000000000000000000000"}, {"from": "Frankfurt", "to": "Singapore", "distance_display": "1,872.4 km", "distance": "1872.400000000000000000000000000000"}, {"from": "Singapore", "to": "Amsterdam", "distance_display": "4,097.1 km", "distance": "4097.100000000000000000000000000000"}, {"from": "Amsterdam", "to": "Lima", "distance_display": "1,597.0 km", "distance": "1597.000000000000000000000000000000"}], "transfers": ["Frankfurt", "Singapore", "Amsterdam"], "distance_display": "8,928.6 km", "price_display": "$1,160.71", "distance": "8928.600000000000000000000000000000", "price": "1160.718000000000000000000000000000", "expires_at": "2026-11-23T08:15:00Z", "state": {"status": "presented", "bookable": true, "nonce": "n_3c1d9e", "ticket_id": null}}], "created_at": "2026-11-23T08:00:04Z"}}
+
+
+=== contract/fixtures/tickets.json
+{
+  "tickets": [
+    {
+      "type": "ticket",
+      "id": "t_91b2",
+      "quote_id": "q_7f3a",
+      "origin": "Guangzhou",
+      "destination": "Lima",
+      "legs": [
+        {
+          "from": "Guangzhou",
+          "to": "Frankfurt",
+          "distance_display": "1,362.1 km",
+          "distance": "1362.100000000000000000000000000000"
+        },
+        {
+          "from": "Frankfurt",
+          "to": "Singapore",
+          "distance_display": "1,872.4 km",
+          "distance": "1872.400000000000000000000000000000"
+        },
+        {
+          "from": "Singapore",
+          "to": "Amsterdam",
+          "distance_display": "4,097.1 km",
+          "distance": "4097.100000000000000000000000000000"
+        },
+        {
+          "from": "Amsterdam",
+          "to": "Lima",
+          "distance_display": "1,597.0 km",
+          "distance": "1597.000000000000000000000000000000"
+        }
+      ],
+      "transfers": [
+        "Frankfurt",
+        "Singapore",
+        "Amsterdam"
+      ],
+      "distance_display": "8,928.6 km",
+      "price_display": "$1,160.71",
+      "booked_at": "2026-11-23T08:03:12Z"
+    }
+  ]
+}
+
+=== contract/fixtures/trace.json
+{
+  "quote_id": "q_7f3a",
+  "formula": "price = Σ sqrt(dx²+dy²) × 0.13 USD; Decimal prec 50, stored to 30 dp",
+  "algorithm": "hub all-pairs (networkx) + endpoint enumeration; tie-break: legs, names",
+  "network_fingerprint": "sha256:0f1e2d…",
+  "legs": [
+    {
+      "from": "Guangzhou",
+      "to": "Frankfurt",
+      "distance_display": "1,362.1 km",
+      "distance": "1362.100000000000000000000000000000",
+      "from_coord": [
+        -9278,
+        3445
+      ],
+      "to_coord": [
+        -7957,
+        3113
+      ],
+      "source": "locations.connected_hubs(Guangzhou)"
+    },
+    {
+      "from": "Frankfurt",
+      "to": "Singapore",
+      "distance_display": "1,872.4 km",
+      "distance": "1872.400000000000000000000000000000",
+      "from_coord": [
+        -7957,
+        3113
+      ],
+      "to_coord": [
+        -6991,
+        1509
+      ],
+      "source": "hub_links(Frankfurt, Singapore)"
+    },
+    {
+      "from": "Singapore",
+      "to": "Amsterdam",
+      "distance_display": "4,097.1 km",
+      "distance": "4097.100000000000000000000000000000",
+      "from_coord": [
+        -6991,
+        1509
+      ],
+      "to_coord": [
+        -7318,
+        -2575
+      ],
+      "source": "hub_links(Singapore, Amsterdam)"
+    },
+    {
+      "from": "Amsterdam",
+      "to": "Lima",
+      "distance_display": "1,597.0 km",
+      "distance": "1597.000000000000000000000000000000",
+      "from_coord": [
+        -7318,
+        -2575
+      ],
+      "to_coord": [
+        -6546,
+        -3973
+      ],
+      "source": "locations.connected_hubs(Lima)"
+    }
+  ],
+  "distance": "8928.600000000000000000000000000000",
+  "price": "1160.718000000000000000000000000000",
+  "distance_display": "8,928.6 km",
+  "price_display": "$1,160.71",
+  "note": "Price is computed from the unrounded distance, so displayed distance × 0.13 can differ from the displayed price by one cent."
+}
+

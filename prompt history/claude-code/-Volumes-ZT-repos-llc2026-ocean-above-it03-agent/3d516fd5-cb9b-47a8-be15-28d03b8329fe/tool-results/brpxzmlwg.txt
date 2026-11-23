@@ -1,0 +1,816 @@
+"""Airline-side capabilities behind one interface (design §2). The agent and the HTTP layer depend
+only on this package; it could later be served as an MCP server or backed by a real booking
+system. Schedules, seats and inventory are intentionally absent: locations.db has no such data."""
+from .locks import ConversationBusy, ConversationLocks
+from .service import QUOTE_TTL, Airline, BookingError, NotFound, Result
+
+__all__ = ["QUOTE_TTL", "Airline", "BookingError", "ConversationBusy", "ConversationLocks",
+           "NotFound", "Result"]
+"""One lock per conversation, shared by chat turns and the booking endpoint (design §4.6, B7).
+
+In-process only: the API runs as a single uvicorn worker. The database does not rely on this lock
+for B5/B7 (those hold through `BEGIN IMMEDIATE` and `tickets.quote_id UNIQUE`); the lock keeps a
+booking click and a running chat turn of the same conversation from interleaving.
+
+The lock is NOT reentrant. `Airline.book` takes it itself; everything else in `Airline` expects
+the caller (the chat turn) to hold it.
+"""
+from __future__ import annotations
+
+import asyncio
+import threading
+import time
+from contextlib import asynccontextmanager, contextmanager
+from typing import AsyncIterator, Iterator
+
+
+class ConversationBusy(Exception):
+    """The conversation lock was not obtained within the timeout."""
+
+
+class ConversationLocks:
+    def __init__(self) -> None:
+        self._mutex = threading.Lock()
+        self._entries: dict[str, list] = {}  # conversation id -> [lock, holders + waiters]
+
+    def _checkout(self, conversation_id: str) -> threading.Lock:
+        with self._mutex:
+            entry = self._entries.setdefault(conversation_id, [threading.Lock(), 0])
+            entry[1] += 1
+            return entry[0]
+
+    def _checkin(self, conversation_id: str) -> None:
+        with self._mutex:
+            entry = self._entries[conversation_id]
+            entry[1] -= 1
+            if entry[1] == 0:
+                del self._entries[conversation_id]
+
+    @contextmanager
+    def hold(self, conversation_id: str, timeout: float | None = None) -> Iterator[None]:
+        """Blocking form, for sync code (threadpool endpoints). Never call it on the event loop:
+        use `hold_async` there."""
+        lock = self._checkout(conversation_id)
+        try:
+            if not lock.acquire(timeout=-1 if timeout is None else timeout):
+                raise ConversationBusy(conversation_id)
+            try:
+                yield
+            finally:
+                lock.release()
+        finally:
+            self._checkin(conversation_id)
+
+    @asynccontextmanager
+    async def hold_async(self, conversation_id: str, timeout: float | None = None,
+                         poll: float = 0.01) -> AsyncIterator[None]:
+        """Async form of the same lock: waits without blocking the event loop, safe to cancel
+        while waiting, and may be held across awaits (a whole streamed turn)."""
+        lock = self._checkout(conversation_id)
+        try:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while not lock.acquire(blocking=False):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ConversationBusy(conversation_id)
+                await asyncio.sleep(poll)
+            try:
+                yield
+            finally:
+                lock.release()
+        finally:
+            self._checkin(conversation_id)
+
+    def locked(self, conversation_id: str) -> bool:
+        with self._mutex:
+            entry = self._entries.get(conversation_id)
+            return entry is not None and entry[0].locked()
+"""app.db access (stdlib sqlite3). `Store` for whole operations, `records` for composable ones."""
+from . import records
+from .db import SCHEMA_VERSION, Clock, Store, iso, new_id, parse_iso, utc_now
+
+__all__ = ["SCHEMA_VERSION", "Clock", "Store", "iso", "new_id", "parse_iso", "records", "utc_now"]
+"""Row-level operations on app.db. Every function takes an open connection, so several of them
+compose inside one `Store.write()` transaction. Rows are returned as plain dicts with json columns
+already decoded. `now` is always the caller's stored-form time string (`Store.now()`)."""
+from __future__ import annotations
+
+import json
+import sqlite3
+from typing import Any, Iterable
+
+from .db import new_id, to_json
+
+PREVIEW_CHARS = 120
+
+_USER_COLS = "id, auth_provider, provider_sub, email, display_name, created_at"
+_MESSAGE_COLS = "id, conversation_id, role, text, cards, guard_problems, created_at"
+_QUOTE_COLS = (
+    "id, conversation_id, user_id, origin, destination, legs, distance, price, network_fingerprint, "
+    "status, status_reason, created_at, expires_at, presented_at, closed_at"
+)
+_TICKET_COLS = (
+    "id, user_id, quote_id, origin, destination, legs_snapshot, distance, price, "
+    "network_fingerprint, confirmed_message_id, booked_at"
+)
+
+
+def _row(row: sqlite3.Row | None, json_cols: Iterable[str] = ()) -> dict | None:
+    if row is None:
+        return None
+    out = dict(row)
+    for col in json_cols:
+        if out[col] is not None:
+            out[col] = json.loads(out[col])
+    return out
+
+
+# --- users ---------------------------------------------------------------------------------
+def upsert_user(con, now: str, auth_provider: str, provider_sub: str, display_name: str,
+                email: str | None = None) -> dict:
+    """The user for (auth_provider, provider_sub); created on first sight, name/email refreshed."""
+    con.execute(
+        "INSERT INTO users (id, auth_provider, provider_sub, email, display_name, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (auth_provider, provider_sub) DO UPDATE SET "
+        "email = excluded.email, display_name = excluded.display_name",
+        (new_id("u"), auth_provider, provider_sub, email, display_name, now),
+    )
+    row = con.execute(
+        f"SELECT {_USER_COLS} FROM users WHERE auth_provider = ? AND provider_sub = ?",
+        (auth_provider, provider_sub),
+    ).fetchone()
+    return _row(row)
+
+
+def get_user(con, user_id: str) -> dict | None:
+    return _row(con.execute(f"SELECT {_USER_COLS} FROM users WHERE id = ?", (user_id,)).fetchone())
+
+
+# --- conversations -------------------------------------------------------------------------
+_CONVERSATION_SELECT = (
+    "SELECT c.id, c.title, c.created_at, c.updated_at, "
+    "COALESCE((SELECT substr(m.text, 1, ?) FROM messages m WHERE m.conversation_id = c.id "
+    "          AND m.text <> '' ORDER BY m.seq DESC LIMIT 1), '') AS preview "
+    "FROM conversations c "
+)
+
+
+def create_conversation(con, now: str, user_id: str, title: str = "") -> dict:
+    cid = new_id("c")
+    con.execute(
+        "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (cid, user_id, title, now, now),
+    )
+    return {"id": cid, "title": title, "created_at": now, "updated_at": now, "preview": ""}
+
+
+def get_conversation(con, user_id: str, conversation_id: str) -> dict | None:
+    """Contract `ConversationSummary`, or None when missing or owned by someone else."""
+    row = con.execute(
+        _CONVERSATION_SELECT + "WHERE c.id = ? AND c.user_id = ?",
+        (PREVIEW_CHARS, conversation_id, user_id),
+    ).fetchone()
+    return _row(row)
+
+
+def list_conversations(con, user_id: str) -> list[dict]:
+    """Contract `ConversationSummary` list, most recently updated first."""
+    rows = con.execute(
+        _CONVERSATION_SELECT + "WHERE c.user_id = ? ORDER BY c.updated_at DESC, c.rowid DESC",
+        (PREVIEW_CHARS, user_id),
+    ).fetchall()
+    return [_row(r) for r in rows]
+
+
+def set_conversation_title(con, user_id: str, conversation_id: str, title: str) -> bool:
+    cur = con.execute(
+        "UPDATE conversations SET title = ? WHERE id = ? AND user_id = ?",
+        (title, conversation_id, user_id),
+    )
+    return cur.rowcount == 1
+
+
+def conversation_owner(con, conversation_id: str) -> str | None:
+    row = con.execute("SELECT user_id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    return None if row is None else row["user_id"]
+
+
+# --- messages ------------------------------------------------------------------------------
+def add_message(con, now: str, conversation_id: str, role: str, text: str,
+                cards: Iterable[dict] = (), guard_problems: Any = None) -> dict:
+    mid = new_id("m")
+    cards = list(cards)
+    con.execute(
+        "INSERT INTO messages (id, conversation_id, role, text, cards, guard_problems, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (mid, conversation_id, role, text, to_json(cards),
+         None if guard_problems is None else to_json(guard_problems), now),
+    )
+    con.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
+    return {"id": mid, "conversation_id": conversation_id, "role": role, "text": text,
+            "cards": cards, "guard_problems": guard_problems, "created_at": now}
+
+
+def list_messages(con, conversation_id: str) -> list[dict]:
+    rows = con.execute(
+        f"SELECT {_MESSAGE_COLS} FROM messages WHERE conversation_id = ? ORDER BY seq",
+        (conversation_id,),
+    ).fetchall()
+    return [_row(r, ("cards", "guard_problems")) for r in rows]
+
+
+# --- call logs -----------------------------------------------------------------------------
+def add_llm_call(con, now: str, conversation_id: str, request: Any, response: Any,
+                 latency_ms: int | None, tokens: int | None, model: str | None) -> str:
+    lid = new_id("l")
+    con.execute(
+        "INSERT INTO llm_calls (id, conversation_id, request, response, latency_ms, tokens, model, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (lid, conversation_id, to_json(request), to_json(response), latency_ms, tokens, model, now),
+    )
+    return lid
+
+
+def list_llm_calls(con, conversation_id: str) -> list[dict]:
+    rows = con.execute(
+        "SELECT id, conversation_id, request, response, latency_ms, tokens, model, created_at "
+        "FROM llm_calls WHERE conversation_id = ? ORDER BY seq",
+        (conversation_id,),
+    ).fetchall()
+    return [_row(r, ("request", "response")) for r in rows]
+
+
+def add_tool_call(con, now: str, message_id: str, name: str, args: Any, result: Any,
+                  error: str | None, latency_ms: int | None) -> str:
+    tid = new_id("tc")
+    con.execute(
+        "INSERT INTO tool_calls (id, message_id, name, args, result, error, latency_ms, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (tid, message_id, name, to_json(args), None if result is None else to_json(result),
+         error, latency_ms, now),
+    )
+    return tid
+
+
+def list_tool_calls(con, message_id: str) -> list[dict]:
+    rows = con.execute(
+        "SELECT id, message_id, name, args, result, error, latency_ms, created_at "
+        "FROM tool_calls WHERE message_id = ? ORDER BY seq",
+        (message_id,),
+    ).fetchall()
+    return [_row(r, ("args", "result")) for r in rows]
+
+
+# --- quotes --------------------------------------------------------------------------------
+def insert_quote(con, *, now: str, expires_at: str, conversation_id: str, user_id: str,
+                 origin: str, destination: str, legs: list[dict], distance: str, price: str,
+                 network_fingerprint: str) -> dict:
+    qid = new_id("q")
+    con.execute(
+        "INSERT INTO quotes (id, conversation_id, user_id, origin, destination, legs, distance, "
+        "price, network_fingerprint, status, created_at, expires_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'quoted', ?, ?)",
+        (qid, conversation_id, user_id, origin, destination, to_json(legs), distance, price,
+         network_fingerprint, now, expires_at),
+    )
+    return get_quote(con, qid)
+
+
+def get_quote(con, quote_id: str) -> dict | None:
+    row = con.execute(f"SELECT {_QUOTE_COLS} FROM quotes WHERE id = ?", (quote_id,)).fetchone()
+    return _row(row, ("legs",))
+
+
+def set_quote_status(con, quote: dict, status: str, now: str, reason: str | None = None) -> None:
+    """Move a quote to `status` and update the dict in place. `presented` stamps presented_at;
+    the terminal states stamp closed_at. The row must still hold the status the caller read."""
+    column = "presented_at" if status == "presented" else "closed_at"
+    cur = con.execute(
+        f"UPDATE quotes SET status = ?, status_reason = ?, {column} = ? WHERE id = ? AND status = ?",
+        (status, reason, now, quote["id"], quote["status"]),
+    )
+    if cur.rowcount != 1:
+        raise RuntimeError(f"quote {quote['id']} changed underneath us")
+    quote.update({"status": status, "status_reason": reason, column: now})
+
+
+def add_quote_card(con, quote_id: str, message_id: str, now: str) -> None:
+    con.execute(
+        "INSERT OR IGNORE INTO quote_cards (quote_id, message_id, presented_at) VALUES (?, ?, ?)",
+        (quote_id, message_id, now),
+    )
+
+
+def quote_cards(con, quote_id: str) -> list[dict]:
+    rows = con.execute(
+        "SELECT quote_id, message_id, presented_at, nonce_used_at FROM quote_cards "
+        "WHERE quote_id = ? ORDER BY rowid",
+        (quote_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_nonce_used(con, quote_id: str, message_id: str, now: str) -> bool:
+    """True when this call consumed the nonce; False when it had been used before."""
+    cur = con.execute(
+        "UPDATE quote_cards SET nonce_used_at = ? "
+        "WHERE quote_id = ? AND message_id = ? AND nonce_used_at IS NULL",
+        (now, quote_id, message_id),
+    )
+    return cur.rowcount == 1
+
+
+# --- tickets -------------------------------------------------------------------------------
+def insert_ticket(con, *, now: str, quote: dict, network_fingerprint: str,
+                  confirmed_message_id: str) -> dict:
+    tid = new_id("t")
+    con.execute(
+        "INSERT INTO tickets (id, user_id, quote_id, origin, destination, legs_snapshot, distance, "
+        "price, network_fingerprint, confirmed_message_id, booked_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (tid, quote["user_id"], quote["id"], quote["origin"], quote["destination"],
+         to_json(quote["legs"]), quote["distance"], quote["price"], network_fingerprint,
+         confirmed_message_id, now),
+    )
+    return get_ticket_for_quote(con, quote["id"])
+
+
+def get_ticket_for_quote(con, quote_id: str) -> dict | None:
+    row = con.execute(f"SELECT {_TICKET_COLS} FROM tickets WHERE quote_id = ?", (quote_id,)).fetchone()
+    return _row(row, ("legs_snapshot",))
+
+
+def list_tickets(con, user_id: str) -> list[dict]:
+    """The user's tickets, newest first."""
+    rows = con.execute(
+        f"SELECT {_TICKET_COLS} FROM tickets WHERE user_id = ? ORDER BY booked_at DESC, rowid DESC",
+        (user_id,),
+    ).fetchall()
+    return [_row(r, ("legs_snapshot",)) for r in rows]
+import os
+import sqlite3
+from pathlib import Path
+
+import pytest
+from hypothesis import settings
+
+# Hypothesis profiles. "ci" (used by tool/run_tests.sh) is deterministic: the same examples on
+# every run, no example database. "dev" (default) keeps random exploration and the local database.
+# Select with HYPOTHESIS_PROFILE=ci|dev. Must run before the test modules are imported.
+settings.register_profile("ci", derandomize=True, database=None)
+settings.register_profile("dev")
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
+
+from app.core.network import Fingerprint, build_network, load_network
+
+REAL_DB = Path(__file__).resolve().parents[2] / "locations.db"
+TEST_FP = Fingerprint("test", 0, 0)
+
+
+@pytest.fixture(scope="session")
+def real_db() -> Path:
+    return REAL_DB
+
+
+@pytest.fixture(scope="session")
+def net(real_db):
+    return load_network(real_db)
+
+
+def make_net(locations, links=()):
+    """Network from rows in database format: (name, 'x,y', is_hub, 'Hub1;Hub2')."""
+    return build_network(locations, links, TEST_FP)
+
+
+def make_db(path, locations, links=()):
+    """A sqlite file with the two tables but without constraints, so bad rows can be stored."""
+    con = sqlite3.connect(path)
+    con.execute("create table locations (city_name, coordinate, is_hub, connected_hubs)")
+    con.execute("create table hub_links (hub_a, hub_b)")
+    con.executemany("insert into locations values (?,?,?,?)", locations)
+    con.executemany("insert into hub_links values (?,?)", links)
+    con.commit()
+    con.close()
+    return path
+"""FastAPI entry point. Run from backend/: `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`."""
+from __future__ import annotations
+
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+
+from .core.network import NetworkProvider
+
+DEFAULT_DB = Path(__file__).resolve().parents[2] / "locations.db"
+
+
+def create_app(db_path: str | Path | None = None) -> FastAPI:
+    path = Path(db_path or os.environ.get("LOCATIONS_DB") or DEFAULT_DB)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.networks = NetworkProvider(path)
+        app.state.networks.current()  # fail at startup, not on the first request, if the db is bad
+        yield
+
+    app = FastAPI(title="Ocean Above API", lifespan=lifespan)
+
+    @app.get("/health")
+    def health(request: Request) -> dict:
+        net = request.app.state.networks.current()
+        return {
+            "status": "ok",
+            "network": {
+                "cities": len(net.cities),
+                "hubs": len(net.hubs),
+                "hub_links": len(net.hub_links),
+                "unserved": len(net.cities) - len(net.served),
+                "fingerprint": net.fingerprint.id,
+            },
+        }
+
+    @app.get("/api/cities")
+    def cities(request: Request) -> dict:
+        """Debug listing straight from the loaded network (database order)."""
+        net = request.app.state.networks.current()
+        return {
+            "fingerprint": net.fingerprint.id,
+            "count": len(net.cities),
+            "cities": [
+                {
+                    "name": c.name,
+                    "coordinate": [str(c.x), str(c.y)],
+                    "is_hub": c.is_hub,
+                    "served": net.is_served(c.name),
+                    "connected_hubs": list(c.connected_hubs),
+                }
+                for c in net.cities.values()
+            ],
+        }
+
+    return app
+
+
+app = create_app()
+"""app.db: the business database (users, conversations, messages, call logs, quotes, tickets).
+
+Plain stdlib sqlite3, no ORM. Every operation opens its own connection, so a `Store` can be shared
+between threads. Writes run inside `BEGIN IMMEDIATE` (`Store.write()`): the write lock is taken
+before the first read, so a check-then-write sequence cannot interleave with another writer.
+
+Times are ISO 8601 UTC strings with second precision (`2026-11-23T08:15:00Z`); sub-seconds are
+truncated when a time is stored. The clock is injectable.
+"""
+from __future__ import annotations
+
+import json
+import secrets
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+Clock = Callable[[], datetime]
+
+SCHEMA_VERSION = 1
+
+_SCHEMA_V1 = """
+CREATE TABLE users (
+    id            TEXT PRIMARY KEY,
+    auth_provider TEXT NOT NULL,
+    provider_sub  TEXT NOT NULL,
+    email         TEXT,
+    display_name  TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    UNIQUE (auth_provider, provider_sub)
+);
+CREATE TABLE conversations (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    title      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX conversations_by_user ON conversations(user_id, updated_at);
+CREATE TABLE messages (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,   -- insertion order within the database
+    id              TEXT NOT NULL UNIQUE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    role            TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    text            TEXT NOT NULL,
+    cards           TEXT NOT NULL DEFAULT '[]',          -- json; quote cards without live state
+    guard_problems  TEXT,                                -- json or NULL
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX messages_by_conversation ON messages(conversation_id, seq);
+CREATE TABLE llm_calls (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              TEXT NOT NULL UNIQUE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    request         TEXT NOT NULL,                       -- json
+    response        TEXT NOT NULL,                       -- json
+    latency_ms      INTEGER,
+    tokens          INTEGER,
+    model           TEXT,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX llm_calls_by_conversation ON llm_calls(conversation_id, seq);
+CREATE TABLE tool_calls (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         TEXT NOT NULL UNIQUE,
+    message_id TEXT NOT NULL REFERENCES messages(id),    -- the user message that triggered the turn
+    name       TEXT NOT NULL,
+    args       TEXT NOT NULL,                            -- json
+    result     TEXT,                                     -- json
+    error      TEXT,
+    latency_ms INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX tool_calls_by_message ON tool_calls(message_id, seq);
+CREATE TABLE quotes (
+    id                  TEXT PRIMARY KEY,
+    conversation_id     TEXT NOT NULL REFERENCES conversations(id),
+    user_id             TEXT NOT NULL REFERENCES users(id),
+    origin              TEXT NOT NULL,
+    destination         TEXT NOT NULL,
+    legs                TEXT NOT NULL,                   -- json: from, to, distance, coords, source
+    distance            TEXT NOT NULL,                   -- km, 30 dp decimal string
+    price               TEXT NOT NULL,                   -- USD, 30 dp decimal string
+    network_fingerprint TEXT NOT NULL,
+    status              TEXT NOT NULL
+                        CHECK (status IN ('quoted', 'presented', 'booked', 'expired', 'stale')),
+    status_reason       TEXT,
+    created_at          TEXT NOT NULL,
+    expires_at          TEXT NOT NULL,
+    presented_at        TEXT,
+    closed_at           TEXT                             -- when it became booked / expired / stale
+);
+CREATE INDEX quotes_by_conversation ON quotes(conversation_id);
+-- One row per (quote, message) whose card was sent to the user with `done`. The one-time
+-- confirmation nonce of that card is derived from (quote, user, message); it is never stored.
+CREATE TABLE quote_cards (
+    quote_id      TEXT NOT NULL REFERENCES quotes(id),
+    message_id    TEXT NOT NULL REFERENCES messages(id),
+    presented_at  TEXT NOT NULL,
+    nonce_used_at TEXT,
+    PRIMARY KEY (quote_id, message_id)
+);
+CREATE TABLE tickets (
+    id                   TEXT PRIMARY KEY,
+    user_id              TEXT NOT NULL REFERENCES users(id),
+    quote_id             TEXT NOT NULL UNIQUE REFERENCES quotes(id),   -- B5: one ticket per quote
+    origin               TEXT NOT NULL,
+    destination          TEXT NOT NULL,
+    legs_snapshot        TEXT NOT NULL,                  -- json, same form as quotes.legs
+    distance             TEXT NOT NULL,
+    price                TEXT NOT NULL,
+    network_fingerprint  TEXT NOT NULL,                  -- locations.db verified at booking time
+    confirmed_message_id TEXT NOT NULL REFERENCES messages(id),        -- the card that was clicked
+    booked_at            TEXT NOT NULL
+);
+CREATE INDEX tickets_by_user ON tickets(user_id, booked_at);
+
+-- Q3: booked / expired / stale never change again, whatever the application code does.
+CREATE TRIGGER quotes_terminal_status BEFORE UPDATE OF status ON quotes
+WHEN OLD.status IN ('booked', 'expired', 'stale') AND NEW.status <> OLD.status
+BEGIN SELECT RAISE(ABORT, 'quote status is terminal'); END;
+-- B2/B7: a ticket can only be written for a quote that is `presented` in the same transaction.
+CREATE TRIGGER tickets_need_presented_quote BEFORE INSERT ON tickets
+WHEN (SELECT status FROM quotes WHERE id = NEW.quote_id) IS NOT 'presented'
+BEGIN SELECT RAISE(ABORT, 'ticket needs a presented quote'); END;
+CREATE TRIGGER tickets_are_immutable BEFORE UPDATE ON tickets
+BEGIN SELECT RAISE(ABORT, 'tickets are immutable'); END;
+"""
+
+_MIGRATIONS = {1: _SCHEMA_V1}
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso(moment: datetime) -> str:
+    """Stored / wire form of a time. Sub-seconds are dropped (floor)."""
+"""Shared scaffolding for the store / airline tests: fake clock, a small network, a world with
+its own app.db and its own copy of a locations database, and a contract-fixture shape checker."""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from app.airline import Airline
+from app.core.network import NetworkProvider
+from app.store import Store
+
+from .conftest import REAL_DB, make_db
+
+FIXTURES = Path(__file__).resolve().parents[2] / "contract" / "fixtures"
+START = datetime(2026, 11, 23, 8, 0, 0, tzinfo=timezone.utc)
+SECRET = b"test-secret"
+
+# H1(0,0) -- H2(30,0) -- H3(30,40) -- H4(90,40) hub chain, plus H1 -- H3 (50 km).
+# A, B: non-hubs on H1.  C: non-hub on H3 and H4.  D: non-hub on H4.  U: no service.
+# I1 -- I2: an island of two hubs, E: non-hub on I1.
+SMALL_LOCATIONS = [
+    ("H1", "0,0", 1, ""), ("H2", "30,0", 1, ""), ("H3", "30,40", 1, ""), ("H4", "90,40", 1, ""),
+    ("A", "0,-10", 0, "H1"), ("B", "-10,0", 0, "H1"), ("C", "60,40", 0, "H3;H4"),
+    ("D", "90,50", 0, "H4"), ("U", "5,5", 0, ""),
+    ("I1", "500,500", 1, ""), ("I2", "503,504", 1, ""), ("E", "500,510", 0, "I1"),
+]
+SMALL_LINKS = [("H1", "H2"), ("H2", "H3"), ("H3", "H4"), ("H1", "H3"), ("I1", "I2")]
+
+
+class FakeClock:
+    def __init__(self, start: datetime = START):
+        self.now = start
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, seconds: float = 0, minutes: float = 0) -> None:
+        self.now += timedelta(seconds=seconds, minutes=minutes)
+
+
+class World:
+    """One app.db, one private locations database, two users with a conversation each."""
+
+    def __init__(self, tmp_path: Path, real: bool = False, airline_cls=Airline, **airline_kwargs):
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        self.dir = tmp_path
+        self.db = tmp_path / "locations.db"
+        if real:
+            shutil.copyfile(REAL_DB, self.db)
+        else:
+            make_db(self.db, SMALL_LOCATIONS, SMALL_LINKS)
+        self._mtime = self.db.stat().st_mtime_ns
+        self.clock = FakeClock()
+        self.store = Store(tmp_path / "app.db", clock=self.clock)
+        self.networks = NetworkProvider(self.db)
+        airline_kwargs.setdefault("nonce_secret", SECRET)
+        self.airline = airline_cls(self.store, self.networks, **airline_kwargs)
+        self.alice = self.store.upsert_user("dev", "alice", "Alice")["id"]
+        self.bob = self.store.upsert_user("dev", "bob", "Bob")["id"]
+        self.conv = self.store.create_conversation(self.alice)["id"]
+        self.bob_conv = self.store.create_conversation(self.bob)["id"]
+
+    # --- shortcuts for the common flow ---
+    def quote(self, origin="A", destination="D", user=None, conv=None):
+        result = self.airline.quote_route(user or self.alice, conv or self.conv, origin, destination)
+        assert result.ok, result
+        return result
+
+    def done(self, cards, user=None, conv=None, text="Here you go."):
+        return self.airline.post_assistant_message(user or self.alice, conv or self.conv, text, cards)
+
+    def presented(self, origin="A", destination="D", user=None, conv=None):
+        """Quote and present it. Returns (quote_id, nonce)."""
+        result = self.quote(origin, destination, user, conv)
+        message = self.done(result.cards, user, conv)
+        state = message["cards"][0]["state"]
+#!/bin/bash
+# Runs every test suite that exists and prints one normalized line per failure: "FAIL <suite>: <test name>".
+# Used by tool/test_diff.sh. Backend: pytest (FastAPI). Frontend: vitest (Next.js).
+set -uo pipefail
+cd "$(dirname "$0")/.."
+status=0
+if [ -d backend ]; then
+  (cd backend && HYPOTHESIS_PROFILE=ci uv run pytest -q --tb=short -rf) 2>&1 | tee /dev/stderr \
+    | sed -nE 's/^FAILED ([^ ]+)( - .*)?$/FAIL backend: \1/p'
+  [ "${PIPESTATUS[0]}" -ne 0 ] && status=1
+fi
+if [ -d frontend ] && [ -f frontend/package.json ]; then
+  (cd frontend && npx vitest run) 2>&1 | tee /dev/stderr \
+    | sed -nE 's/^ *(FAIL|×) +(.*[^ ])( [0-9]+ms)?$/FAIL frontend: \2/p'
+  [ "${PIPESTATUS[0]}" -ne 0 ] && status=1
+fi
+exit $status
+#!/usr/bin/env python3
+"""Rule-registry lint. `python3 tool/review_lint.py` runs all rules; `... R01` runs one.
+
+Add a rule: write a function returning a list of problems, decorate it with @rule('Rxx', 'what it checks').
+Keep each rule tied to an incident in docs/review_rules.md.
+"""
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+RULES = {}
+
+
+def rule(rid, title):
+    def wrap(fn):
+        RULES[rid] = (title, fn)
+        return fn
+    return wrap
+
+
+def tracked(*globs):
+    out = subprocess.run(['git', 'ls-files', '--', *globs], cwd=ROOT, capture_output=True, text=True).stdout
+    return [ROOT / p for p in out.splitlines() if p]
+
+
+# Fill in the names you must never ship (machine names, user names, internal domains).
+FORBIDDEN_NAMES = [r'\bDESKTOP-[A-Z0-9]{5,}\b', r'(?i)yongsheng', r'(?i)\bmacmini\b']
+# Raw agent sessions must stay unedited (deliverable requirement); this file lists the patterns itself.
+NAME_SCAN_EXCLUDE = ('prompt history/', 'tool/review_lint.py')
+
+
+@rule('R01', 'No real host or user names in tracked files')
+def no_real_names():
+    problems = []
+    for f in tracked():
+        if not f.is_file() or str(f.relative_to(ROOT)).startswith(NAME_SCAN_EXCLUDE):
+            continue
+        text = f.read_text(errors='ignore')
+        for pat in FORBIDDEN_NAMES:
+            for m in re.finditer(pat, text):
+                problems.append(f'{f.relative_to(ROOT)}: {m.group(0)}')
+    return problems
+
+
+@rule('R02', 'rm -rf only as rm -rf "${VAR:?}"')
+def safe_rm():
+    problems = []
+    for f in tracked('*.sh', '**/*.sh'):
+        for n, line in enumerate(f.read_text(errors='ignore').splitlines(), 1):
+            if re.search(r'rm\s+-rf\s+"?\$(?!\{\w+:\?\})', line):
+                problems.append(f'{f.relative_to(ROOT)}:{n}: {line.strip()}')
+    return problems
+
+
+def main(argv):
+    selected = argv or sorted(RULES)
+    failed = False
+    for rid in selected:
+        title, fn = RULES[rid]
+        problems = fn()
+        print(f'{rid} {title}: ' + ('ok' if not problems else f'{len(problems)} problem(s)'))
+        for p in problems:
+            print('   ', p)
+        failed |= bool(problems)
+    return 1 if failed else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
+# Review rules
+
+Pitfalls we have hit. `R*` rules are checked by `tool/review_lint.py` (run one with
+`python3 tool/review_lint.py R01`); `M*` rules are checked by reading.
+
+| Id | Rule | Why (the incident) |
+|---|---|---|
+| R01 | No real host or user names in tracked files (except raw `prompt history/`); use `example-*`. | A public export leaked a machine name. |
+| R02 | `rm -rf` only as `rm -rf "${VAR:?}"`. | An empty variable must never delete `/`. |
+| M01 | Timing claims need a recording cut at stable frames, not one screenshot after the action. | A transient state was reported as a persistent failure. |
+| M02 | Build-number bumps go through `tool/next_build.py`, never a blind `sed`. | A sed rewrote a hex id that contained the number. |
+| M03 | Every number shown to the user (distance, price, leg list) comes from a tool result, never from LLM text. | Project rule: the LLM never computes. |
+| M04 | Booking only via the user's click with the card's one-time nonce; the LLM has no booking path. | Requirement 7; design review P0-2. |
+| M05 | UI changes ship with an Impeccable `critique`/`audit` result and a `detect` run; P0–P1 fixed. | User decision 2026-11-23. |
+| M06 | New dependency named in the plan with a reason; no agent/LLM frameworks. | Minimal-dependency rule. |
+| M07 | Each iteration plan has a "Take-home check" against `Quotr Agent Dev Engineer take-home.md`; the take-home wins on conflict. | User decision 2026-11-23. |
+| M08 | One canonical pricing function (explicit Decimal context); rounding only at display. | User decision 2026-11-23; design review P1-4 (thread default context is 28 digits). |
+| M09 | Booking re-validates against current `locations.db` and the business DB; mismatch → re-quote + re-confirm. | User decision 2026-11-23. |
+| M10 | UI acceptance includes ego-browser screenshots at desktop and mobile widths. | User decision 2026-11-23. |
+| M11 | City lookup never auto-picks among names equal after accent folding (`San Jose` / `San José`). | Design review P0-1. |
+| M12 | Every id-bearing endpoint checks ownership, not only booking. | Design review P2-5. |
+| M13 | Sessions exported with `tool/export_sessions.py` and secret-scanned at the end of every iteration. | Design review P1-6. |
+| M14 | No Decimal method or operator without an explicit context in pricing/routing (`ctx.add`, `quantize(..., context=ctx)`). | 02-core: context-less `scaleb` rounded edge weights to 28 digits. |
+../docs/design:
+design.md
+state_invariants.md
+
+../docs/iterations/03-slice/T2:
+implementation.md
+STATE.md
+app/core/places.py:23:def fold(name: str) -> str:
+app/core/places.py:30:def build_fold_index(cities: Iterable[str]) -> Mapping[str, tuple[str, ...]]:
+app/core/places.py:40:class Resolution:
+app/core/places.py:48:def resolve(net: "Network", name: str) -> Resolution:
+app/core/places.py:72:class Nearby:
+app/core/places.py:77:def nearest_served(
+app/core/network.py:21:class NetworkDataError(Exception):
+app/core/network.py:26:class Fingerprint:
+app/core/network.py:38:    def id(self) -> str:
+app/core/network.py:43:class City:
+app/core/network.py:52:class Network:
+app/core/network.py:65:    def has_flight(self, a: str, b: str) -> bool:
+app/core/network.py:68:    def is_served(self, name: str) -> bool:
+app/core/network.py:73:def _fail(msg: str) -> None:
+app/core/network.py:77:def build_network(
+app/core/network.py:158:def _stat(path: Path) -> tuple[int, int]:
+app/core/network.py:166:def _sha256(path: Path) -> str:
+app/core/network.py:173:def _read_rows(path: Path) -> tuple[list[tuple], list[tuple]]:
+app/core/network.py:189:def load_network(path: str | Path) -> Network:
+app/core/network.py:202:class NetworkProvider:
+app/core/network.py:211:    def __init__(self, path: str | Path):
+app/core/network.py:217:    def current(self, strict: bool = False) -> Network:
