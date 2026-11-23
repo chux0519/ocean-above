@@ -146,10 +146,10 @@ sequenceDiagram
   L->>M: 历史（含 q_7f3a 已展示）
   M-->>L: tool_call request_booking(quote_id="q_7f3a")
   L->>A: request_booking
-  A->>S: 检查归属 / 状态 / 有效期；签发一次性 nonce
-  A-->>L: 确认卡记录（完整航段、中转、距离、价格、nonce）
-  L-->>FE: SSE card：确认卡「点击确认后出票」
-  L-->>FE: 文本 + done
+  A->>S: 检查归属 / 状态 / 有效期（不签发 nonce）
+  A-->>L: 确认卡记录（完整航段、中转、距离、价格；工具结果里永远没有 nonce）
+  L-->>FE: SSE card：确认卡（按钮禁用）
+  L-->>FE: 文本 + done（此刻卡片 presented，nonce 随 done 的消息下发）
   U->>FE: 点击「确认预订」
   FE->>A: POST /api/quotes/q_7f3a/book（nonce）
   A->>S: BEGIN IMMEDIATE：B1–B7
@@ -234,7 +234,7 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 |---|---|---|---|
 | `find_city` | `name` | `CityRecord`：规范名、是否有服务、是否 hub、直连 hub；无服务时附最近的有服务城市（前 3 个）；找不到或有歧义时附候选 | 城市解析和「无服务 → 最近有服务城市」（要求 8）是确定性逻辑；歧义（如 `San Jose` / `San José`）返回 `ambiguous_city`，由用户选 |
 | `quote_route` | `origin`, `destination` | `Quote`：航段、中转、距离、价格（显示值 + 高精度值）、来源、库指纹、有效期；错误：`unknown_city` / `ambiguous_city` / `same_city` / `no_service`（附最近有服务城市，排除另一端）/ `unreachable` | 询价产生不可变记录；确认卡、出票都引用同一个 id |
-| `request_booking` | `quote_id` | `BookingRequest`：确认卡（完整航段、中转、距离、价格、有效期）+ 一次性 nonce | LLM 只能让确认卡出现，不能出票；出票的触发是用户点击（P4） |
+| `request_booking` | `quote_id` | `BookingRequest`：确认卡（完整航段、中转、距离、价格、有效期）；nonce 在本轮 `done` 时随消息下发，不进工具结果 | LLM 只能让确认卡出现，不能出票；出票的触发是用户点击（P4） |
 | `list_my_tickets` | 可选：`city`、`ticket_id`、`booked_after/before` | `TicketList`：票据记录 + `count` | 要求 9：票据只从 app.db 读；数量由代码给出（FSR 的计数教训） |
 
 工具设计取舍：
@@ -428,8 +428,13 @@ erDiagram
     text price
     text network_fingerprint
     text status
-    text nonce_hash
     text expires_at
+  }
+  quote_cards {
+    text quote_id FK
+    text message_id FK
+    text presented_at
+    text nonce_used_at
   }
   tickets {
     text id PK
@@ -444,6 +449,11 @@ erDiagram
 ```
 
 - 距离、价格存成高精度十进制字符串（规范函数的输出），显示值不入库参与计算。
+- nonce 不入库：`HMAC(secret, quote_id ␟ user_id ␟ message_id)` 现算（刷新页面后同一张卡仍可得到有效 nonce）；
+  `quote_cards` 记录卡片出现在哪条消息、何时展示、nonce 是否已用（一次性）。`NONCE_SECRET` 未设置时每个进程随机，
+  重启后打开的页面需要刷新。
+- `locations.db` 必须是回滚日志模式且没有 `-wal` 文件（WAL 中的已提交修改不会改变主文件哈希）；部署时用原子替换
+  （写新文件再 rename）。读不到时出票返回 `data_unavailable`（可重试），不把报价判为 stale。
 - `app.db` 在 `data/` 目录，不进 git（含用户邮箱、全部对话）。
 - 用户：`(auth_provider, provider_sub)` 唯一；固定账号是 `auth_provider = "dev"`。
 

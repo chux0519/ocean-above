@@ -32,7 +32,9 @@ script, not by the production core) — correctness is tested in the backend, no
 | GET | `/api/debug/sse-ping` | – | SSE: `ping` with `{"seq":n}` immediately, then every 2 s, 5 events total |
 
 Booking errors: `invalid_nonce` (409), `not_presented` (409), `expired` (409), `already_booked` (409),
-`stale` (409; data changed — ask for a new quote), `not_found` (404).
+`stale` (409; data changed — ask for a new quote), `not_found` (404), `conversation_busy` (409; a reply is still
+being generated — retry after `done`), `data_unavailable` (503; route data could not be read — retry; the quote and
+nonce are unchanged).
 
 ## Objects
 

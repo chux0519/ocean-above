@@ -62,7 +62,7 @@
         -6546,
         -3973
       ],
-      "source": "locations.connected_hubs(Lima)"
+      "source": "hub_links(Amsterdam, Lima)"
     }
   ],
   "distance": "8928.600000000000000000000000000000",
