@@ -7,21 +7,27 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 
+from . import api
 from .core.network import NetworkProvider
 
 DEFAULT_DB = Path(__file__).resolve().parents[2] / "locations.db"
 
 
-def create_app(db_path: str | Path | None = None) -> FastAPI:
+def create_app(db_path: str | Path | None = None, settings: api.Settings | None = None,
+               clock=None) -> FastAPI:
+    """`settings` default to the environment; `clock` is for tests."""
+    settings = settings or api.Settings.from_env()
     path = Path(db_path or os.environ.get("LOCATIONS_DB") or DEFAULT_DB)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.networks = NetworkProvider(path)
         app.state.networks.current()  # fail at startup, not on the first request, if the db is bad
+        api.install(app, settings, app.state.networks, clock)
         yield
 
     app = FastAPI(title="Ocean Above API", lifespan=lifespan)
+    api.mount(app)
 
     @app.get("/health")
     def health(request: Request) -> dict:

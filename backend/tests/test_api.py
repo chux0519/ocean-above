@@ -1,10 +1,11 @@
 from fastapi.testclient import TestClient
 
+from app.api import Settings
 from app.main import create_app
 
 
-def test_health_and_cities(real_db):
-    with TestClient(create_app(real_db)) as client:
+def test_health_and_cities(real_db, tmp_path):
+    with TestClient(create_app(real_db, Settings(app_db=tmp_path / "app.db"))) as client:
         res = client.get("/health")
         assert res.status_code == 200
         body = res.json()
