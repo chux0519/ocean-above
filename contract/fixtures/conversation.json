@@ -315,12 +315,34 @@
           "suggestions": []
         },
         {
+          "type": "unknown_city",
+          "query": "Atlantis",
+          "suggestions": [
+            "Atlanta"
+          ]
+        }
+      ],
+      "created_at": "2026-11-23T08:07:02Z"
+    },
+    {
+      "id": "m_12",
+      "role": "user",
+      "text": "Shanghai to Shanghai",
+      "cards": [],
+      "created_at": "2026-11-23T08:08:00Z"
+    },
+    {
+      "id": "m_13",
+      "role": "assistant",
+      "text": "Origin and destination are the same city.",
+      "cards": [
+        {
           "type": "notice",
           "code": "same_city",
           "message": "Origin and destination are the same city."
         }
       ],
-      "created_at": "2026-11-23T08:07:02Z"
+      "created_at": "2026-11-23T08:08:01Z"
     }
   ]
 }
