@@ -15,6 +15,13 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
     in place, connector enabled at boot (4 active connections). `https://ocean-above.potafree.net/health` returns 200
     from the placeholder service on `127.0.0.1:18765` (TLS verified). Compose's Caddy takes over the same port.
 
+## Building on the homelab
+- Docker Hub is not reachable directly. The daemon already uses the local proxy for pulls; the **build** needs it too,
+  in the same shell: `export HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=$HTTP_PROXY http_proxy=$HTTP_PROXY
+  https_proxy=$HTTP_PROXY`, then `docker compose -p <name> build --builder default` and `up -d --no-build`.
+  Fallback mirrors: USTC or Aliyun Docker Hub mirrors.
+- 2026-11-23: compose skeleton (PR #9) verified there: build OK, `/health` 200 through Caddy, `/` → `/login` 200.
+
 ## What we hand over for each deploy
 - Repo URL, branch or commit.
 - `locations.db` (and any other db file) is copied to the homelab with `scp`, into the directory mounted read-only
