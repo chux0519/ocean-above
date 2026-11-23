@@ -6,22 +6,28 @@ import type { ConversationSummary } from "@/lib/types";
 import { Shell } from "@/components/shell";
 import { MessageList } from "@/components/message-list";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { cn } from "@/lib/utils";
+import { CloseIcon, MenuIcon, PlusIcon, SendIcon } from "@/components/icons";
+
+const EXAMPLES = ["I want to fly from Guangzhou to Lima", "Can I fly from Abu Dhabi?", "Which tickets do I have?"];
 
 function ConversationList({ items, loading, activeId, onSelect, onNew }: { items: ConversationSummary[]; loading: boolean; activeId: string | null; onSelect: (id: string) => void; onNew: () => void }) {
   return (
-    <div className="flex h-full flex-col gap-2 p-2">
-      <Button onClick={onNew}>New chat</Button>
-      <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto" aria-label="Conversations">
-        {loading && <li className="px-3 py-2 text-sm text-muted" role="status">Loading conversations…</li>}
-        {!loading && items.length === 0 && <li className="px-3 py-2 text-sm text-muted">No conversations yet.</li>}
+    <div className="flex h-full flex-col gap-3 p-3">
+      <Button variant="outline" className="justify-start" onClick={onNew}><PlusIcon size={18} />New chat</Button>
+      <h2 className="px-3 pt-1 text-xs font-semibold uppercase tracking-[0.06em] text-ink-2">Conversations</h2>
+      <ul className="-mt-1 min-h-0 flex-1 space-y-0.5 overflow-y-auto" aria-label="Conversations">
+        {loading && <li className="px-3 py-2 text-sm text-ink-2" role="status">Loading conversations…</li>}
+        {!loading && items.length === 0 && <li className="px-3 py-2 text-sm text-ink-2">No conversations yet.</li>}
         {items.map((c) => (
           <li key={c.id}>
             <button onClick={() => onSelect(c.id)}
-              className={cn("block min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-slate-100", c.id === activeId && "bg-slate-100")}>
-              <span className="block truncate font-medium">{c.title || "New chat"}</span>
-              <span className="block truncate text-xs text-muted">{c.preview}</span>
+              aria-current={c.id === activeId ? "true" : undefined}
+              className={cn("block min-h-11 w-full rounded-md px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-ink/5", c.id === activeId && "bg-surface shadow-[inset_0_0_0_1px_var(--hairline)]")}>
+              <span className="block truncate font-semibold">{c.title || "New chat"}</span>
+              <span className="block truncate text-xs text-ink-2">{c.preview}</span>
             </button>
           </li>
         ))}
@@ -39,6 +45,16 @@ function Chat() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const drawerOpener = useRef<HTMLButtonElement>(null);
+  const drawerClose = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!drawer) return;
+    drawerClose.current?.focus();
+    const opener = drawerOpener.current;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(false); };
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); opener?.focus(); };
+  }, [drawer]);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState<(() => void) | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -130,34 +146,45 @@ function Chat() {
 
   return (
     <div className="relative flex h-full">
-      <aside className="hidden w-72 shrink-0 border-r border-border bg-card md:block">
+      <aside className="hidden w-72 shrink-0 border-r border-hairline bg-rail md:block">
         <ConversationList items={list} loading={listState === "loading"} activeId={activeId} onSelect={select} onNew={newChat} />
       </aside>
       {drawer && (
         <div className="fixed inset-0 z-20 md:hidden" role="dialog" aria-modal="true" aria-label="Conversations">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setDrawer(false)} />
-          <div className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-card shadow-xl">
-            <ConversationList items={list} loading={listState === "loading"} activeId={activeId} onSelect={select} onNew={newChat} />
+          <div className="absolute inset-0 bg-scrim" onClick={() => setDrawer(false)} />
+          <div className="drawer absolute inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col bg-rail shadow-[var(--overlay-shadow)]">
+            <div className="flex justify-end px-1 pt-1"><Button ref={drawerClose} variant="ghost" aria-label="Close conversations" onClick={() => setDrawer(false)}><CloseIcon /></Button></div>
+            <div className="min-h-0 flex-1"><ConversationList items={list} loading={listState === "loading"} activeId={activeId} onSelect={select} onNew={newChat} /></div>
           </div>
         </div>
       )}
-      <section className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b border-border px-2 md:hidden">
-          <Button variant="ghost" onClick={() => setDrawer(true)} aria-label="Open conversations">☰ Conversations</Button>
+      <section className="flex min-w-0 flex-1 flex-col" aria-labelledby="chat-title">
+        <h1 id="chat-title" className="sr-only">Chat with Ocean Above</h1>
+        <div className="flex items-center border-b border-hairline bg-surface px-1 md:hidden">
+          <Button ref={drawerOpener} variant="ghost" className="gap-2 px-3" onClick={() => setDrawer(true)} aria-label="Open conversations" aria-expanded={drawer}><MenuIcon />Conversations</Button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-6 sm:py-6">
           {loadingConv && <LoadingState label="Loading conversation…" />}
           {!loadingConv && listState !== "error" && state.messages.length === 0 && !state.draft && !error && (
-            <EmptyState>Where would you like to fly? Try “I want to fly from Guangzhou to Lima”.</EmptyState>
+            <EmptyState>
+              <p className="text-lg font-semibold text-ink">Where would you like to fly?</p>
+              <p className="mt-1">Describe your trip in your own words. You’ll see every leg, the distance and the price before anything is booked.</p>
+              <div className="mt-4 flex flex-col items-stretch gap-2">
+                {EXAMPLES.map((ex) => (
+                  <Button key={ex} variant="outline" className="justify-start font-normal" onClick={() => setText(ex)}>{ex}</Button>
+                ))}
+              </div>
+            </EmptyState>
           )}
           <MessageList messages={state.messages} draft={state.draft} onBooked={() => activeId && load(activeId).catch(() => {})} onAsk={(t) => void submit(t)} />
           {error && <div className="mt-3"><ErrorState message={error} onRetry={retry ?? undefined} /></div>}
           <div ref={bottom} />
         </div>
-        <form onSubmit={send} className="flex gap-2 border-t border-border bg-card p-2 sm:p-3">
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Where do you want to go?" aria-label="Message"
-            className="min-h-11 min-w-0 flex-1 rounded-md border border-border px-3 text-base" />
-          <Button type="submit" disabled={streaming || !text.trim()}>Send</Button>
+        <form onSubmit={send} className="border-t border-hairline bg-surface px-3 py-2 sm:px-6 sm:py-3">
+          <div className="mx-auto flex max-w-3xl gap-2">
+            <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Where do you want to go?" aria-label="Message" className="flex-1" />
+            <Button type="submit" aria-label="Send" disabled={streaming || !text.trim()}><SendIcon /><span className="hidden sm:inline">Send</span></Button>
+          </div>
         </form>
       </section>
     </div>

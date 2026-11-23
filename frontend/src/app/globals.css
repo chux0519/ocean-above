@@ -1,30 +1,156 @@
 @import "tailwindcss";
 
+/* Direction A "Timetable" (docs/iterations/04-web/D1/design-proposal.md). Two themes: light (default) and dark.
+   Theme = system unless <html data-theme="light|dark"> is set (components/theme-toggle.tsx). */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --muted: #64748b;
-  --border: #e2e8f0;
-  --card: #ffffff;
-  --primary: #0369a1;
-  --primary-fg: #ffffff;
-  --danger: #b91c1c;
-  --ok: #15803d;
-  --warn: #b45309;
+  --ground: #f3f5f7;      /* page */
+  --surface: #ffffff;     /* cards, composer */
+  --rail: #e9edf1;        /* conversation list, skeletons */
+  --ink: #102030;         /* text, strong rules: 16.5:1 on surface */
+  --ink-2: #4a5866;       /* secondary text: 7.3:1 on surface */
+  --placeholder: #5e6b78; /* 5.5:1 */
+  --hairline: #cbd3db;    /* 1px dividers (decorative) */
+  --field: #8794a1;       /* input borders: 3.1:1 */
+  --shell: #0e2f4a;       /* header band */
+  --shell-ink: #ffffff;   /* 13.8:1 */
+  --shell-ink-2: #b7c9d9; /* 8.1:1 */
+  --accent: #0b5d8f;      /* primary action, focus, links, service line */
+  --accent-hover: #094b74;
+  --accent-ink: #ffffff;  /* text on accent: 7.1:1 */
+  --accent-tint: #dde8f2; /* user message, selection: ink 13.3:1 */
+  --ok: #1a6b34;    --ok-bg: #e6f4ea;     /* 5.8:1 */
+  --warn: #7a4a00;  --warn-bg: #fff1d6;   /* 6.7:1 */
+  --danger: #b42318; --danger-bg: #fdecea; /* 5.8:1 */
+  --scrim: rgb(16 32 48 / 0.4);
+  --overlay-shadow: 8px 0 24px rgb(16 32 48 / 0.18);
+  color-scheme: light;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --dur-1: 150ms; /* hover, colour */
+  --dur-2: 200ms; /* enter, drawer */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  --ground: #0c1721;
+  --surface: #15232f;
+  --rail: #101d29;
+  --ink: #e6edf3;         /* 13.5:1 on surface, 15.3:1 on ground */
+  --ink-2: #a3b3c2;       /* 7.5:1 on surface, 8.0:1 on rail */
+  --placeholder: #8a9bab; /* 5.6:1 */
+  --hairline: #2a3b4a;
+  --field: #5f7486;       /* 3.3:1 */
+  --shell: #0a2236;
+  --shell-ink: #ffffff;   /* 16.2:1 */
+  --shell-ink-2: #9fb6ca; /* 7.7:1 */
+  --accent: #4ba3db;      /* 5.8:1 on surface */
+  --accent-hover: #6db6e6;
+  --accent-ink: #06131d;  /* text on accent: 6.8:1 */
+  --accent-tint: #1d3a52; /* ink on it 10.0:1 */
+  --ok: #6fd08c;    --ok-bg: #12301e;     /* 7.6:1 */
+  --warn: #f2b84b;  --warn-bg: #3a2a0a;   /* 7.7:1 */
+  --danger: #ff8a7a; --danger-bg: #3d1714; /* 6.9:1 */
+  --scrim: rgb(0 0 0 / 0.55);
+  --overlay-shadow: 8px 0 24px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0c1721;
+  --surface: #15232f;
+  --rail: #101d29;
+  --ink: #e6edf3;         /* 13.5:1 on surface, 15.3:1 on ground */
+  --ink-2: #a3b3c2;       /* 7.5:1 on surface, 8.0:1 on rail */
+  --placeholder: #8a9bab; /* 5.6:1 */
+  --hairline: #2a3b4a;
+  --field: #5f7486;       /* 3.3:1 */
+  --shell: #0a2236;
+  --shell-ink: #ffffff;   /* 16.2:1 */
+  --shell-ink-2: #9fb6ca; /* 7.7:1 */
+  --accent: #4ba3db;      /* 5.8:1 on surface */
+  --accent-hover: #6db6e6;
+  --accent-ink: #06131d;  /* text on accent: 6.8:1 */
+  --accent-tint: #1d3a52; /* ink on it 10.0:1 */
+  --ok: #6fd08c;    --ok-bg: #12301e;     /* 7.6:1 */
+  --warn: #f2b84b;  --warn-bg: #3a2a0a;   /* 7.7:1 */
+  --danger: #ff8a7a; --danger-bg: #3d1714; /* 6.9:1 */
+  --scrim: rgb(0 0 0 / 0.55);
+  --overlay-shadow: 8px 0 24px rgb(0 0 0 / 0.5);
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-muted: var(--muted);
-  --color-border: var(--border);
-  --color-card: var(--card);
-  --color-primary: var(--primary);
-  --color-primary-fg: var(--primary-fg);
-  --color-danger: var(--danger);
+  --font-sans: var(--font-public-sans), ui-sans-serif, system-ui, sans-serif;
+  --color-background: var(--ground);
+  --color-ground: var(--ground);
+  --color-foreground: var(--ink);
+  --color-ink: var(--ink);
+  --color-muted: var(--ink-2);
+  --color-ink-2: var(--ink-2);
+  --color-border: var(--hairline);
+  --color-hairline: var(--hairline);
+  --color-field: var(--field);
+  --color-card: var(--surface);
+  --color-surface: var(--surface);
+  --color-rail: var(--rail);
+  --color-shell: var(--shell);
+  --color-shell-ink: var(--shell-ink);
+  --color-shell-ink-2: var(--shell-ink-2);
+  --color-primary: var(--accent);
+  --color-primary-fg: var(--accent-ink);
+  --color-accent-ink: var(--accent-ink);
+  --color-placeholder: var(--placeholder);
+  --color-scrim: var(--scrim);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-tint: var(--accent-tint);
   --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
   --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --text-xs: 0.75rem;   --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;    --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.375rem;  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.75rem;  --text-2xl--line-height: 2.25rem;
 }
 
 html, body { height: 100%; }
-body { background: var(--background); color: var(--foreground); font-family: system-ui, sans-serif; overflow-x: hidden; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--accent-tint); color: var(--ink); }
+input, textarea { caret-color: var(--accent); }
+input::placeholder { color: var(--placeholder); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+* { scrollbar-color: var(--hairline) transparent; scrollbar-width: thin; }
+
+/* Every figure is tabular so columns of km and $ line up. */
+.figures { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+@keyframes enter { from { opacity: 0; transform: translateY(4px); } }
+.enter { animation: enter var(--dur-2) var(--ease-out) both; }
+@keyframes drawer { from { transform: translateX(-16px); opacity: 0.6; } }
+.drawer { animation: drawer var(--dur-2) var(--ease-out) both; }
+@keyframes pulse-dot { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+.typing span { animation: pulse-dot 1.2s var(--ease-out) infinite; }
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0ms !important; animation-iteration-count: 1 !important; transition-duration: 0ms !important; }
+}
+
+/* Focus on the navy band: white ring (accent would be too dark there). */
+[data-shell] :focus-visible { outline-color: var(--shell-ink); }
+p { text-wrap: pretty; }
+h1, h2 { text-wrap: balance; }

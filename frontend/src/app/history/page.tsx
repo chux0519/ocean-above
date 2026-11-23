@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ConversationSummary } from "@/lib/types";
+import { ChevronIcon } from "@/components/icons";
 import { Shell } from "@/components/shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 
@@ -15,22 +16,25 @@ function History() {
   }, []);
   useEffect(load, [load]);
   return (
-    <div className="h-full overflow-y-auto p-3 sm:p-6">
-      <h1 className="mb-3 text-lg font-semibold">Conversation history</h1>
+    <div className="h-full overflow-y-auto px-3 py-5 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-3xl">
+      <h1 className="mb-5 text-2xl font-bold tracking-[-0.01em]">Conversation history</h1>
       {!items && !error && <LoadingState label="Loading conversations…" />}
       {error && <ErrorState message={error} onRetry={load} />}
       {items?.length === 0 && <EmptyState>No conversations yet. Start one in Chat.</EmptyState>}
       <ul className="space-y-2">
         {items?.map((c) => (
           <li key={c.id}>
-            <Link href={`/history/${c.id}`} className="block min-h-11 rounded-lg border border-border bg-card p-3 hover:bg-slate-50">
-              <span className="block font-medium">{c.title || "New chat"}</span>
-              <span className="block text-sm text-muted">{c.preview}</span>
-              <span className="block text-xs text-muted">{new Date(c.updated_at).toLocaleString()}</span>
+            <Link href={`/history/${c.id}`} className="flex min-h-11 items-center gap-3 rounded-lg border border-hairline bg-surface px-4 py-3 transition-colors duration-150 hover:bg-ground">
+              <span className="min-w-0 flex-1"><span className="block font-semibold">{c.title || "New chat"}</span>
+              <span className="block text-sm text-ink-2">{c.preview}</span>
+              <span className="figures mt-1 block text-xs text-ink-2">{new Date(c.updated_at).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</span></span>
+              <ChevronIcon size={18} className="shrink-0 text-ink-2" />
             </Link>
           </li>
         ))}
       </ul>
+      </div>
     </div>
   );
 }

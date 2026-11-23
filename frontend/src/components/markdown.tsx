@@ -9,7 +9,7 @@ function renderInline(nodes: Inline[]): ReactNode {
       case "br": return <br key={i} />;
       case "b": return <strong key={i}>{renderInline(n.c)}</strong>;
       case "i": return <em key={i}>{renderInline(n.c)}</em>;
-      case "code": return <code key={i} className="rounded bg-slate-100 px-1 text-[0.9em]">{n.v}</code>;
+      case "code": return <code key={i} className="rounded-sm bg-rail px-1 text-[0.9em]">{n.v}</code>;
       case "a": return <a key={i} href={n.href} target="_blank" rel="noopener noreferrer" className="text-primary underline">{renderInline(n.c)}</a>;
     }
   });

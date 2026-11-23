@@ -3,13 +3,16 @@ import { useEffect, useState } from "react";
 import type { BookingRequestCard, QuoteCard, TicketCard, Trace } from "@/lib/types";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
+import { Alert } from "@/components/ui/alert";
+import { ArrowIcon, CheckIcon, ChevronIcon, ClockIcon } from "@/components/icons";
 
 type Route = QuoteCard | BookingRequestCard | TicketCard;
 
 const STATUS_LABEL: Record<string, { text: string; tone: "muted" | "ok" | "warn" | "danger" }> = {
   quoted: { text: "Quote", tone: "muted" },
-  presented: { text: "Awaiting confirmation", tone: "warn" },
+  presented: { text: "Awaiting your confirmation", tone: "warn" },
   booked: { text: "Booked", tone: "ok" },
   expired: { text: "Expired", tone: "danger" },
   stale: { text: "Out of date", tone: "danger" },
@@ -19,38 +22,62 @@ function SimilarNames({ card }: { card: Route }) {
   const names = "similar_names" in card ? card.similar_names ?? [] : [];
   if (!names.length) return null;
   return (
-    <p className="mt-2 rounded-md bg-amber-50 p-2 text-sm text-amber-900" data-testid="similar-names">
-      {names.map((n, i) => (
-        <span key={n.city} className="block">
-          {i === 0 ? "Also: " : ""}<strong>{n.city}</strong>
-          {n.connected_hubs.length ? <> — flies to {n.connected_hubs.join(", ")}</> : null}
-        </span>
-      ))}
-    </p>
+    <Alert tone="warn" className="mt-3" data-testid="similar-names">
+      <p>
+        {names.map((n, i) => (
+          <span key={n.city} className="block">
+            {i === 0 ? "Not to be confused with " : "or "}<strong className="font-semibold">{n.city}</strong>
+            {n.connected_hubs.length ? <> (flies to {n.connected_hubs.join(", ")})</> : null}
+          </span>
+        ))}
+      </p>
+    </Alert>
   );
 }
 
+/** The itinerary as a timetable block: a service line down the left, one row per leg with its distance in a
+ * right-aligned tabular column, a "transfer at" row at each transfer city, and a double rule above the totals. */
 function Route({ card }: { card: Route }) {
+  const last = card.legs.length - 1;
   return (
     <>
-      <div className="flex flex-wrap items-center gap-x-2 text-base font-semibold">
-        <span>{card.origin}</span><span aria-hidden>→</span><span>{card.destination}</span>
+      <h2 className="text-lg font-semibold leading-tight">
+        {card.origin} <ArrowIcon className="inline-block align-[-3px] text-ink-2" size={18} /> {card.destination}
+      </h2>
+      <p className="mt-0.5 text-sm text-ink-2">
+        {card.transfers.length ? <>Via {card.transfers.join(", ")}</> : <>Direct flight</>}
+      </p>
+      <SimilarNames card={card} />
+      <div className="mt-4 flex items-end justify-between border-b border-ink pb-1 text-xs font-semibold uppercase tracking-[0.06em] text-ink-2" aria-hidden>
+        <span className="pl-6">Leg</span><span>Distance</span>
       </div>
-      <ol className="mt-3 space-y-1 text-sm" aria-label="Route legs">
+      <ol className="figures text-sm" aria-label="Route legs">
         {card.legs.map((l, i) => (
-          <li key={i} className="flex flex-wrap justify-between gap-x-3">
-            <span>{l.from} → {l.to}</span>
-            <span className="text-muted">{l.distance_display}</span>
+          <li key={i}>
+            <div className="relative flex items-baseline justify-between gap-3 py-2 pl-6">
+              <span className="absolute top-0 bottom-0 left-[7px] w-0.5 bg-accent" aria-hidden
+                style={{ top: i === 0 ? "50%" : 0, bottom: i === last ? "50%" : 0 }} />
+              <span className="absolute left-[3px] top-1/2 size-2.5 -translate-y-1/2 rounded-full bg-accent" aria-hidden />
+              <span className="min-w-0 font-medium">{l.from} → {l.to}</span>
+              <span className="shrink-0 whitespace-nowrap text-ink">{l.distance_display}</span>
+            </div>
+            {i < last && (
+              <div className="relative flex items-center gap-2 border-y border-dashed border-hairline py-1 pl-6 text-xs text-ink-2">
+                <span className="absolute top-0 bottom-0 left-[7px] w-0.5 bg-accent" aria-hidden />
+                <span className="absolute left-[2px] top-1/2 size-3 -translate-y-1/2 rounded-full border-2 border-accent bg-surface" aria-hidden />
+                Transfer at <span className="font-semibold text-ink">{l.to}</span>
+              </div>
+            )}
           </li>
         ))}
       </ol>
-      <SimilarNames card={card} />
-      <p className="mt-2 text-sm text-muted">
-        {card.transfers.length ? <>Transfers: {card.transfers.join(", ")}</> : <>Direct flight</>}
-      </p>
-      <dl className="mt-3 flex gap-6 border-t border-border pt-3 text-sm">
-        <div><dt className="text-muted">Total distance</dt><dd className="font-semibold">{card.distance_display}</dd></div>
-        <div><dt className="text-muted">Price</dt><dd className="font-semibold">{card.price_display}</dd></div>
+      <dl className="figures mt-1 border-t-[3px] border-double border-ink pt-2">
+        <div className="flex items-baseline justify-between gap-3 py-1 text-sm">
+          <dt className="text-ink-2">Total distance</dt><dd className="font-semibold">{card.distance_display}</dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3 py-1">
+          <dt className="text-sm text-ink-2">Price</dt><dd className="text-xl font-bold tracking-[-0.01em]">{card.price_display}</dd>
+        </div>
       </dl>
     </>
   );
@@ -68,12 +95,13 @@ function TraceView({ quoteId }: { quoteId: string }) {
     }
   }
   return (
-    <div className="mt-3">
-      <Button variant="ghost" className="px-2" onClick={toggle} aria-expanded={open}>
+    <div className="mt-2">
+      <Button variant="ghost" className="-ml-2 gap-1 px-2 font-medium text-ink-2" onClick={toggle} aria-expanded={open}>
+        <ChevronIcon size={16} className={open ? "rotate-90 transition-transform duration-150" : "transition-transform duration-150"} />
         {open ? "Hide calculation details" : "Calculation details"}
       </Button>
       {open && (
-        <div className="mt-2 space-y-2 rounded-md bg-slate-50 p-3 text-xs" data-testid="trace">
+        <div className="figures mt-1 space-y-2 rounded-md bg-ground p-3 text-xs leading-relaxed" data-testid="trace">
           {err && <p className="text-danger">{err}</p>}
           {!trace && !err && <p className="text-muted">Loading…</p>}
           {trace && (
@@ -168,11 +196,11 @@ export function QuoteCardView({
   }
 
   return (
-    <Card data-testid={`card-${card.type}`} className="w-full max-w-md">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+    <Card data-testid={`card-${card.type}`} className={cn("enter w-full max-w-md", showConfirm && "border-2 border-accent")}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <Badge tone={st.tone} className="whitespace-nowrap">{st.text}</Badge>
-        {status === "quoted" && <span className="text-xs text-muted">Valid until {new Date(card.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>}
-        {live && !lapsed && <span className="text-xs text-muted" data-testid="countdown">Expires in {formatCountdown(left)}</span>}
+        {status === "quoted" && <span className="figures text-xs text-ink-2">Valid until {new Date(card.expires_at).toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit" })}</span>}
+        {live && !lapsed && <span className="figures inline-flex items-center gap-1 text-xs text-ink-2" data-testid="countdown"><ClockIcon size={14} />Expires in {formatCountdown(left)}</span>}
       </div>
       <Route card={card} />
       {showConfirm && (
@@ -180,11 +208,9 @@ export function QuoteCardView({
           Confirm booking
         </Button>
       )}
-      {lapsed && !err && <p role="status" className="mt-3 text-sm text-danger">This quote has expired.</p>}
+      {lapsed && !err && <Alert role="status" className="mt-3">This quote has expired.</Alert>}
       {err && (
-        <div role="alert" className="mt-3 text-sm text-danger" data-testid="booking-error">
-          <p>{err.text}</p>
-        </div>
+        <Alert role="alert" className="mt-3" data-testid="booking-error"><p>{err.text}</p></Alert>
       )}
       {showNewQuote && (
         <Button className="mt-2 w-full" variant="outline" onClick={() => onAsk!(`Please get me a new quote for ${card.origin} to ${card.destination}.`)} disabled={streaming}>
@@ -198,10 +224,10 @@ export function QuoteCardView({
 
 export function TicketCardView({ card }: { card: TicketCard }) {
   return (
-    <Card data-testid="card-ticket" className="w-full max-w-md border-green-300">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        <Badge tone="ok" className="whitespace-nowrap">Ticket {card.id}</Badge>
-        <span className="text-xs text-muted">Booked {new Date(card.booked_at).toLocaleString()}</span>
+    <Card data-testid="card-ticket" className="enter w-full max-w-md">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        <Badge tone="ok" className="whitespace-nowrap"><CheckIcon size={14} />Ticket {card.id}</Badge>
+        <span className="figures text-xs text-ink-2">Booked {new Date(card.booked_at).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</span>
       </div>
       <Route card={card} />
     </Card>

@@ -17,7 +17,7 @@ function send(res, status, body, headers = {}) {
 }
 
 // Scenario switches for screenshots/tests: POST /__mock {"book":"stale","message":"busy","tickets":"empty","history":"error","delay":800,"conversation":"error"}
-// book: stale|expired|invalid_nonce|already_booked|conversation_busy|data_unavailable; message: busy|drop; tickets/history/conversation: empty|error
+// confirm: multileg; book: stale|expired|invalid_nonce|already_booked|conversation_busy|data_unavailable; message: busy|drop; tickets/history/conversation: empty|error
 let scn = {};
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const extra = [];
@@ -31,6 +31,8 @@ function conversation() {
   // Presented quotes in the fixture expired long ago; keep them live so the countdown and Confirm show.
   const soon = new Date(Date.now() + 10 * 60_000).toISOString();
   for (const m of c.messages) for (const k of m.cards) {
+    // scenario {"confirm":"multileg"}: the multi-leg booking_request is still awaiting confirmation
+    if (scn.confirm === "multileg" && k.type === "booking_request") k.state = { status: "presented", bookable: true, nonce: "n_mock_ml", ticket_id: null };
     if (k.state?.status !== "presented") continue;
     k.expires_at = soon;
     if (forced) k.state = { status: forced, bookable: false, nonce: null, ticket_id: forced === "booked" ? "t_91b2" : null };

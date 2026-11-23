@@ -339,7 +339,7 @@ describe("card details", () => {
     const c = base();
     c.similar_names = [{ city: "San José", connected_hubs: ["Sydney", "Tokyo"] }];
     render(<CardView card={c} />);
-    expect(screen.getByTestId("similar-names")).toHaveTextContent("Also: San José — flies to Sydney, Tokyo");
+    expect(screen.getByTestId("similar-names")).toHaveTextContent("Not to be confused with San José (flies to Sydney, Tokyo)");
   });
 
   it("no note when similar_names is empty", () => {
@@ -353,3 +353,30 @@ describe("card details", () => {
   });
 });
 
+
+describe("chat drawer (mobile)", () => {
+  it("moves focus into the drawer, closes on Escape and returns focus to the opener", async () => {
+    mockFetch(at("/conversations", () => json({ conversations: [] })));
+    const { default: userEvent } = await import("@testing-library/user-event");
+    render(<ChatPage />);
+    await screen.findByTestId("empty");
+    const opener = screen.getByRole("button", { name: "Open conversations" });
+    await userEvent.click(opener);
+    const close = screen.getByRole("button", { name: "Close conversations" });
+    expect(close).toHaveFocus();
+    expect(opener).toHaveAttribute("aria-expanded", "true");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+
+  it("example prompts fill the input without sending", async () => {
+    const f = mockFetch(at("/conversations", () => json({ conversations: [] })));
+    const { default: userEvent } = await import("@testing-library/user-event");
+    render(<ChatPage />);
+    await screen.findByTestId("empty");
+    await userEvent.click(screen.getByRole("button", { name: "Can I fly from Abu Dhabi?" }));
+    expect(screen.getByLabelText("Message")).toHaveValue("Can I fly from Abu Dhabi?");
+    expect(f.mock.calls.some(([u]) => String(u).includes("/messages"))).toBe(false);
+  });
+});
