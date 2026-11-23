@@ -16,6 +16,8 @@ Migrated by the user's codex agent (report received over hc, 2026-11-23). Source
 - Every release: record commit, image ids and the checks above in the deploy log below.
 
 ## Homelab (previous demo host, retired as the public entry 2026-11-23)
+- 2026-11-24: compose project `ocean-above` stopped on the homelab (`docker compose down`, user decision); `data/` kept.
+  The homelab remains the image build machine for VPS releases.
 
 Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-23.
 
