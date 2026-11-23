@@ -14,7 +14,11 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   Every number shown to the user comes from a tool result.
 - **Nothing is booked without explicit user confirmation** of the full route (every leg and transfer city),
   distance and price.
-- Dev: servers bind `0.0.0.0`, any port. Later deployment target: Cloudflare (ask before any deploy).
+- Dev: servers bind `0.0.0.0`, any port. Auth in dev: one fixed account from env (no Google).
+- Delivery and deploy: `docker compose up` (web + api + Caddy proxy, one exposed port). Demo:
+  `ocean-above.potafree.net` on the homelab behind Cloudflare Tunnel; may move to a VPS with the same compose.
+  Google login and multi-user flow are finished before the demo goes public. Homelab deploy questions go to
+  the hc agent named "potafree.net" on the homelab machine.
 - Deliverables include `prompt history/` with the **raw, unedited** agent sessions (only secrets removed),
   so it is excluded from the forbidden-names lint.
 
@@ -105,8 +109,9 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 - Every new dependency is named in the plan with its reason.
 
 ## Authorizations
-- Standing (no need to ask): install dependencies locally, run tests / lint / dev servers, commit on branches.
-- Always ask: `git push`, opening PRs, any deploy (Cloudflare or other), deleting data, anything public or
+- Standing (no need to ask): install dependencies locally, run tests / lint / dev servers, commit on branches; deploy
+  the test demo `ocean-above.potafree.net` (homelab via Cloudflare Tunnel: tunnel, DNS record, compose up/restart).
+- Always ask: `git push`, opening PRs, any other deploy (other hosts/domains, the VPS), deleting data, anything public or
   hard to undo.
 - An authorization never extends to a different context. If the tool refuses an action, ask; don't work around.
 

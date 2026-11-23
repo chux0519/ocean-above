@@ -64,7 +64,7 @@ flowchart LR
       Gate["confirmation gate<br/>(对话侧条件)"]
     end
     Airline["airline/ 服务接口<br/>报价 · 下单复核 · 查票<br/>(将来可拆为 MCP server)"]
-    Auth["auth<br/>Google ID token 核验<br/>演示登录"]
+    Auth["auth<br/>固定账号（开发）<br/>Google ID token（上线前）"]
     subgraph Core["core/ (纯函数, 确定性)"]
       Net["network<br/>加载 · 校验 · 指纹"]
       Route["routing<br/>hub 约束 Dijkstra"]
@@ -432,7 +432,7 @@ erDiagram
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | POST | `/api/auth/google` | 提交 Google ID token，后端核验后发会话 cookie |
-| POST | `/api/auth/demo` | 演示登录（仅 `DEMO_LOGIN=1` 时启用） |
+| POST | `/api/auth/dev` | 固定账号登录（开发 / 本地运行，环境变量开关） |
 | POST | `/api/auth/logout` | 退出 |
 | GET | `/api/me` | 当前用户 |
 | GET | `/api/conversations` | 会话列表（要求 10） |
@@ -444,15 +444,39 @@ erDiagram
 | GET | `/api/tickets` | 我的机票（要求 9） |
 
 ### 8.1 登录
+- **分两步**：开发期用一个固定账号（`DEV_AUTH_USER` / `DEV_AUTH_PASSWORD`，来自 `.env`）登录，后端发会话 cookie；
+  数据模型从第一天起就按多用户设计（所有数据带 `user_id`）。demo 公开上线前接入 Google 登录并走通多用户流程，
+  固定账号在线上关闭。
+- Google 登录（上线前）：
 - 前端用 Google Identity Services 的登录按钮拿到 **ID token**（不走授权码流程，不需要 client secret，
   不申请任何 Google API 权限，只要 `openid email profile`）。
 - 后端核验 ID token：用 Google 公布的 JWKS 验签，检查 `aud` = 我们的 client ID、`iss`、`exp`、`email_verified`；
   通过后发**自己的** httpOnly、SameSite=Lax 会话 cookie（服务端会话表或签名 cookie），之后不再依赖 Google。
   依赖：`google-auth`（官方库，做验签）或 `PyJWT[crypto]` + JWKS 缓存，在 04 开工时选一个并写明理由。
-- 演示登录：`DEMO_LOGIN=1` 时显示「用用户名进入」，方便评审在本地无 Google 配置时运行；线上可关。
+- 本地运行（评审用）：保留固定账号登录作为无 Google 配置时的兜底，由环境变量开关，线上关闭。
 - 配置：`GOOGLE_CLIENT_ID`（后端）和 `NEXT_PUBLIC_GOOGLE_CLIENT_ID`（前端，同一个值，非机密）。
 - 限制：Google 只接受 `http://localhost` 或 https 域名作为 JavaScript 来源；用局域网 IP（0.0.0.0 绑定后从别的机器访问）
   打开时 Google 登录不可用，用演示登录或 localhost。
+
+### 8.2 部署与交付
+```mermaid
+flowchart LR
+  User["浏览器"] -->|HTTPS| CF["Cloudflare<br/>ocean-above.potafree.net"]
+  CF -->|Tunnel| Proxy
+  subgraph Compose["docker compose（homelab，将来可换 VPS）"]
+    Proxy["proxy · Caddy<br/>唯一对外端口"]
+    Web["web · Next.js :3000"]
+    Api["api · FastAPI :8000"]
+    Proxy -->|"/api/* (SSE 不缓冲)"| Api
+    Proxy -->|"其余"| Web
+  end
+  Api --- Vol[("./data/app.db")]
+  Api --- LDB[("locations.db 只读挂载")]
+```
+- 交付物就是这份 compose：本地 `docker compose up` 后打开 `http://localhost:3000`；demo 站点用同一份 compose。
+- 同域名同源：前端只请求相对路径 `/api/*`，无 CORS，cookie 简单。开发时 Next.js 把 `/api` 转给本地后端，行为一致。
+- 密钥只在部署机的 `.env`；app.db 持久化在卷里。
+- demo 站点部署不需每次询问（测试用途）；homelab 侧的 tunnel / DNS 由 homelab 上的 potafree.net agent 协助。
 
 ## 9. 前端
 
@@ -491,6 +515,6 @@ erDiagram
 - 2026-11-23 v0 review：引用占位符 + 数字守卫符合 FSR 思路 ✔；`book_quote` 带用户确认原话（B4）✔；中文草稿，05 出英文版 ✔。
 - 2026-11-23：流式输出提前到 03；Markdown 流式渲染组件（`streamdown` 优先）；Google 登录现在就做（04），
   用户自己在 GCP 建凭证；MCP 对当前版本 overkill，不做，只保留 `airline/` 领域边界便于将来拆分。
+- 2026-11-23：demo 站点 `ocean-above.potafree.net`，homelab + Cloudflare Tunnel，docker compose 交付（可迁 VPS）；
+  部署 demo 不用问。开发期用固定账号，Google 登录和多用户流程在 demo 公开前完成。
 
-## 13. 待你决定 / review 的点
-1. 保留演示登录（`DEMO_LOGIN=1`）作为评审本地运行的兜底，可以吗？
