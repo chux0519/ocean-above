@@ -12,12 +12,19 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 Clock = Callable[[], datetime]
+
+# Timeouts (06 P0b, design §4.9). Store calls run in worker threads (`asyncio.to_thread`), which
+# cannot be killed; these bound how long one store operation can keep its thread busy.
+BUSY_TIMEOUT = 10.0  # seconds a statement waits for another connection's lock ("database is locked")
+OPERATION_TIMEOUT = 10.0  # wall seconds one connection (= one read / write transaction) may live while SQL runs
+_PROGRESS_OPS = 1000  # SQLite VM instructions between two deadline checks
 
 SCHEMA_VERSION = 3
 
@@ -189,12 +196,38 @@ class NotFound(Exception):
     status = 404
 
 
+class StoreUnavailable(sqlite3.OperationalError):
+    """app.db did not answer in time: a lock wait passed `busy_timeout` ("database is locked") or
+    an operation passed `operation_timeout` ("interrupted"). The transaction was rolled back, so
+    nothing of it was written; the same operation may be retried."""
+
+
+_UNAVAILABLE = ("database is locked", "database table is locked", "database is busy", "interrupted")
+
+
+def _unavailable(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and not isinstance(exc, StoreUnavailable) \
+        and any(text in str(exc).lower() for text in _UNAVAILABLE)
+
+
+def _disarm(con: sqlite3.Connection) -> None:
+    """Stop the operation deadline (before COMMIT / ROLLBACK, which must not be interrupted)."""
+    con.set_progress_handler(None, 0)
+
+
 class Store:
-    def __init__(self, path: str | Path, clock: Clock = utc_now):
+    def __init__(self, path: str | Path, clock: Clock = utc_now, *, busy_timeout: float = BUSY_TIMEOUT,
+                 operation_timeout: float | None = OPERATION_TIMEOUT):
+        """`busy_timeout`: seconds a statement waits for a lock held by another connection.
+        `operation_timeout`: wall seconds per connection (one `read()` / `write()`, counted from its
+        opening); SQL still running past it is interrupted at its next check (every few thousand
+        SQLite instructions; None: no limit). Both raise StoreUnavailable, after a rollback."""
         self.path = Path(path)
         self.clock = clock
+        self.busy_timeout = busy_timeout
+        self.operation_timeout = operation_timeout
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        con = self._connect()
+        con = self._connect(deadline=False)  # migrations are not bounded by the operation timeout
         try:
             con.execute("PRAGMA journal_mode = WAL")  # readers are not blocked by a writer
             self._migrate(con)
@@ -204,11 +237,16 @@ class Store:
     def now(self) -> str:
         return iso(self.clock())
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self, deadline: bool = True) -> sqlite3.Connection:
         # isolation_level=None: no implicit transactions; `write()` issues BEGIN IMMEDIATE itself.
-        con = sqlite3.connect(self.path, isolation_level=None, timeout=30)
+        # `timeout` is SQLite's busy timeout. The progress handler interrupts SQL that runs past
+        # the operation deadline (it does not run while waiting for a lock: that is busy_timeout).
+        con = sqlite3.connect(self.path, isolation_level=None, timeout=self.busy_timeout)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA foreign_keys = ON")
+        if deadline and self.operation_timeout is not None:
+            ends = time.monotonic() + self.operation_timeout
+            con.set_progress_handler(lambda: time.monotonic() > ends, _PROGRESS_OPS)
         return con
 
     def _migrate(self, con: sqlite3.Connection) -> None:
@@ -229,31 +267,44 @@ class Store:
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
         """A connection for reads; several statements see one snapshot."""
-        con = self._connect()
         try:
-            con.execute("BEGIN")
+            con = self._connect()
             try:
-                yield con
+                con.execute("BEGIN")
+                try:
+                    yield con
+                finally:
+                    _disarm(con)
+                    con.execute("ROLLBACK")
             finally:
-                con.execute("ROLLBACK")
-        finally:
-            con.close()
+                con.close()
+        except sqlite3.OperationalError as exc:
+            if _unavailable(exc):
+                raise StoreUnavailable(str(exc)) from exc
+            raise
 
     @contextmanager
     def write(self) -> Iterator[sqlite3.Connection]:
         """One `BEGIN IMMEDIATE` transaction: commit on normal exit, roll back on any exception."""
-        con = self._connect()
         try:
-            con.execute("BEGIN IMMEDIATE")
+            con = self._connect()
             try:
-                yield con
-            except BaseException:
-                if con.in_transaction:  # sqlite rolls back by itself on some errors (disk full)
-                    con.execute("ROLLBACK")
-                raise
-            con.execute("COMMIT")
-        finally:
-            con.close()
+                con.execute("BEGIN IMMEDIATE")
+                try:
+                    yield con
+                except BaseException:
+                    _disarm(con)
+                    if con.in_transaction:  # sqlite rolls back by itself on some errors (disk full)
+                        con.execute("ROLLBACK")
+                    raise
+                _disarm(con)
+                con.execute("COMMIT")
+            finally:
+                con.close()
+        except sqlite3.OperationalError as exc:
+            if _unavailable(exc):  # lock wait or deadline: rolled back, nothing written
+                raise StoreUnavailable(str(exc)) from exc
+            raise
 
     # Every method below that takes a conversation or message id also takes the user and checks
     # ownership in the same transaction; NotFound when it is missing or someone else's.

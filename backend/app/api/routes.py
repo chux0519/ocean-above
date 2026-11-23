@@ -262,7 +262,9 @@ def build_router() -> APIRouter:
         except NotFound:
             raise ApiError(404, "not_found", "Conversation not found.") from None
         try:
-            events = agent.stream_turn(user["id"], conversation_id, body.text)
+            # server_busy (design §4.9): the server's fault, so the day's message slot is given back
+            events = agent.stream_turn(user["id"], conversation_id, body.text, on_server_busy=lambda: (
+                app.state.store.release_message(user["id"], reservation)))
         except (NotFound, ValueError) as e:
             # refused before anything was stored: the slot is given back
             await asyncio.to_thread(app.state.store.release_message, user["id"], reservation)
@@ -319,7 +321,8 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
         except LLMNotConfigured:
             llm = None
     app.state.llm = llm
-    agent_kwargs = {"budget": settings.agent_budget, **(agent_kwargs or {})}
+    agent_kwargs = {"budget": settings.agent_budget, "concurrency": settings.turn_concurrency,
+                    **(agent_kwargs or {})}
     app.state.agent = Agent(airline, llm, **agent_kwargs) if llm is not None else None
 
 

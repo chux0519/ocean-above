@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..airline import BookingError, NotFound
 from ..core.network import NetworkDataError
+from ..store import StoreUnavailable
 
 
 class ApiError(Exception):
@@ -48,6 +49,12 @@ def install_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(NetworkDataError)
     async def _data(_: Request, e: NetworkDataError):
+        return respond(503, "data_unavailable", "Route data could not be read right now. Please try again.")
+
+    @app.exception_handler(StoreUnavailable)
+    async def _store(_: Request, e: StoreUnavailable):
+        # app.db lock wait / operation deadline (design §4.9): rolled back, nothing changed; a
+        # booking keeps its quote and nonce, so the same click can be retried
         return respond(503, "data_unavailable", "Route data could not be read right now. Please try again.")
 
     @app.exception_handler(RequestValidationError)
