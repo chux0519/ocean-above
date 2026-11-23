@@ -30,15 +30,17 @@ token 预算，超额有明确提示；dev 固定账号在线上关闭。本地�
   daily_limit}`。登录接口按 IP 简单限速（每分钟 10 次）。
 - **会话标题兜底**：标题为空时用首条用户消息，再空则 "New conversation"（04 遗留）。
 - **字体**：Public Sans woff2 放进 `frontend/src/fonts/`，`next/font/local` 加载（04 决定：缓存字体）。
+- **隐私政策与服务条款**（Google OAuth Branding 需要）：本项目自己的页面 `/privacy`、`/terms`（同域名、内容如实描述本应用：
+  Google 登录只取邮箱和名字、保存对话与机票、消息发给 DeepSeek 处理、demo 无真实交易、可申请删除），由 L3 实现，文本由协调者起草。
 - **COOP 头**：GIS 弹窗需要 `Cross-Origin-Opener-Policy: same-origin-allow-popups`（Next 配置或 Caddy）。
 
 ## 任务
 | # | 任务 | 依赖 | 拥有的文件 | 模型 |
 |---|---|---|---|---|
 | C2 | 契约 v1.2：`/api/auth/google`、`/api/auth/invite`、config 字段、`me.usage`、`429 rate_limited`、标题兜底 | 无 | `docs/api/contract.md`、`contract/**` | 协调者 |
-| L1 | 后端认证：Google ID token 验签（PyJWT + JWKS 缓存，可注入时钟和密钥做测试）、邀请码、dev 开关、登录限速、标题兜底；测试（伪造签名、错 aud/iss、过期、未验证邮箱、kid 轮换、JWKS 拉取失败） | C2 | `backend/app/api/**`（auth 部分）、`backend/app/store/**`（用户）、测试 | Opus 5.5（安全） |
-| L2 | 用量限额：计数与预算、429、`me.usage`、并发下不超额（同一事务计数）；测试 | C2 | `backend/app/api/**`（限额部分）、`backend/app/store/**`（计数查询）、测试 | Sonnet 5.5 |
-| L3 | 前端：GIS 按钮（`/api/config` 驱动）、邀请码表单、账号显示、429 提示（输入保留）、本地字体、COOP 头；vitest | C2 | `frontend/**`、`deploy/Caddyfile`（仅 COOP 头） | Sonnet 5.5 |
+| L1 | 后端认证：Google ID token 验签（PyJWT + JWKS 缓存，可注入时钟和密钥做测试）、邀请码、dev 开关、登录限速、标题兜底；测试（伪造签名、错 aud/iss、过期、未验证邮箱、kid 轮换、JWKS 拉取失败） | C2 | `backend/app/api/**`（auth 部分）、`backend/app/store/**`（用户）、测试 | Opus 5.5 |
+| L2 | 用量限额：计数与预算、429、`me.usage`、并发下不超额（同一事务计数）；测试 | C2 | `backend/app/api/**`（限额部分）、`backend/app/store/**`（计数查询）、测试 | Opus 5.5 |
+| L3 | 前端：GIS 按钮（`/api/config` 驱动）、邀请码表单、账号显示、429 提示（输入保留）、本地字体、COOP 头；vitest | C2 | `frontend/**`、`deploy/Caddyfile`（仅 COOP 头） | Opus 5.5 |
 | R | Fable 只读安全评审 L1 + L2 | L1、L2 | — | Fable 5.2 |
 | D | 部署：homelab `.env` 加 `GOOGLE_CLIENT_ID`、`INVITE_CODES`、限额变量，删 dev 账号；双用户端到端（Google + 邀请码）；公开 | 全部 | `docs/deploy.md` | 协调者 |
 
@@ -46,7 +48,7 @@ L1 与 L2 都改 `backend/app/api/`：L1 先做，L2 在 L1 合并后开始（�
 可并行；协调者开工时按实际代码结构决定）。L3 可与 L1 并行（对契约开发）。
 
 ## 预算控制
-- Opus 只用于 L1；L2、L3 用 Sonnet；Fable 一次只读评审。真模型只在 D 的端到端里用（几分钱）。
+- 用户决定（2026-11-23）：L1、L2、L3 全部用 Opus 5.5；Fable 一次只读评审。真模型只在 D 的端到端里用（几分钱）。
 
 ## Acceptance（tier A + 线上验证）
 - 测试差分无新失败；lint；认证与限额的单元 / API 测试；前端 vitest。
@@ -57,4 +59,4 @@ L1 与 L2 都改 `backend/app/api/`：L1 先做，L2 在 L1 合并后开始（�
 
 ## 需要用户做的
 - 按下方步骤配置 Google Cloud 项目，把 **Client ID** 发给我（不是机密，不需要 client secret）。
-- 决定邀请码：给评审几个码（我生成随机码，通过安全渠道放进 homelab `.env`，码本身发给你转交评审）。
+- 邀请码：用户定 10 个，已生成（协调者本机私有文件，不进仓库、不在会话里打印）。原计划：给评审几个码（我生成随机码，通过安全渠道放进 homelab `.env`，码本身发给你转交评审）。
