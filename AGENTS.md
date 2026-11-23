@@ -18,7 +18,7 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 - Delivery and deploy: `docker compose up` (web + api + Caddy proxy, one exposed port). Demo:
   `ocean-above.potafree.net` on the homelab behind Cloudflare Tunnel; may move to a VPS with the same compose.
   Google login and multi-user flow are finished before the demo goes public. Homelab deploy questions go to
-  the hc agent named "potafree.net" on the homelab machine.
+  the hc agent named "potafree.net" on the homelab machine. Details: [docs/deploy.md](docs/deploy.md).
 - Deliverables include `prompt history/` with the **raw, unedited** agent sessions (only secrets removed),
   so it is excluded from the forbidden-names lint.
 
