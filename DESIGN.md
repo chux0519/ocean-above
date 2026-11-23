@@ -12,170 +12,193 @@ distances always also appear in a structured card), a "book" action that is not 
 and colour that means two things.
 
 ## 2. Colour
-Direction: **A "Timetable"** (user decision 2026-11-23): a quote reads like a printed airline timetable entry — the
-itinerary block (service line, one row per leg with right-aligned tabular distances, "Transfer at X" rows, double
-rule above the totals, price as the largest figure) is the signature. Source and alternatives:
-`docs/iterations/04-web/D1/design-proposal.md`.
+Direction: **soft minimalism** (issue #39, user decision 2026-11-24). The design is a calm, ChatGPT-like
+conversation. The itinerary card is the only place with structure and emphasis. Source:
+`docs/iterations/07-ui/proposal/proposal.md`.
 
-Strategy: restrained, plus a committed shell. Neutral surfaces with a cool tint, one accent, and status colours
-that always come with text or an icon. Contrast ratios below were computed with the WCAG formula.
+Strategy: restrained neutrals. Light is warm neutral and dark is charcoal/zinc. The primary action is ink-filled.
+One muted ocean-blue accent is used for the route line, links, the focus ring and selection. Status colours always
+come with text and, where useful, an icon. Ratios use the WCAG 2.x formula.
+
+### Light
 
 | Token | Value | Use | Contrast |
 |---|---|---|---|
-| `ground` | `#F3F5F7` | page | — |
-| `surface` | `#FFFFFF` | cards, composer | — |
-| `rail` | `#E9EDF1` | conversation list, skeletons | — |
-| `ink` | `#102030` | text, strong rules | 16.5:1 on surface, 15.1:1 on ground |
-| `ink-2` | `#4A5866` | secondary text | 7.3:1 on surface, 6.7:1 on ground, 6.2:1 on rail |
-| `hairline` | `#CBD3DB` | 1 px dividers (decorative) | 1.5:1 (not used for meaning) |
-| `field` | `#8794A1` | input borders | 3.1:1 (non-text ≥ 3:1) |
-| placeholder | `#5E6B78` | input placeholder | 5.5:1 |
-| `shell` | `#0E2F4A` | header band | white 13.8:1, inactive tab `#B7C9D9` 8.1:1 |
-| `accent` | `#0B5D8F` | primary button, focus ring, links, service line, selection | white on accent 7.1:1 |
-| `accent-tint` | `#DDE8F2` | user message, text selection | ink on it 13.3:1 |
-| `ok` / `ok-bg` | `#1A6B34` / `#E6F4EA` | Booked, ticket | 5.8:1 |
-| `warn` / `warn-bg` | `#7A4A00` / `#FFF1D6` | needs your attention: awaiting confirmation, no service, similar names, notice | 6.7:1 |
-| `danger` / `danger-bg` | `#B42318` / `#FDECEA` | expired, out of date, errors | 5.8:1 (6.6:1 on white) |
+| `ground` | `#FAF9F6` | page | — |
+| `surface` | `#FFFFFF` | cards, composer, menus | — |
+| `sidebar` | `#F4F3EF` | sidebar, drawer | — |
+| `sunken` | `#F0EEEA` | user bubble, calculation panel, neutral badge, skeleton | — |
+| `hover` / `active` | ink 5 % / 8 % | row and ghost hover; current nav row | — |
+| `ink` | `#1C1A17` | text | 17.4 surface, 15.0 sunken |
+| `ink-2` | `#5E5A54` | secondary text | 6.9 surface, 5.9 sunken |
+| `ink-3` | `#6F6A63` | placeholder, meta, "Transfer", "Flight" | 5.4 surface, 4.6 sunken |
+| `hairline` | `#EBE8E3` | dividers inside cards | decorative |
+| `border` | `#E2DFD9` | card, composer, outline button | decorative |
+| `field` | `#8F8A82` | form-field outline; composer border on focus | 3.4 |
+| `primary` / `primary-ink` | `#1C1A17` / `#FFFFFF` | Confirm booking, Send, Go to Chat | 17.4 |
+| `accent` | `#1F5F99` | route line (35 %), transfer nodes, links, focus ring | 6.7 |
+| `ok` / `ok-bg` | `#1E7340` / `#EAF5ED` | booked, ticket | 5.9 / 5.2 |
+| `warn` / `warn-bg` | `#8A5300` / `#FCF1DE` | awaiting confirmation, no service, which one?, notices, similar names | 6.3 / 5.7 |
+| `danger` / `danger-bg` | `#B3261E` / `#FCEDEB` | expired, out of date, errors | 6.5 / 5.7 |
+
+### Dark (a re-mix, not an inversion)
+
+| Token | Value | Contrast |
+|---|---|---|
+| `ground` | `#19191B` | — |
+| `surface` | `#222225` | — |
+| `sidebar` | `#131315` | — |
+| `sunken` | `#2A2A2E` | — |
+| `hover` / `active` | white 5 % / 8 % | — |
+| `ink` | `#ECECEE` | 13.5 surface |
+| `ink-2` | `#A6A6AE` | 6.6 surface, 5.9 sunken |
+| `ink-3` | `#96969F` | 5.4 surface, 4.9 sunken |
+| `hairline` / `border` | `#2E2E32` / `#34343A` | decorative |
+| `field` | `#6E6E77` | 3.1 |
+| `primary` / `primary-ink` | `#ECECEE` / `#18181B` | 15.0 (light pill on dark) |
+| `accent` | `#7FB3E6` | 7.2 |
+| `ok` / `ok-bg` | `#6CCB8B` / `#17291D` | 8.0 / 7.7 |
+| `warn` / `warn-bg` | `#E8B25A` / `#2D2414` | 8.3 / 8.0 |
+| `danger` / `danger-bg` | `#F28B82` / `#331B19` | 6.6 / 6.7 |
 
 Each colour has one meaning:
-- amber means "your attention or action is needed";
-- green means "booked";
-- red means "cannot proceed";
-- blue means "act here".
+- **Amber:** your attention or action is needed.
+- **Green:** booked.
+- **Red:** cannot proceed.
+- **Ink pill:** the one primary action on screen.
+- **Blue:** route and links. Blue is never a status.
 
-The "Hub" badge is neutral (it used to be green).
-
-### Dark palette
-The dark palette is a re-mix, not an inversion. Surfaces are deep navy; the accent is lightened, and text on
-accent-coloured buttons turns dark. Ratios below were computed with the WCAG 2.x formula.
-
-| Token | Dark value | Contrast |
-|---|---|---|
-| `ground` | `#0C1721` | — |
-| `surface` | `#15232F` | — |
-| `rail` | `#101D29` | — |
-| `ink` | `#E6EDF3` | 13.5:1 on surface, 15.3:1 on ground |
-| `ink-2` | `#A3B3C2` | 7.5:1 on surface, 8.4:1 on ground, 8.0:1 on rail |
-| placeholder | `#8A9BAB` | 5.6:1 |
-| `hairline` | `#2A3B4A` | decorative |
-| `field` | `#5F7486` | 3.3:1 (non-text) |
-| `shell` | `#0A2236` | white 16.2:1; inactive tab `#9FB6CA` 7.7:1 |
-| `accent` | `#4BA3DB` | 5.8:1 on surface; text on it `#06131D` 6.8:1 |
-| `accent-tint` | `#1D3A52` | ink on it 10.0:1 |
-| `ok` / `ok-bg` | `#6FD08C` / `#12301E` | 7.6:1 |
-| `warn` / `warn-bg` | `#F2B84B` / `#3A2A0A` | 7.7:1 |
-| `danger` / `danger-bg` | `#FF8A7A` / `#3D1714` | 6.9:1 (7.0:1 on surface) |
-
-On the navy header the focus ring is white in both themes (13.8:1 and 16.2:1).
-
-**How the theme is chosen:**
-- With nothing stored, `:root` uses the light tokens, and `@media (prefers-color-scheme: dark)` switches to dark on
-  `:root:not([data-theme="light"])`.
-- A stored choice sets `<html data-theme>` from an inline `<head>` script before the body is parsed, so there is no
-  flash.
-- The switch is `components/theme-toggle.tsx`: three `aria-pressed` buttons. It sits in the header on desktop, and
-  in the settings menu (gear icon) and on the login page on phones.
+The theme is chosen as before: it follows the system unless `<html data-theme>` is set, and the stored choice is
+applied by the inline boot script, so there is no flash. The System / Light / Dark switch is a segmented control in
+the account menu on every page, and in the header on login and the legal pages.
 
 ## 3. Type, spacing, shape
-- **Family:** Public Sans, variable 100–900, loaded with `next/font/google` (self-hosted at build time, `display: swap`, CSS variable `--font-public-sans`). It has `tnum`, which turns on
-  tabular figures for every number (`.figures`). The fallback is the system UI stack. One family carries everything.
-- **Scale (rem / px, fixed, ratio about 1.2):**
+- **Family:** Geist (variable, OFL). It is loaded with `next/font/local` from `frontend/src/fonts/`, so builds are
+  offline; the licence file is next to it. Figures use `tnum` (`.figures`). One family carries everything.
+- **Scale:**
 
   | Step | px / line height | Use |
   |---|---|---|
-  | xs | 12 / 16 | badges, column heads (uppercase, +0.06em), timestamps |
-  | sm | 14 / 20 | card body, legs, list rows |
-  | 15 | 15 / 24 | chat messages |
-  | base | 16 / 24 | inputs (avoids iOS zoom) |
-  | lg | 18 / 24 | card titles (`Guangzhou → Lima`) |
-  | xl | 22 / 28 | the price |
-  | 2xl | 28 / 36 | page titles |
+  | xs | 12 / 16 | badges, meta, "Transfer", "Flight", timestamps |
+  | sm | 14 / 20 | secondary text, buttons, sidebar rows, leg distances |
+  | base | 15 / 24 | body default, card text |
+  | md | 16 / 26 | chat messages, composer, inputs (no iOS zoom) |
+  | lg | 17 / 24 | card titles |
+  | xl | 24 / 32 | total price, page titles |
+  | 2xl | 28 / 36 | empty-chat headline, legal titles |
 
-- **Weights:** 400 body, 500 legs and nav, 600 titles and buttons, 700 price and page titles.
-- **Spacing:** 4 / 8 / 12 / 16 / 24, plus 32 for page padding on desktop. Card padding is 16 px (20 px from `sm` up).
-  The message gap is 20 px.
-- **Touch targets:** ≥ 44×44 (`min-h-11 min-w-11` on every button, link and list row).
-- **Radii:**
-  - 4 px: badges, inline code;
-  - 6 px: buttons, inputs, notices;
-  - 8 px: cards;
-  - 12 px: the user message (4 px at the tail corner).
+- **Weights and case:** 400 body; 500 labels, nav and buttons; 600 titles and the price. No 700. No uppercase labels.
+- **Spacing:**
+  - 4-pt scale (4 / 8 / 12 / 16 / 20 / 24 / 32 / 40);
+  - 32 px between messages;
+  - card padding 20 px (16 px on phones);
+  - page top padding 40 px from `sm` up.
+- **Touch targets:** ≥ 44×44 everywhere (`min-h-11 min-w-11`).
+- **Radii (by role):**
+
+  | Radius | Used for |
+  |---|---|
+  | full | buttons, badges, send, theme switch, the read-only pill |
+  | 26 px | composer |
+  | 20 px | user bubble |
+  | 16 px | cards, menus, history list, empty panel |
+  | 12 px | alerts, calculation panel, login fields, candidate rows |
+  | 8 px | sidebar rows, ghost buttons |
+  | 6 px | inline code |
+
+- **Depth:**
+  - `shadow-card`: a very soft 1–2 px shadow in light, none in dark, where the border carries it;
+  - `shadow-raised`: the composer, the confirmable card, the login card and the limit notice;
+  - `shadow-overlay`: the account menu and the drawer.
+
+  No nested panels.
 - **Lines:**
-  - 1 px hairline: dividers and card borders;
-  - 1 px ink: the column-head rule;
-  - 3 px double ink: the rule above the totals;
-  - 2 px accent: the border of a card awaiting confirmation;
-  - 3 px: the active tab underline.
-- **Shadow:** none on cards. Only the mobile drawer has one (`8px 0 24px rgba(16,32,48,.18)`).
+  - 1 px `border` around cards;
+  - 1 px `hairline` above the totals;
+  - the route line is 2 px of accent at 35 % (grey `border` on dead quotes);
+  - the confirmable card's border is amber at 40 %.
 - **Layout:**
-  - the chat column is at most 768 px, centred, and cards at most 448 px;
-  - assistant text has no bubble (it reads as prose) and user text has a tinted bubble;
-  - the desktop conversation rail is 288 px and becomes a drawer below 768 px.
+  - the sidebar is 272 px and becomes a 300 px drawer below 768 px;
+  - the chat column and composer are at most 768 px;
+  - cards are at most 480 px;
+  - assistant text has no container;
+  - the user bubble is `sunken`.
+- **Fade:** a 24 px fade from `ground` to transparent sits above the composer, so text slides under it. It is
+  functional, not decoration.
 
 ## 4. Motion
-- **Durations:** 150 ms for hover and colour, 200 ms for card enter (opacity plus 4 px rise) and the drawer slide.
-  Easing is `cubic-bezier(0.2, 0, 0, 1)` (ease-out).
-- **Reduced motion:** every duration becomes 0 and no loop runs.
-- **Loops:** the only indeterminate indicator is the three-dot "typing" pulse shown while a reply streams (1.2 s);
-  the skeleton blocks pulse while loading. Nothing else loops. The countdown changes its text once a second and is
-  not animated.
+- **Durations:** 150 ms for colour, hover and the menu pop (opacity, 4 px rise, 0.98 scale); 200 ms for card enter
+  (opacity plus 4 px rise) and the drawer slide. Easing is `cubic-bezier(0.2, 0, 0, 1)`.
+- **Reduced motion:** every duration becomes 0, so state changes stay instant and visible.
+- **Loops:** the three-dot typing pulse (1.2 s) and the skeleton pulse. The countdown text changes once a second and
+  is not animated.
+- **Scrolling:**
+  - chat follows new content only while the reader is within 96 px of the bottom, and never yanks someone reading
+    further up;
+  - away from the bottom, a round "Scroll to latest" button appears above the composer;
+  - opening a conversation or sending a message jumps to the bottom.
 
 ## 5. Components
-These are shadcn/ui-style primitives copied into `frontend/src/components/ui/`, with no Radix and no new npm
-packages. App components wrap them.
+These are shadcn/ui-style primitives in `frontend/src/components/ui/` (no Radix, no new packages). Icons are
+lucide-react named imports (`icons.tsx`).
 
 | Layer | Component | Notes |
 |---|---|---|
-| ui | `Button` | variants: default (accent), outline, ghost, link; all ≥ 44 px; focus ring 2 px accent |
-| ui | `Card` | flat sheet, 1 px hairline, 8 px radius |
-| ui | `Badge` | tones: muted, ok, warn, danger; always text, optional icon |
-| ui | `Input` | 44 px, `field` border, accent focus |
-| ui | `Skeleton`, `Alert` | tinted strip plus icon; tones warn and danger |
-| icons | `icons.tsx` | lucide-react named imports wrapped once (20 px, 1.75 stroke, `aria-hidden`) |
-| app | `ThemeToggle` | System / Light / Dark, `aria-pressed`, 44 px |
-| app | `ItineraryBlock` (`Route` in `route-card.tsx`) | the signature: service line, leg rows, transfer rows, double rule, totals |
-| app | `QuoteCard` / `BookingRequestCard` | status badge plus countdown; accent border while confirmable; Confirm, error, Get a new quote; calculation details (chevron disclosure) |
-| app | `TicketCard`, `TicketList` | green "✓ Ticket t_…" badge, booked time in English |
-| app | `NoServiceCard` | amber "No service" badge, headline, nearest served cities in the distance column (first in bold) |
-| app | `AmbiguousCityCard` | candidates as ruled rows, "Flies to …" |
-| app | `UnknownCityCard`, `NoticeCard` | quiet text card; amber notice strip with icon |
-| app | `Message` / `MessageList` | user bubble; assistant prose; typing status |
-| app | `ConversationList`, drawer | rail on desktop, drawer with close button on phones |
-| app | `Shell` | navy band, tabs, sign-out (icon only on phones) |
-| app | `LoadingState`, `EmptyState`, `ErrorState` | skeleton cards; teaching empty state; red strip with Retry |
+| ui | `Button` | pill; default (ink primary), outline, ghost (8 px radius), link; ≥ 44 px; 2 px accent focus ring |
+| ui | `Card`, `Badge` | 16 px card with border + `shadow-card`; pill badges in tones muted / ok / warn / danger |
+| ui | `Input` | 44 px, 12 px radius, `field` outline, 16 px text |
+| ui | `Alert`, `Skeleton` | tinted strip with icon (warn / danger); skeletons shaped like cards |
+| app | `Shell` | sidebar (brand, Chat / My tickets / History, page slot, account), phone top bar (menu, name, page action), drawer as a modal dialog with the page behind `inert` |
+| app | `AccountPanel` | name, email or sign-in method, usage, theme switch, Sign out, Privacy / Terms |
+| app | `ConversationList` | New chat, "Recent" rows (title + preview); portalled into the sidebar |
+| app | composer | textarea grows to about 8 lines; Enter sends, Shift+Enter adds a line, never while an IME composes; round send button; reminder line |
+| app | `Route` (in `route-card.tsx`) | the signature: origin (filled node) → each transfer city (hollow node, "Transfer") → destination; "Flight {distance}" on each segment; Total distance; Total price (24 px) |
+| app | `QuoteCardView` | badge ("Quote · not booked" / "Awaiting your confirmation" / "✓ Booked" / "Expired" / "Out of date", `aria-live`), Valid until or countdown, Route, Confirm booking (ink pill, 48 px), booking error strip, Get a new quote, calculation details (collapsed) |
+| app | `TicketCardView` | "✓ Ticket t_…" badge, booked time, Route |
+| app | `NoServiceCardView` | amber "No service", "{city} has no flights yet", nearest served cities with distances, first one tinted and marked "Nearest" |
+| app | `AmbiguousCityCardView` | amber "Which one?"; candidates are buttons sending "I mean X." (plain rows when read-only) |
+| app | `UnknownCityCardView`, `NoticeCardView` | quiet card with a search icon and a suggestion; amber notice strip |
+| app | `LoadingState`, `EmptyState`, `ErrorState`, `PageHeader` | skeleton cards; hero (chat) or dashed panel with icon and action; red strip with a ghost Retry; title + one line |
 
 ## 6. Screens
 ### Chat
-1. Hierarchy: the newest card, then the assistant text, then the composer.
-2. Primary action: **Confirm booking** on a confirmable card. The card gets a 2 px accent border, and the button
-   spans the card's full width directly under the price.
-3. Empty state:
+1. **Hierarchy:** the newest card, then the assistant text, then the composer.
+2. **Primary action:** Confirm booking, on a confirmable card only. That card is the only raised one, with an amber
+   border, and the button spans its width under the price.
+3. **Empty state:**
    - "Where would you like to fly?";
-   - one sentence promising that every leg, the distance and the price appear before booking;
-   - three example prompts that fill the input (they do not send).
-4. Errors:
-   - booking errors appear inside the card (red strip with icon), with "Get a new quote" when needed;
-   - stream and network errors appear as a red strip with Retry above the composer.
+   - one sentence promising every leg, the distance and the price before booking;
+   - three example prompts as pills that fill the input (they do not send).
+4. **Errors:**
+   - Booking errors show inside the card, with "Get a new quote" when needed.
+   - Errors sent before the message is stored (`conversation_busy`, `server_busy`, and `internal_error` before
+     `user_message`) keep the input text and show a red strip with Retry above the composer.
+   - Stream and network errors show the same strip.
 
 ### My tickets
-1. Hierarchy: the page title, a one-line explanation, then ticket cards (2 columns from `lg`).
-2. Primary action: none. The page is read-only; booking happens in Chat.
-3. Empty state: "You have no tickets yet. Book a flight in Chat and it will appear here."
-4. Error: a red strip with Retry.
+1. **Hierarchy:** page title and one line, then ticket cards (two columns from `lg`).
+2. **Primary action:** none on the page, except "Go to Chat" in the empty state.
+3. **Empty state:** a dashed panel with a ticket icon: "You have no tickets yet…", plus a Go to Chat button.
+4. **Error:** a red strip with Retry.
 
 ### History
-1. Hierarchy: the page title, then conversation rows (title, preview, time).
-2. Primary action: open a conversation. The detail view is the read-only chat with no Confirm.
-3. Empty state: "No conversations yet."
-4. Error: a red strip with Retry. A missing conversation shows "not found" text.
+1. **Hierarchy:** page title and one line, then a single bordered list (title, time, preview, chevron).
+2. **Detail:** a "‹ All conversations" pill link, then the title, then the read-only pill, then the read-only chat
+   with no Confirm and no candidate buttons.
+3. **Empty, error and not-found:** a dashed panel; a red strip with Retry; the "not found" text.
 
 ### Login
-1. Hierarchy: the product name, one line of purpose, then the form.
-2. Primary action: Sign in.
-3. Error: inline text under the form.
-4. Navy band with the theme switch, then the "Sign in" card.
+A quiet header (name and theme switch), then a raised "Sign in" card: Google, invite code, local account, separated
+by "or", with the legal line below and the footer links.
+
+### Privacy, Terms
+The same quiet header, a 28 px title, 16/26 body text at most 672 px wide, and the footer.
 
 ## 7. Exceptions (dated)
+- 2026-11-24: 07-ui soft minimalism accepted (user confirmed D1–D7 of `docs/iterations/07-ui/proposal/proposal.md`):
+  Geist; ink pill as the primary action; full-height sidebar + phone drawer; low-contrast borders + soft shadow with a
+  stronger focus state; vertical route line; 24 px fade above the composer; amber border on the confirm card. §2–6
+  rewritten from `docs/iterations/07-ui/DESIGN-draft.md`; earlier entries about direction A are historical.
 - 2026-11-23: **superseded direction.** The user replaced direction A "Timetable" with issue #39 (ChatGPT-inspired soft
   minimalism: neutral charcoal/zinc dark, warm-neutral light, floating composer, selective rounding, calculation details
   collapsed). Sections 2–6 will be rewritten from the 07-ui proposal once the user confirms it; until then they
