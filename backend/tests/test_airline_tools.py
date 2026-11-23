@@ -103,7 +103,7 @@ def test_quote_route_stores_a_quoted_quote_and_returns_its_card(world):
     card = r.cards[0]
     assert_card(card, SCHEMAS)
     assert card == {
-        "type": "quote", "id": r.data["quote_id"], "origin": "A", "destination": "D",
+        "type": "quote", "id": r.data["quote_id"], "origin": "A", "destination": "D", "similar_names": [],
         "legs": [
             {"from": "A", "to": "H1", "distance_display": "10.0 km", "distance": "10." + Z},
             {"from": "H1", "to": "H3", "distance_display": "50.0 km", "distance": "50." + Z},
@@ -496,3 +496,25 @@ def test_list_tickets_rejects_a_bad_time(world):
 def test_list_tickets_when_there_are_none(world):
     r = world.airline.list_tickets(world.alice)
     assert r.data == {"count": 0, "filter": {}, "tickets": []} and world.airline.tickets(world.alice) == []
+
+
+def test_similar_names_on_quote_and_booking_request_cards(real):
+    """Tokyo -> San Jose / San José list each other (with hubs); the same on every read; plain routes []."""
+    net = real.networks.current()
+    for dest, other in (("San Jose", "San José"), ("San José", "San Jose")):
+        r = real.airline.quote_route(real.alice, real.conv, "Tokyo", dest)
+        assert r.ok
+        expected = [{"city": other, "connected_hubs": list(net.cities[other].connected_hubs)}]
+        assert expected[0]["connected_hubs"]
+        card = r.cards[0]
+        assert card["similar_names"] == expected
+        assert_card(card, SCHEMAS)
+        qid = r.data["quote_id"]
+        booking = real.airline.request_booking(real.alice, real.conv, qid)
+        assert booking.cards[0]["type"] == "booking_request" and booking.cards[0]["similar_names"] == expected
+        assert real.airline.get_quote(real.alice, qid)["similar_names"] == expected
+        message = real.done(booking.cards)
+        assert message["cards"][0]["similar_names"] == expected
+        assert_message(message, SCHEMAS)
+    plain = real.airline.quote_route(real.alice, real.conv, "Guangzhou", "Lima")
+    assert plain.cards[0]["similar_names"] == []

@@ -159,7 +159,8 @@ class Airline:
         data = _quote_data(quote, "quoted")
         if route.similar_names:
             data["similar_names"] = {k: list(v) for k, v in route.similar_names.items()}
-        return Result("ok", data, (cards.quote_card(quote, cards.card_state("quoted")),))
+        return Result("ok", data, (cards.quote_card(quote, cards.card_state("quoted"),
+                                                      similar_names=_similar(self.networks, quote)),))
 
     def request_booking(self, user_id: str, conversation_id: str, quote_id: str) -> Result:
         """Ask for the confirm card of a quote. It never books and never returns a nonce.
@@ -179,7 +180,8 @@ class Airline:
                 return Result("quote_expired", {"quote_id": quote_id}, (cards.notice_card("quote_expired"),))
             if status == "stale":
                 return Result("stale", {"quote_id": quote_id}, (cards.notice_card("stale"),))
-            card = cards.quote_card(quote, cards.card_state(status), kind="booking_request")
+            card = cards.quote_card(quote, cards.card_state(status), kind="booking_request",
+                                    similar_names=_similar(self.networks, quote))
             return Result("ok", _quote_data(quote, status), (card,))
 
     def list_tickets(self, user_id: str, *, city: str | None = None, ticket_id: str | None = None,
@@ -351,7 +353,8 @@ class Airline:
             quote = records.get_quote(con, quote_id)
             if quote is None or quote["user_id"] != user_id:
                 return None
-            return cards.quote_card(quote, self._state(con, quote, now))
+            return cards.quote_card(quote, self._state(con, quote, now),
+                                    similar_names=_similar(self.networks, quote))
 
     # ================================================================== internals =============
     def _require_conversation(self, con: sqlite3.Connection, user_id: str, conversation_id: str) -> None:
@@ -440,7 +443,8 @@ class Airline:
                 if quote is None or quote["user_id"] != user_id:
                     continue  # cannot happen through post_assistant_message; never leak a quote
                 state = self._state(con, quote, now, message["id"])
-                card = cards.quote_card(quote, state, kind=card["type"])
+                card = cards.quote_card(quote, state, kind=card["type"],
+                                        similar_names=_similar(self.networks, quote))
             out.append(card)
         return {"id": message["id"], "role": message["role"], "text": message["text"],
                 "cards": out, "created_at": message["created_at"]}
@@ -482,6 +486,21 @@ def _connected_hubs(net: Network, name: str) -> list[str]:
     if not city.is_hub:
         return list(city.connected_hubs)
     return sorted(n for n in net.neighbors[name] if net.cities[n].is_hub)
+
+
+def _similar(networks: NetworkProvider, quote: dict) -> list[dict]:
+    """Other cities whose accent-folded name equals an endpoint's, with their connected hubs.
+    Display only: when locations.db is unreadable the card is still shown, without the hint."""
+    try:
+        net = networks.current()
+    except NetworkDataError:
+        return []
+    out: list[dict] = []
+    for endpoint in (quote["origin"], quote["destination"]):
+        for name in net.fold_index.get(places.fold(endpoint), ()):
+            if name != quote["origin"] and name != quote["destination"] and name not in {o["city"] for o in out}:
+                out.append({"city": name, "connected_hubs": _connected_hubs(net, name)})
+    return out
 
 
 def _candidate(net: Network, name: str) -> dict:

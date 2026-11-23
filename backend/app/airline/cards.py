@@ -39,7 +39,8 @@ def card_state(status: str, nonce: str | None = None, ticket_id: str | None = No
     return {"status": status, "bookable": nonce is not None, "nonce": nonce, "ticket_id": ticket_id}
 
 
-def quote_card(quote: Mapping, state: dict, kind: str = "quote") -> dict:
+def quote_card(quote: Mapping, state: dict, kind: str = "quote",
+               similar_names: Iterable[Mapping] = ()) -> dict:
     """`QuoteCard`, or `BookingRequestCard` with kind="booking_request" (same fields)."""
     return {
         "type": kind,
@@ -54,6 +55,8 @@ def quote_card(quote: Mapping, state: dict, kind: str = "quote") -> dict:
         "price": quote["price"],
         "expires_at": quote["expires_at"],
         "state": state,
+        "similar_names": [{"city": s["city"], "connected_hubs": list(s["connected_hubs"])}
+                          for s in similar_names],
     }
 
 
