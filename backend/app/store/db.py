@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterator
 
 Clock = Callable[[], datetime]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_V1 = """
 CREATE TABLE users (
@@ -143,7 +143,13 @@ CREATE INDEX message_usage_by_user ON message_usage(user_id, created_at);
 CREATE INDEX llm_calls_by_time ON llm_calls(created_at);
 """
 
-_MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2}
+# v3 (L4 review #7): sessions can be revoked. The cookie carries the user's epoch at sign-in;
+# logout bumps it, so every cookie issued before stops working.
+_SCHEMA_V3 = """
+ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0;
+"""
+
+_MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3}
 
 
 def utc_now() -> datetime:
@@ -264,6 +270,13 @@ class Store:
 
         with self.read() as con:
             return records.get_user(con, user_id)
+
+    def bump_session_epoch(self, user_id: str) -> None:
+        """Revoke every session cookie of the user issued so far (logout)."""
+        from . import records
+
+        with self.write() as con:
+            records.bump_session_epoch(con, user_id)
 
     def create_conversation(self, user_id: str, title: str = "") -> dict:
         from . import records

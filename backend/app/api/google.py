@@ -10,14 +10,19 @@ Checks: signature with the key named by the token's `kid` (RS256 only), `aud == 
 `email_verified` is true. A replayed token is accepted while it is valid (the check is stateless);
 it only proves the same Google account again.
 
-Keys are cached for `ttl` seconds. A token with an unknown `kid` (Google rotated its keys) forces
-one refetch, at most once per `min_refetch` seconds so forged kids cannot make us hammer Google.
-If the keys are needed and cannot be fetched → `KeysUnavailable` (the API answers 503).
+Keys (review #2): cached for `ttl` seconds. A token with an unknown `kid` (Google rotated its keys)
+allows one refetch, at most once per `min_refetch` seconds, so forged kids cannot make us hammer
+Google. A failed fetch keeps the last good key set (usable for up to `max_stale` seconds after it
+was fetched) and backs off: the next attempt waits `min_refetch`, doubling per consecutive failure
+up to `max_backoff`. Only one fetch runs at a time (single flight) and it runs **outside** the
+lock, so a slow Google never blocks requests that can use the cached keys. `KeysUnavailable`
+(the API answers 503) only when there is no usable key set at all.
 The clock and the fetch function are injectable for tests.
 """
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass
@@ -33,6 +38,8 @@ ISSUERS = ("accounts.google.com", "https://accounts.google.com")
 ALGORITHMS = ["RS256"]
 LEEWAY_SECONDS = 60
 MAX_TOKEN_CHARS = 8192
+MAX_TOKEN_LIFETIME = 24 * 3600  # exp - iat; Google issues 1 h tokens
+FETCH_TIMEOUT = 3.0
 
 
 class InvalidToken(Exception):
@@ -50,7 +57,7 @@ class GoogleIdentity:
     name: str | None
 
 
-def fetch_jwks(url: str = JWKS_URL, timeout: float = 5.0) -> dict:
+def fetch_jwks(url: str = JWKS_URL, timeout: float = FETCH_TIMEOUT) -> dict:
     """GET the JWKS document. Any failure (network, status, json) raises."""
     res = httpx.get(url, timeout=timeout, follow_redirects=False)
     res.raise_for_status()
@@ -59,7 +66,8 @@ def fetch_jwks(url: str = JWKS_URL, timeout: float = 5.0) -> dict:
 
 class GoogleVerifier:
     def __init__(self, client_id: str, *, fetch: Callable[[], dict] = fetch_jwks,
-                 clock: Callable[[], float] = time.time, ttl: float = 3600.0, min_refetch: float = 60.0):
+                 clock: Callable[[], float] = time.time, ttl: float = 3600.0, min_refetch: float = 60.0,
+                 max_backoff: float = 900.0, max_stale: float = 24 * 3600.0, wait: float = FETCH_TIMEOUT + 1):
         if not client_id:
             raise ValueError("client_id is required")
         self.client_id = client_id
@@ -67,14 +75,19 @@ class GoogleVerifier:
         self._clock = clock
         self._ttl = ttl
         self._min_refetch = min_refetch
+        self._max_backoff = max_backoff
+        self._max_stale = max_stale
+        self._wait = wait  # how long a request without a usable key waits for a running fetch
         self._keys: dict[str, jwt.PyJWK] = {}
-        self._fetched_at: float | None = None
-        self._lock = threading.Lock()
+        self._fetched_at: float | None = None  # last successful fetch
+        self._next_attempt = -math.inf  # no fetch is started before this time
+        self._failures = 0  # consecutive failed fetches
+        self._fetching = False
+        self._cond = threading.Condition(threading.Lock())
 
     # --- keys ---------------------------------------------------------------------------------
-    def _refresh(self) -> None:
-        """Replace the key set. Called with the lock held."""
-        self._fetched_at = self._clock()  # also on failure: the refetch limit counts attempts
+    def _load(self) -> dict[str, jwt.PyJWK]:
+        """Fetch and parse the key set (no lock held). Raises KeysUnavailable."""
         try:
             doc = self._fetch()
             keys = {}
@@ -87,27 +100,65 @@ class GoogleVerifier:
                 except jwt.PyJWTError:
                     continue
         except Exception as e:  # network, http status, bad json, bad shape
-            self._keys = {}
             log.warning("google jwks fetch failed: %s", type(e).__name__)
             raise KeysUnavailable() from None
         if not keys:
-            self._keys = {}
             log.warning("google jwks fetch returned no usable keys")
             raise KeysUnavailable()
-        self._keys = keys
+        return keys
+
+    def _usable(self, now: float) -> dict[str, jwt.PyJWK]:
+        """The cached keys while not older than `max_stale` (lock held)."""
+        if self._fetched_at is None or now - self._fetched_at >= self._max_stale:
+            return {}
+        return self._keys
+
+    def _wants_fetch(self, kid: str, now: float) -> bool:
+        """Is a fetch due and allowed? (lock held)"""
+        if self._fetching or now < self._next_attempt:
+            return False
+        if not self._usable(now) or now - self._fetched_at >= self._ttl:
+            return True
+        return kid not in self._keys  # possibly rotated; `_next_attempt` bounds how often
+
+    def _fetch_outside_lock(self) -> None:
+        """Run one fetch with the lock released, then publish the result. Called with the lock
+        held and `_fetching` set; returns with the lock held."""
+        self._cond.release()
+        try:
+            keys, ok = self._load(), True
+        except KeysUnavailable:
+            keys, ok = None, False
+        finally:
+            self._cond.acquire()
+        now = self._clock()
+        if ok:
+            self._keys, self._fetched_at, self._failures = keys, now, 0
+            self._next_attempt = now + self._min_refetch
+        else:  # keep the last good keys; back off
+            self._failures += 1
+            self._next_attempt = now + min(self._min_refetch * 2 ** (self._failures - 1), self._max_backoff)
 
     def _key(self, kid: str) -> jwt.PyJWK:
-        with self._lock:
+        with self._cond:
             now = self._clock()
-            fresh = self._fetched_at is not None and now - self._fetched_at < self._ttl and self._keys
-            if not fresh:
-                self._refresh()
-            elif kid not in self._keys and now - self._fetched_at >= self._min_refetch:
-                self._refresh()  # keys rotated since the last fetch
-            key = self._keys.get(kid)
-        if key is None:
-            raise InvalidToken("unknown kid")
-        return key
+            if self._wants_fetch(kid, now):
+                self._fetching = True
+                try:
+                    self._fetch_outside_lock()
+                finally:
+                    self._fetching = False
+                    self._cond.notify_all()
+            elif self._fetching and kid not in self._usable(now):
+                # someone else is fetching and we have nothing to use yet: wait for that fetch only
+                self._cond.wait_for(lambda: not self._fetching, timeout=self._wait)
+            keys = self._usable(self._clock())
+            key = keys.get(kid)
+        if key is not None:
+            return key
+        if not keys:
+            raise KeysUnavailable()
+        raise InvalidToken("unknown kid")
 
     # --- tokens -------------------------------------------------------------------------------
     def verify(self, token: str) -> GoogleIdentity:
@@ -142,6 +193,8 @@ class GoogleVerifier:
         exp, iat = claims.get("exp"), claims.get("iat")
         if not _number(exp) or not _number(iat):
             raise InvalidToken("time claims")
+        if exp - iat > MAX_TOKEN_LIFETIME:
+            raise InvalidToken("lifetime")
         if exp <= now - LEEWAY_SECONDS:
             raise InvalidToken("expired")
         if iat > now + LEEWAY_SECONDS:
@@ -157,7 +210,8 @@ class GoogleVerifier:
 
 
 def _number(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """A finite JSON number (review #9: NaN / Infinity parse as floats and pass every comparison)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 __all__ = ["GoogleIdentity", "GoogleVerifier", "InvalidToken", "KeysUnavailable", "fetch_jwks"]

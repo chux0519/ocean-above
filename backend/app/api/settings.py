@@ -12,6 +12,10 @@ DEFAULT_APP_DB = Path(__file__).resolve().parents[2] / "data" / "app.db"
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 
 
+def _flag(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass
 class Settings:
     app_db: Path = DEFAULT_APP_DB
@@ -23,6 +27,7 @@ class Settings:
     google_client_id: str | None = None
     invite_codes: list[str] = field(default_factory=list, repr=False)
     trusted_proxies: tuple = field(default_factory=lambda: parse_networks(None))
+    trust_cf_connecting_ip: bool = False  # only behind Cloudflare (review #4)
     login_attempts_per_minute: int = 10
     daily_messages_per_user: int = 50  # chat messages per user per UTC day (limits.py)
     daily_token_budget: int = 2_000_000  # site-wide sum of llm_calls.tokens per UTC day (limits.py)
@@ -36,6 +41,14 @@ class Settings:
     def invite_login(self) -> bool:
         return bool(self.invite_codes)
 
+    def warnings(self) -> list[str]:
+        """Configuration mistakes worth a log line at startup (review #12)."""
+        out = []
+        if (self.google_client_id or self.invite_codes) and not self.cookie_secure:
+            out.append("public logins are enabled but COOKIE_SECURE is off: the session cookie may be sent "
+                       "over plain HTTP; set COOKIE_SECURE=1 behind HTTPS")
+        return out
+
     @classmethod
     def from_env(cls, env=None) -> "Settings":
         env = os.environ if env is None else env
@@ -44,7 +57,7 @@ class Settings:
             s.app_db = Path(env["APP_DB"])
         s.dev_user = env.get("DEV_AUTH_USER", "")
         s.dev_password = env.get("DEV_AUTH_PASSWORD", "")
-        s.cookie_secure = env.get("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes", "on")
+        s.cookie_secure = _flag(env.get("COOKIE_SECURE"))
         # Without SESSION_SECRET a restart signs everyone out (random key per process).
         if env.get("SESSION_SECRET"):
             s.session_secret = env["SESSION_SECRET"].encode()
@@ -53,6 +66,7 @@ class Settings:
         s.google_client_id = (env.get("GOOGLE_CLIENT_ID") or "").strip() or None
         s.invite_codes = parse_codes(env.get("INVITE_CODES"))
         s.trusted_proxies = parse_networks(env.get("TRUSTED_PROXIES"))
+        s.trust_cf_connecting_ip = _flag(env.get("TRUST_CF_CONNECTING_IP"))
         if env.get("DAILY_MESSAGES_PER_USER", "").strip().isdigit():
             s.daily_messages_per_user = int(env["DAILY_MESSAGES_PER_USER"])
         if env.get("DAILY_TOKEN_BUDGET", "").strip().replace("_", "").isdigit():

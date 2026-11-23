@@ -16,7 +16,7 @@ from jwt.algorithms import RSAAlgorithm
 
 from app.api import Settings
 from app.api.google import ISSUERS, LEEWAY_SECONDS, GoogleVerifier, InvalidToken, KeysUnavailable
-from app.api.logins import InviteCodes, Throttle, clean_name, client_ip, parse_networks
+from app.api.logins import InviteCodes, Throttle, account_key, clean_name, client_ip, parse_networks, throttle_key
 from app.main import create_app
 
 from .airline_helpers import SECRET, World, assert_shape
@@ -216,11 +216,17 @@ def test_jwks_fetch_failure_is_unavailable_not_invalid():
 
 
 # --- invite codes, names, client ip, throttle --------------------------------------------------
-def test_invite_codes_match_by_index():
+def test_review_1_invite_account_key_is_the_code_not_its_position():
     codes = InviteCodes(["alpha-1", "beta-2"])
-    assert (codes.match("alpha-1"), codes.match("beta-2")) == (0, 1)
+    key = codes.match("beta-2")
+    assert key == account_key("beta-2") and "beta-2" not in key and len(key) == 32
+    # removing or reordering other codes does not change it
+    assert InviteCodes(["beta-2"]).match("beta-2") == InviteCodes(["gamma", "beta-2", "alpha-1"]).match("beta-2") == key
+    assert codes.match("alpha-1") not in (None, key)
     for bad in ("", "alpha-", "alpha-1 ", "ALPHA-1", "\ud800"):
         assert codes.match(bad) is None
+    assert codes.active(key) and not InviteCodes(["alpha-1"]).active(key)
+    assert len(InviteCodes(["a", "a", "b"])) == 2
     assert not InviteCodes([])
 
 
@@ -235,10 +241,11 @@ def test_client_ip_trusts_forwarding_headers_only_from_a_proxy():
     trusted = parse_networks(None)
     h = {"cf-connecting-ip": "203.0.113.9", "x-forwarded-for": "198.51.100.1, 172.18.0.3"}
     assert client_ip("203.0.113.50", h, trusted) == "203.0.113.50"  # public peer: headers ignored
-    assert client_ip("172.18.0.2", h, trusted) == "203.0.113.9"  # Caddy → Cloudflare's header
+    assert client_ip("172.18.0.2", h, trusted, trust_cf=True) == "203.0.113.9"  # Caddy → Cloudflare's header
+    assert client_ip("172.18.0.2", h, trusted) == "198.51.100.1"  # not behind Cloudflare: XFF only
     assert client_ip("172.18.0.2", {"x-forwarded-for": "198.51.100.1, 172.18.0.3"}, trusted) == "198.51.100.1"
     assert client_ip("172.18.0.2", {"x-forwarded-for": "garbage"}, trusted) == "172.18.0.2"
-    assert client_ip("172.18.0.2", {"cf-connecting-ip": "nope"}, trusted) == "172.18.0.2"
+    assert client_ip("172.18.0.2", {"cf-connecting-ip": "nope"}, trusted, trust_cf=True) == "172.18.0.2"
     assert client_ip("172.18.0.2", h, parse_networks("none")) == "172.18.0.2"
     assert client_ip("10.1.2.3", h, parse_networks("172.16.0.0/12")) == "10.1.2.3"
 
@@ -344,10 +351,10 @@ def test_invite_login(client):
     grace = res.json()
     assert (grace["auth_provider"], grace["display_name"], grace["email"]) == ("invite", "Grace Hopper", None)
     assert_shape(SCHEMAS_ME, client.get("/api/me").json())
-    # same code + same name (any case / spacing) → same account; other code or name → other account
-    assert client.post("/api/auth/invite", json={"code": "code-one", "name": "grace hopper"}).json()["id"] == grace["id"]
+    # one account per code: another name is the same account with a new display name; another code is another account
+    again = client.post("/api/auth/invite", json={"code": "code-one", "name": "Ada"}).json()
+    assert (again["id"], again["display_name"]) == (grace["id"], "Ada")
     assert client.post("/api/auth/invite", json={"code": "code-two", "name": "Grace Hopper"}).json()["id"] != grace["id"]
-    assert client.post("/api/auth/invite", json={"code": "code-one", "name": "Ada"}).json()["id"] != grace["id"]
 
 
 def test_invite_failures(client):
@@ -362,13 +369,13 @@ def test_invite_failures(client):
 def test_invite_users_are_isolated(client):
     client.post("/api/auth/invite", json={"code": "code-one", "name": "Ada"})
     mine = client.post("/api/conversations", json={}).json()
-    client.post("/api/auth/invite", json={"code": "code-one", "name": "Bob"})
+    client.post("/api/auth/invite", json={"code": "code-two", "name": "Ada"})
     assert client.get("/api/conversations").json() == {"conversations": []}
     assert_error(client.get(f"/api/conversations/{mine['id']}"), 404, "not_found")
 
 
 def test_login_throttle_per_ip(world):
-    with app_client(world, peer=("172.18.0.2", 1)) as c:  # behind Caddy
+    with app_client(world, peer=("172.18.0.2", 1), trust_cf_connecting_ip=True) as c:  # behind Caddy + Cloudflare
         clock = Clock(0.0)
         c.app.state.login_throttle = Throttle(10, 60, clock=clock)
         cf = {"cf-connecting-ip": "203.0.113.1"}
@@ -410,6 +417,9 @@ def test_no_secrets_in_logs_or_settings_repr(client, caplog):
     for secret in (secret_token, good_token, good_token.split(".")[2], "code-two", "code-one"):
         assert secret not in text
     assert "rejected" in text  # the reason is logged
+    text_after = caplog.text
+    for k in (account_key("code-one"), account_key("code-two")):  # the account key is not the code, but keep it out too
+        assert k not in text_after
     r = repr(Settings(dev_user="demo", dev_password="hunter2", session_secret=b"topsecret",
                       nonce_secret=b"noncesecret", invite_codes=["code-one"]))
     for secret in ("hunter2", "topsecret", "noncesecret", "code-one"):
@@ -424,6 +434,8 @@ def test_settings_from_env_auth_fields():
     empty = Settings.from_env({"GOOGLE_CLIENT_ID": " "})
     assert (empty.google_client_id, empty.invite_login, empty.dev_login) == (None, False, False)
     assert len(empty.trusted_proxies) > 0  # defaults
+    assert empty.trust_cf_connecting_ip is False
+    assert Settings.from_env({"TRUST_CF_CONNECTING_IP": "1"}).trust_cf_connecting_ip is True
 
 
 # --- conversation title fallback ----------------------------------------------------------------

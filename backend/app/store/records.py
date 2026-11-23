@@ -11,7 +11,7 @@ from .db import NotFound, new_id, to_json
 
 PREVIEW_CHARS = 120
 
-_USER_COLS = "id, auth_provider, provider_sub, email, display_name, created_at"
+_USER_COLS = "id, auth_provider, provider_sub, email, display_name, created_at, session_epoch"
 _MESSAGE_COLS = "id, conversation_id, role, text, cards, guard_problems, created_at"
 _QUOTE_COLS = (
     "id, conversation_id, user_id, origin, destination, legs, distance, price, network_fingerprint, "
@@ -53,6 +53,10 @@ def upsert_user(con, now: str, auth_provider: str, provider_sub: str, display_na
 
 def get_user(con, user_id: str) -> dict | None:
     return _row(con.execute(f"SELECT {_USER_COLS} FROM users WHERE id = ?", (user_id,)).fetchone())
+
+
+def bump_session_epoch(con, user_id: str) -> None:
+    con.execute("UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?", (user_id,))
 
 
 # --- conversations -------------------------------------------------------------------------
@@ -212,10 +216,20 @@ def messages_since(con, user_id: str, since: str) -> int:
                        (user_id, since)).fetchone()[0]
 
 
+# A call the upstream reported no usage for (stream error, cancel, a server without `usage`) still
+# cost something (review #10): count it as its request size in tokens (≈ 3 chars per token) plus a
+# full output allowance. Over-counting is the safe side of a budget.
+CHARS_PER_TOKEN_ESTIMATE = 3
+OUTPUT_TOKENS_ESTIMATE = 4096
+
+
 def tokens_since(con, since: str) -> int:
-    """Site-wide LLM tokens (`llm_calls.tokens`, all users) at or after `since`; NULL counts 0."""
-    return con.execute("SELECT COALESCE(SUM(tokens), 0) FROM llm_calls WHERE created_at >= ?",
-                       (since,)).fetchone()[0]
+    """Site-wide LLM tokens (`llm_calls.tokens`, all users) at or after `since`; a NULL count is
+    replaced by an estimate (request chars / 3 + 4096)."""
+    return con.execute(
+        "SELECT COALESCE(SUM(COALESCE(tokens, length(request) / ? + ?)), 0) FROM llm_calls "
+        "WHERE created_at >= ?",
+        (CHARS_PER_TOKEN_ESTIMATE, OUTPUT_TOKENS_ESTIMATE, since)).fetchone()[0]
 
 
 # --- quotes --------------------------------------------------------------------------------

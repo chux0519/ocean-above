@@ -16,6 +16,7 @@ from app.api import Settings, session
 from app.api.limits import resets_at
 from app.main import create_app
 from app.store import SCHEMA_VERSION, Store, day_start
+from app.store.records import OUTPUT_TOKENS_ESTIMATE
 
 from .agent_helpers import Call, FakeLLM
 from .airline_helpers import SECRET, FakeClock, World, _learn, assert_shape
@@ -125,7 +126,7 @@ def test_ownership_and_missing_llm_come_before_the_limit(world):
         as_user(client, world.alice)
         assert_429(send(client, world.conv), "user", "2026-11-24T00:00:00Z")
     base = dict(app_db=world.dir / "app.db", session_secret=SECRET_KEY, nonce_secret=SECRET,
-                daily_messages_per_user=0)
+                daily_messages_per_user=0, dev_user="demo", dev_password="pw")  # dev login on: alice is a dev user
     with TestClient(create_app(world.db, Settings(**base), clock=world.clock)) as client:  # no LLM
         as_user(client, world.alice)
         assert send(client, world.conv).json()["error"]["code"] == "llm_unavailable"
@@ -194,10 +195,24 @@ def test_the_user_scope_wins_when_both_are_reached(world):
         assert_429(send(client, world.bob_conv), "site", "2026-11-24T00:00:00Z")
 
 
-def test_calls_without_a_token_count_cost_nothing(world):
-    world.store.add_llm_call(world.alice, world.conv, {}, {}, tokens=None)
+def test_review_10_calls_without_a_token_count_are_estimated(world):
+    """Review #10: a call with no reported usage (stream error, cancel, server without usage) is not
+    free: request chars / 3 + a full output allowance."""
+    from app.store.records import CHARS_PER_TOKEN_ESTIMATE
+
+    request = {"messages": [{"role": "user", "content": "x" * 3000}]}
+    world.store.add_llm_call(world.alice, world.conv, request, {"error": "stream broke"}, tokens=None)
     world.store.add_llm_call(world.alice, world.conv, {}, {}, tokens=7)
-    assert world.store.tokens_today() == 7
+    stored = len(json.dumps(request, ensure_ascii=False, separators=(",", ":")))
+    assert world.store.tokens_today() == 7 + stored // CHARS_PER_TOKEN_ESTIMATE + OUTPUT_TOKENS_ESTIMATE
+
+
+def test_review_10_unreported_calls_can_exhaust_the_site_budget(world):
+    c, _ = app_client(world, daily_token_budget=OUTPUT_TOKENS_ESTIMATE)
+    with c as client:
+        as_user(client, world.alice)
+        world.store.add_llm_call(world.alice, world.conv, {}, {"error": "x"}, tokens=None)
+        assert_429(send(client, world.conv), "site", "2026-11-24T00:00:00Z")
 
 
 # --- concurrency: count + reserve in one write transaction ---------------------------------
@@ -292,6 +307,7 @@ def test_a_v1_database_is_migrated_and_keeps_its_data(tmp_path):
     con = sqlite3.connect(path)
     con.execute("DROP TABLE message_usage")
     con.execute("DROP INDEX llm_calls_by_time")
+    con.execute("ALTER TABLE users DROP COLUMN session_epoch")
     con.execute("PRAGMA user_version = 1")
     con.commit()
     con.close()
@@ -299,7 +315,7 @@ def test_a_v1_database_is_migrated_and_keeps_its_data(tmp_path):
     assert again.get_user(user["id"])["display_name"] == "demo"
     assert again.messages_today(user["id"]) == 0
     con = sqlite3.connect(path)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
     con.close()
 
 

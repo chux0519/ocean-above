@@ -3,14 +3,19 @@
 Invite codes (`INVITE_CODES`, comma-separated) let reviewers in without Google. Only SHA-256
 digests of the codes are kept in memory; a submitted code is hashed and compared with every
 digest using `hmac.compare_digest` (no early exit, so timing does not tell which code is close).
-The user is `(invite, "<code index>:<normalised name>")`: the same code + name is the same
-account; two people who share a code and pick the same name share an account (documented).
+**One account per code** (review #1, #3, #6): the user is `(invite, account_key(code))`, a
+domain-separated SHA-256 of the code itself — not its position in the list, so codes can be
+removed (revoked) or reordered without moving anyone into someone else's account. The name is only
+the display name (updated on every login); it is not part of the identity. One code = one account
+= one daily message limit. Give each reviewer their own code.
 
-Client IP: behind Cloudflare → cloudflared → Caddy → api the TCP peer is always Caddy. We take
-`CF-Connecting-IP` (set by Cloudflare's edge, overwriting what the browser sent), else the
-right-most untrusted `X-Forwarded-For` entry, **only when the peer is a trusted proxy**
-(`TRUSTED_PROXIES`, CIDRs; default loopback + private ranges, because the api port is only
-reachable inside the compose network). From any other peer the headers are ignored.
+Client IP: behind Cloudflare → cloudflared → Caddy → api the TCP peer is always Caddy. Only when
+the peer is a trusted proxy (`TRUSTED_PROXIES`, CIDRs; default loopback + private ranges, because
+the api port is only reachable inside the compose network) do we look at forwarding headers:
+`CF-Connecting-IP` **only when `TRUST_CF_CONNECTING_IP` is on** (review #4: the header is only
+trustworthy when Cloudflare's edge set it, i.e. the deployment really sits behind Cloudflare),
+else the right-most untrusted `X-Forwarded-For` entry. From any other peer the headers are ignored.
+The throttle key of an IPv6 client is its /64 (review #5: one host usually owns the whole /64).
 """
 from __future__ import annotations
 
@@ -33,13 +38,23 @@ def parse_codes(raw: str | None) -> list[str]:
     return [c.strip() for c in (raw or "").split(",") if c.strip()]
 
 
+_KEY_DOMAIN = b"ocean-above invite account v1\0"
+
+
 def _digest(code: str) -> bytes:
-    return hashlib.sha256(code.encode("utf-8", "surrogatepass")).digest()
+    return hashlib.sha256(_KEY_DOMAIN + code.encode("utf-8", "surrogatepass")).digest()
+
+
+def account_key(code: str) -> str:
+    """The stable account key of an invite code (`users.provider_sub`): independent of the code's
+    position in `INVITE_CODES`, never the code itself."""
+    return _digest(code).hex()[:32]
 
 
 class InviteCodes:
     def __init__(self, codes: Iterable[str]):
-        self._digests = [_digest(c) for c in codes]
+        self._digests = list(dict.fromkeys(_digest(c) for c in codes))  # duplicates are one code
+        self._keys = frozenset(d.hex()[:32] for d in self._digests)
 
     def __bool__(self) -> bool:
         return bool(self._digests)
@@ -47,14 +62,17 @@ class InviteCodes:
     def __len__(self) -> int:
         return len(self._digests)
 
-    def match(self, code: str) -> int | None:
-        """Index of the matching code, or None. Compares with every code (constant work)."""
+    def match(self, code: str) -> str | None:
+        """The account key of the matching code, or None. Compares with every code (constant work)."""
         got = _digest(code)
-        found = None
-        for i, d in enumerate(self._digests):
-            if hmac.compare_digest(got, d) and found is None:
-                found = i
-        return found
+        found = False
+        for d in self._digests:
+            found |= hmac.compare_digest(got, d)
+        return got.hex()[:32] if found else None
+
+    def active(self, key: str) -> bool:
+        """Is the code behind this account key still configured? (a removed code = revoked)"""
+        return key in self._keys
 
 
 def clean_name(name: str) -> str | None:
@@ -65,11 +83,6 @@ def clean_name(name: str) -> str | None:
     if any(unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Cn") for ch in text):
         return None
     return text
-
-
-def name_key(display_name: str) -> str:
-    """The part of the account key that comes from the name: case-insensitive."""
-    return display_name.casefold()
 
 
 # --- client ip ---------------------------------------------------------------------------------
@@ -95,12 +108,12 @@ def _trusted(ip, networks) -> bool:
     return ip is not None and any(ip.version == n.version and ip in n for n in networks)
 
 
-def client_ip(peer: str | None, headers, trusted) -> str:
+def client_ip(peer: str | None, headers, trusted, trust_cf: bool = False) -> str:
     """The IP the throttle keys on (see module doc)."""
     peer_ip = _ip(peer)
     if not _trusted(peer_ip, trusted):
         return str(peer_ip) if peer_ip else (peer or "unknown")
-    cf = _ip(headers.get("cf-connecting-ip"))
+    cf = _ip(headers.get("cf-connecting-ip")) if trust_cf else None
     if cf is not None:
         return str(cf)
     for item in reversed((headers.get("x-forwarded-for") or "").split(",")):
@@ -110,6 +123,17 @@ def client_ip(peer: str | None, headers, trusted) -> str:
         if not _trusted(ip, trusted):
             return str(ip)
     return str(peer_ip)
+
+
+def throttle_key(ip: str) -> str:
+    """Bucket for the login throttle: IPv4 address as is, IPv6 by its /64 (an IPv4-mapped IPv6
+    address counts as the IPv4 address)."""
+    addr = _ip(ip)
+    if addr is None or addr.version == 4:
+        return ip
+    if addr.ipv4_mapped is not None:
+        return str(addr.ipv4_mapped)
+    return str(ipaddress.ip_network(f"{addr}/64", strict=False))
 
 
 # --- throttle ----------------------------------------------------------------------------------

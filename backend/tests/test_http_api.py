@@ -164,7 +164,8 @@ def test_bad_cookies_are_unauthorized(client, world):
         client.cookies.clear()
         client.cookies.set(session.COOKIE, value)
         assert_error(client.get("/api/me"), 401, "unauthorized")
-    assert session.verify(SECRET_KEY, session.issue(SECRET_KEY, "u_1", 60, now), now) == "u_1"
+    got = session.verify(SECRET_KEY, session.issue(SECRET_KEY, "u_1", 60, now, epoch=3), now)
+    assert (got.user_id, got.epoch) == ("u_1", 3)
 
 
 @pytest.mark.parametrize("method,path,body", [

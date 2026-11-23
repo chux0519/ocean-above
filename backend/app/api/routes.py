@@ -9,18 +9,21 @@ import math
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel
 
 from ..agent import Agent, LLMConfig, LLMNotConfigured, OpenAIChatClient, encode_stream
-from ..agent.loop import TITLE_CHARS
+from ..agent.loop import MAX_USER_CHARS, TITLE_CHARS
 from ..agent.sse import HEADERS as SSE_HEADERS, MEDIA_TYPE as SSE_MEDIA_TYPE
 from ..airline import Airline, NotFound
 from ..core.network import NetworkProvider
 from ..store import Store
 from . import session
-from .google import GoogleVerifier, InvalidToken, KeysUnavailable
-from .logins import InviteCodes, Throttle, clean_name, client_ip, name_key
+from .google import MAX_TOKEN_CHARS, GoogleVerifier, InvalidToken, KeysUnavailable
+from .logins import InviteCodes, Throttle, clean_name, client_ip, throttle_key
 from .errors import ApiError, install_handlers, respond
+from .guards import ApiGuard
 from .limits import reserve_message, usage_view
 from .settings import SESSION_TTL_SECONDS, Settings
 
@@ -31,34 +34,64 @@ GOOGLE_NAME_MAX = 80
 log = logging.getLogger(__name__)
 
 
+# Field bounds (review #11): oversized values are a 400 before any hashing or lookup. The message
+# text bound is generous; the agent's own MAX_USER_CHARS check keeps its specific message.
+# (An after-validator, not Field(max_length): pydantic's constraint path refuses lone surrogates,
+# which must stay a wrong login, not a 400.)
+SHORT_FIELD = 200
+
+
+def _bounded(limit: int):
+    def check(value: str) -> str:
+        if len(value) > limit:
+            raise ValueError("too long")
+        return value
+    return Annotated[str, AfterValidator(check)]
+
+
 class Credentials(BaseModel):
-    username: str
-    password: str
+    username: _bounded(SHORT_FIELD)
+    password: _bounded(SHORT_FIELD)
 
 
 class GoogleCredential(BaseModel):
-    credential: str
+    credential: _bounded(MAX_TOKEN_CHARS)
 
 
 class Invite(BaseModel):
-    code: str
-    name: str
+    code: _bounded(SHORT_FIELD)
+    name: _bounded(SHORT_FIELD)
 
 
 class Text(BaseModel):
-    text: str
+    text: _bounded(4 * MAX_USER_CHARS)
 
 
 class Nonce(BaseModel):
-    nonce: str
+    nonce: _bounded(SHORT_FIELD)
+
+
+def login_enabled(request: Request, user: dict) -> bool:
+    """Is the way this user signed in still switched on? (review #7: turning dev login off or
+    removing an invite code ends those sessions, not only new logins)"""
+    s: Settings = request.app.state.settings
+    provider = user["auth_provider"]
+    if provider == "dev":
+        return s.dev_login  # renaming DEV_AUTH_USER does not end the old user's sessions: rotate SESSION_SECRET
+    if provider == "invite":
+        return request.app.state.invite_codes.active(user["provider_sub"])
+    if provider == "google":
+        return request.app.state.google is not None
+    return False
 
 
 def current_user(request: Request) -> dict:
-    """The signed-in user, or 401. The cookie only names the user; the row must still exist."""
+    """The signed-in user, or 401. The cookie names the user and its session epoch; the row must
+    still exist, the epoch must be current (not logged out since) and the login method enabled."""
     s: Settings = request.app.state.settings
-    user_id = session.verify(s.session_secret, request.cookies.get(session.COOKIE))
-    user = request.app.state.store.get_user(user_id) if user_id else None
-    if user is None:
+    sess = session.verify(s.session_secret, request.cookies.get(session.COOKIE))
+    user = request.app.state.store.get_user(sess.user_id) if sess else None
+    if user is None or user["session_epoch"] != sess.epoch or not login_enabled(request, user):
         raise ApiError(401, "unauthorized", "Please sign in.")
     return user
 
@@ -83,8 +116,9 @@ def summary_view(store: Store, user_id: str, summary: dict) -> dict:
 def throttle_login(request: Request) -> None:
     """Login endpoints: at most N attempts per client IP per minute (contract), else 429."""
     s: Settings = request.app.state.settings
-    ip = client_ip(request.client.host if request.client else None, request.headers, s.trusted_proxies)
-    wait = request.app.state.login_throttle.hit(ip)
+    ip = client_ip(request.client.host if request.client else None, request.headers, s.trusted_proxies,
+                   s.trust_cf_connecting_ip)
+    wait = request.app.state.login_throttle.hit(throttle_key(ip))
     if wait is not None:
         raise ApiError(429, "rate_limited", "Too many sign-in attempts. Please wait a minute and try again.",
                        headers={"Retry-After": str(max(1, math.ceil(wait)))})
@@ -92,12 +126,13 @@ def throttle_login(request: Request) -> None:
 
 def _signed_in(settings: Settings, user: dict) -> JSONResponse:
     response = JSONResponse(user_view(user))
-    _set_cookie(response, settings, user["id"])
+    _set_cookie(response, settings, user["id"], user["session_epoch"])
     return response
 
 
-def _set_cookie(response, settings: Settings, user_id: str) -> None:
-    response.set_cookie(session.COOKIE, session.issue(settings.session_secret, user_id, SESSION_TTL_SECONDS),
+def _set_cookie(response, settings: Settings, user_id: str, epoch: int) -> None:
+    response.set_cookie(session.COOKIE, session.issue(settings.session_secret, user_id, SESSION_TTL_SECONDS,
+                                                      epoch=epoch),
                         max_age=SESSION_TTL_SECONDS, httponly=True, samesite="lax",
                         secure=settings.cookie_secure, path="/")
 
@@ -155,18 +190,25 @@ def build_router() -> APIRouter:
         if not codes:
             raise ApiError(404, "not_found", "Not found.")
         throttle_login(request)
-        index = codes.match(body.code)
-        if index is None:
+        key = codes.match(body.code)
+        if key is None:
             raise ApiError(401, "invalid_credentials", "That invite code is not valid.")
         name = clean_name(body.name)
         if name is None:
             raise ApiError(400, "bad_request", "The name must be 1–40 characters.")
-        user = request.app.state.store.upsert_user("invite", f"{index}:{name_key(name)}", name)
+        # one account per code; the name is only the display name (refreshed on every login)
+        user = request.app.state.store.upsert_user("invite", key, name)
         return _signed_in(s, user)
 
     @r.post("/auth/logout")
     def logout(request: Request):
+        """Clears the cookie and, for a valid session, revokes every session of the user (review #7)."""
         s: Settings = request.app.state.settings
+        sess = session.verify(s.session_secret, request.cookies.get(session.COOKIE))
+        if sess is not None:
+            user = request.app.state.store.get_user(sess.user_id)
+            if user is not None and user["session_epoch"] == sess.epoch:
+                request.app.state.store.bump_session_epoch(user["id"])
         response = JSONResponse({"ok": True})
         response.delete_cookie(session.COOKIE, path="/", httponly=True, samesite="lax", secure=s.cookie_secure)
         return response
@@ -263,6 +305,8 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
     the booking route and the agent. `llm` (tests) replaces the OpenAI-compatible client; with no
     API key configured there is no agent and the message route answers 503 llm_unavailable."""
     app.state.settings = settings
+    for warning in settings.warnings():
+        log.warning("config: %s", warning)
     app.state.store = store = Store(settings.app_db, **({"clock": clock} if clock else {}))
     app.state.google = GoogleVerifier(settings.google_client_id) if settings.google_client_id else None
     app.state.invite_codes = InviteCodes(settings.invite_codes)
@@ -288,4 +332,5 @@ async def shutdown(app: FastAPI) -> None:
 
 def mount(app: FastAPI) -> None:
     install_handlers(app)
+    app.add_middleware(ApiGuard)
     app.include_router(build_router())
