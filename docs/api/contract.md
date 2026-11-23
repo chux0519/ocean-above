@@ -1,4 +1,4 @@
-# API and card contract (v1.1, 2026-11-23)
+# API and card contract (v1.2, 2026-11-23)
 
 Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
 `contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
@@ -12,16 +12,23 @@ script, not by the production core) — correctness is tested in the backend, no
 - Errors: HTTP status + `{"error": {"code": "<snake_case>", "message": "<human text>"}}`.
   Common codes: `unauthorized` (401), `not_found` (404; also for other users' objects), `bad_request` (400),
   `rate_limited` (429), `llm_unavailable` (503).
+- Login endpoints are throttled per client IP (10 / minute) → 429 `rate_limited`.
+- `POST /api/conversations/{id}/messages` returns **429 `rate_limited` before any SSE** when the user's daily message
+  limit or the site's daily token budget is reached; nothing is stored; `error.message` says which limit and when it
+  resets (UTC midnight), and the body adds `"scope": "user" | "site"`, `"resets_at"`. Booking, tickets, history
+  are never limited.
 
 ## Endpoints
 
 | Method | Path | Request | Response |
 |---|---|---|---|
 | GET | `/api/health` | – | `{"status":"ok","network_fingerprint":"sha256:…"}` |
-| GET | `/api/config` | – | `{"dev_login":true,"google_client_id":null}` |
-| POST | `/api/auth/dev` | `{"username","password"}` | `User` + sets cookie; 401 `invalid_credentials` |
+| GET | `/api/config` | – | `{"dev_login":bool,"invite_login":bool,"google_client_id":string\|null}` |
+| POST | `/api/auth/dev` | `{"username","password"}` | `User` + sets cookie; 401 `invalid_credentials`; 404 `not_found` when disabled |
+| POST | `/api/auth/google` | `{"credential"}` (GIS ID token) | `User` + sets cookie; 401 `invalid_credentials` (bad signature / aud / iss / expired / email not verified); 404 when not configured; 503 `auth_unavailable` (Google keys unreachable) |
+| POST | `/api/auth/invite` | `{"code","name"}` (name 1–40 chars) | `User` + sets cookie; 401 `invalid_credentials`; 404 when disabled |
 | POST | `/api/auth/logout` | – | `{"ok":true}` |
-| GET | `/api/me` | – | `User` or 401 |
+| GET | `/api/me` | – | `User & {"usage": Usage}` or 401 |
 | GET | `/api/conversations` | – | `{"conversations":[ConversationSummary]}` newest first |
 | POST | `/api/conversations` | `{}` | `ConversationSummary` |
 | GET | `/api/conversations/{id}` | – | `Conversation` (messages oldest first; card states are current server state) |
@@ -39,8 +46,10 @@ nonce are unchanged).
 ## Objects
 
 ```ts
-type User = { id: string; display_name: string; auth_provider: "dev" | "google" }
-type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string; preview: string }
+type User = { id: string; display_name: string; auth_provider: "dev" | "google" | "invite"; email: string | null }
+type Usage = { messages_today: number; daily_limit: number; resets_at: string }
+type ConversationSummary = { id: string; title: string /* never empty: first user message, else "New conversation" */
+  created_at: string; updated_at: string; preview: string }
 type Conversation = ConversationSummary & { messages: Message[] }
 type Message = {
   id: string; role: "user" | "assistant" | "system"   // system = booking results etc.

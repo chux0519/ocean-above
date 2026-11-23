@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "You have used today's 50 messages. The limit resets at 00:00 UTC.",
+    "scope": "user",
+    "resets_at": "2026-11-24T00:00:00Z"
+  }
+}

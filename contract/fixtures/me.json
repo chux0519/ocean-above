@@ -1,5 +1,11 @@
 {
   "id": "u_dev",
   "display_name": "demo",
-  "auth_provider": "dev"
+  "auth_provider": "dev",
+  "email": null,
+  "usage": {
+    "messages_today": 3,
+    "daily_limit": 50,
+    "resets_at": "2026-11-24T00:00:00Z"
+  }
 }
