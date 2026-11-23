@@ -1,4 +1,4 @@
-# API and card contract (v1.3, 2026-11-23)
+# API and card contract (v1.4, 2026-11-23)
 
 Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
 `contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
@@ -105,6 +105,6 @@ posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is run
 | `replace` | `{"text":"…"}` | replace the whole assistant text so far |
 | `ping` | `{}` | heartbeat every 15 s; ignore |
 | `done` | `{"message": Message}` | final assistant message incl. cards with current states |
-| `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation; sent before `user_message`, nothing stored — keep the input box text and retry) |
+| `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation) and `server_busy` (too many turns site-wide; the day's message slot is given back): both are sent before `user_message`, nothing is stored — keep the input box text and retry |
 
 Example: `contract/fixtures/sse_quote_turn.txt`.
