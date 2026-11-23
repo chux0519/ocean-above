@@ -22,6 +22,13 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   Fallback mirrors: USTC or Aliyun Docker Hub mirrors.
 - 2026-11-23: compose skeleton (PR #9) verified there: build OK, `/health` 200 through Caddy, `/` → `/login` 200.
 
+## Deploy log
+- 2026-11-23 `bb4488e`: first real deploy (compose project `ocean-above`, `OCEAN_PORT=18765`, `.env` placed by scp,
+  mode 600). Public `/api/health` 200; SSE ping through Cloudflare: first event 1.34 s, then every 2 s (no buffering).
+  Dev fixed-account login is on (strong random password, not public); Google login + limits before announcing (05).
+- Redeploy: `cd ~/llc2026/ocean-above && git pull --ff-only` → build with the proxy env (above) →
+  `OCEAN_PORT=18765 docker compose -p ocean-above up -d --no-build`.
+
 ## What we hand over for each deploy
 - Repo URL, branch or commit.
 - `locations.db` (and any other db file) is copied to the homelab with `scp`, into the directory mounted read-only
