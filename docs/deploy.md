@@ -47,6 +47,9 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
 - 2026-11-23: compose skeleton (PR #9) verified there: build OK, `/health` 200 through Caddy, `/` → `/login` 200.
 
 ## Deploy log
+- 2026-11-24 `4b667ed`: 07-ui soft-minimalist redesign (web image; api unchanged) via `deploy/release_vps.sh`. Public
+  check with ego-browser (invite test code): "Book me a flight from Guangzhou to Lima" → quote + confirmation card,
+  $1,160.71; light 1440 and dark 390 screenshots in `docs/iterations/07-ui/e2e/`, no horizontal scroll.
 - 2026-11-24 `2f6f13e`: first coordinator release to the VPS (06 hardening: budgets, concurrency, runtime fixes; api
   image only). Public `/api/health` 200, `/api/config` (dev off, invite + Google on), SSE first event 0.78 s then every
   2 s, live quote Shanghai → Beijing $1,810.21. Invite code 3 rotated after the check; a separate coordinator test code
