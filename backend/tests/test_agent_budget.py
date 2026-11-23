@@ -240,46 +240,66 @@ def test_turn_token_cap_stops_before_the_next_step(world):
 
 
 def test_missing_usage_is_charged_conservatively(world):
-    budget = AgentBudget(max_total_tokens_per_turn=5000)
+    """A completed call without usage: the request at 2 characters per token plus the output it
+    produced at the same rate (06 review P1-2: not the whole 4096 allowance)."""
+    budget = AgentBudget(max_total_tokens_per_turn=1000)
     agent, llm = make(world, default=finds(1), llm_cls=NoUsageLLM, budget=budget)
     events, message = turn(agent, world)
-    # the first call alone is charged more than the cap: input estimate + the whole output allowance
+    # the first call alone is charged more than the cap: its request is larger than 2000 characters
     assert len(llm.requests) == 1
     logged = world.store.list_llm_calls(world.alice, world.conv)
-    assert logged[0]["tokens"] is None
     charged = logged[0]["response"]["budget"]
+    call = logged[0]["response"]["tool_calls"][0]
+    output = len(call["name"]) + len(call["arguments"])
     assert charged["estimated"] is True
-    assert charged["charged_tokens"] == estimate_tokens(logged[0]["request"]["messages"], 4096)
-    assert charged["charged_tokens"] > 4096 + len(json.dumps(llm.requests[0])) // 4
+    assert charged["charged_tokens"] == estimate_tokens(logged[0]["request"]["messages"], 4096, output)
+    assert charged["charged_tokens"] == math.ceil(
+        len(json.dumps(logged[0]["request"]["messages"], separators=(",", ":"), ensure_ascii=False)) / 2) \
+        + math.ceil(output / 2)
+    assert logged[0]["tokens"] == charged["charged_tokens"]  # the site budget counts the same (P2-9)
     assert world.store.list_messages(world.alice, world.conv)[-1]["guard_problems"] == [
-        {"kind": "token_budget", "value": "5000"}]
+        {"kind": "token_budget", "value": "1000"}]
 
 
 def test_failed_and_retried_calls_count(world):
-    agent, llm = make(world, LLMError("LLM HTTP 503", retryable=True, status=503), ["Hello."])
+    """An HTTP error status read no response body: charged 0. A stream cut after a few
+    characters is estimated from those. The successful retry is charged its usage."""
+    no_body = LLMError("LLM HTTP 503", retryable=True, status=503)
+    cut = ["Hel", LLMError("LLM transport error: ReadError", retryable=True)]  # "Hel" is never released
+    agent, llm = make(world, no_body, cut, ["Hello."])
     events, message = turn(agent, world, "hi")
-    assert message["text"] == "Hello." and len(llm.requests) == 2
-    failed, ok = world.store.list_llm_calls(world.alice, world.conv)
-    assert failed["response"]["budget"]["estimated"] is True
-    estimate = failed["response"]["budget"]["charged_tokens"]
+    assert message["text"] == "Hello." and len(llm.requests) == 3
+    failed, broken, ok = world.store.list_llm_calls(world.alice, world.conv)
+    assert failed["response"]["budget"] == {"charged_tokens": 0, "estimated": False, "turn_tokens": 0}
+    assert failed["tokens"] == 0
+    estimate = broken["response"]["budget"]["charged_tokens"]
+    assert broken["response"]["budget"]["estimated"] is True
+    assert estimate == estimate_tokens(broken["request"]["messages"], 4096, len("Hel"))
     assert ok["response"]["budget"] == {"charged_tokens": 110, "estimated": False, "turn_tokens": estimate + 110}
 
 
 def test_retries_can_exhaust_the_token_budget(world):
-    """Two failed attempts (no usage) then a tool call: the next step is not started."""
-    flaky = LLMError("LLM HTTP 503", retryable=True, status=503)
-    budget = AgentBudget(max_total_tokens_per_turn=9000)
-    agent, llm = make(world, flaky, flaky, finds(1), ["never sent"], budget=budget)
+    """Two streams cut after 4000 characters each: the first leaves tokens, the second uses them
+    up, so there is no third attempt (06 review P2-2: retries stop at the cap too)."""
+    def cut():
+        return LLMError("LLM transport error: ReadError", retryable=True, received=4000)
+
+    budget = AgentBudget(max_total_tokens_per_turn=6000)
+    agent, llm = make(world, cut(), cut(), finds(1), ["never sent"], budget=budget)
     events, message = turn(agent, world)
-    assert len(llm.requests) == 3 and len(world.airline.executed) == 1
+    first, second = world.store.list_llm_calls(world.alice, world.conv)
+    each = first["response"]["budget"]["charged_tokens"]
+    assert each == estimate_tokens(first["request"]["messages"], 4096, 4000) and 3000 < each < 6000
+    assert second["response"]["budget"]["turn_tokens"] == 2 * each
+    assert len(llm.requests) == 2 and world.airline.executed == []
     assert world.store.list_messages(world.alice, world.conv)[-1]["guard_problems"] == [
-        {"kind": "token_budget", "value": "9000"}]
+        {"kind": "token_budget", "value": "6000"}]
 
 
 def test_token_helpers():
     assert reported_tokens({"total_tokens": 7}) == 7
     for bad in (None, {}, {"total_tokens": None}, {"total_tokens": -1}, {"total_tokens": "7"},
-                {"total_tokens": True}, "x"):
+                {"total_tokens": True}, "x", {"total_tokens": 0}):
         assert reported_tokens(bad) is None
     messages = [{"role": "user", "content": "x" * 99}]
     chars = len(json.dumps(messages, separators=(",", ":")))

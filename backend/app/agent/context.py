@@ -148,8 +148,11 @@ def build_context(store: Any, user_id: str, conversation_id: str,
     for call in store.list_llm_calls(user_id, conversation_id):
         request, response = call["request"], call["response"]
         owner = by_message.get(request.get("turn")) if isinstance(request, dict) else None
-        if owner is not None and isinstance(response, dict) and "finish_reason" in response:
-            owner.completions.append(response)  # failed and aborted calls have no finish_reason
+        if owner is not None and isinstance(response, dict) and "finish_reason" in response \
+                and not response.get("tool_calls_not_run"):
+            # failed and aborted calls have no finish_reason; a completion whose tool calls were
+            # all refused as a flood (loop P2-3) has no stored tool calls to line up with
+            owner.completions.append(response)
     # the newest turns stay in full; older ones are shortened once the budget is used up
     full_from, used = len(turns), 0
     for i in range(len(turns) - 1, -1, -1):

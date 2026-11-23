@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import math
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -14,6 +15,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel
 
 from ..agent import Agent, LLMConfig, LLMNotConfigured, OpenAIChatClient, encode_stream
+from ..agent.concurrency import executor_workers
 from ..agent.loop import MAX_USER_CHARS, TITLE_CHARS
 from ..agent.sse import HEADERS as SSE_HEADERS, MEDIA_TYPE as SSE_MEDIA_TYPE
 from ..airline import Airline, NotFound
@@ -262,9 +264,11 @@ def build_router() -> APIRouter:
         except NotFound:
             raise ApiError(404, "not_found", "Conversation not found.") from None
         try:
-            # server_busy (design §4.9): the server's fault, so the day's message slot is given back
-            events = agent.stream_turn(user["id"], conversation_id, body.text, on_server_busy=lambda: (
-                app.state.store.release_message(user["id"], reservation)))
+            # server_busy (design §4.9): the server's fault, so the day's message slot is given back;
+            # app.db failing to store the message: likewise (06 review P2-9)
+            events = agent.stream_turn(user["id"], conversation_id, body.text, owner_checked=True,
+                                       on_not_stored=lambda: app.state.store.release_message(
+                                           user["id"], reservation))
         except (NotFound, ValueError) as e:
             # refused before anything was stored: the slot is given back
             await asyncio.to_thread(app.state.store.release_message, user["id"], reservation)
@@ -324,6 +328,21 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
     agent_kwargs = {"budget": settings.agent_budget, "concurrency": settings.turn_concurrency,
                     **(agent_kwargs or {})}
     app.state.agent = Agent(airline, llm, **agent_kwargs) if llm is not None else None
+    app.state.executor_workers = size_default_executor(settings)
+
+
+def size_default_executor(settings: Settings) -> int | None:
+    """Give the running event loop a default executor of an explicit size (06 review P1-1):
+    every `asyncio.to_thread` of the chat turns and the booking route shares it, and the
+    implicit size, min(32, cpu + 4), is only 5-6 threads on a small VPS. Returns the size
+    (None when no loop is running, e.g. a synchronous test calling `install`)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    workers = executor_workers(settings.turn_concurrency)
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=workers, thread_name_prefix="oa-worker"))
+    return workers
 
 
 async def shutdown(app: FastAPI) -> None:

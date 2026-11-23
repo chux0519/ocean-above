@@ -27,6 +27,7 @@ from typing import Any, AsyncIterator, Callable, Mapping
 _BOUNDS: dict[str, tuple[str, float, float]] = {
     "max_active_turns": ("AGENT_MAX_ACTIVE_TURNS", 1, 256),
     "queue_seconds": ("AGENT_TURN_QUEUE_SECONDS", 0, 60),
+    "max_turns_per_user": ("AGENT_MAX_TURNS_PER_USER", 1, 256),
 }
 
 
@@ -38,6 +39,7 @@ class ServerBusy(Exception):
 class TurnConcurrency:
     max_active_turns: int = 8  # turns running at once, whole server
     queue_seconds: float = 5.0  # how long a turn waits for a slot, then server_busy
+    max_turns_per_user: int = 2  # turns of one user running at once; more: conversation_busy (P2-8)
 
     def __post_init__(self) -> None:
         n, wait = self.max_active_turns, self.queue_seconds
@@ -45,18 +47,22 @@ class TurnConcurrency:
             raise ValueError(f"max_active_turns must be a positive integer, got {n!r}")
         if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait) or wait < 0:
             raise ValueError(f"queue_seconds must be a number >= 0, got {wait!r}")
+        per_user = self.max_turns_per_user
+        if isinstance(per_user, bool) or not isinstance(per_user, int) or per_user < 1:
+            raise ValueError(f"max_turns_per_user must be a positive integer, got {per_user!r}")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "TurnConcurrency":
-        """Defaults, overridden by `AGENT_MAX_ACTIVE_TURNS` (integer 1–256) and
-        `AGENT_TURN_QUEUE_SECONDS` (number 0–60). A bad value raises ValueError (startup fails)."""
+        """Defaults, overridden by `AGENT_MAX_ACTIVE_TURNS` (integer 1–256),
+        `AGENT_TURN_QUEUE_SECONDS` (number 0–60) and `AGENT_MAX_TURNS_PER_USER` (integer 1–256).
+        A bad value raises ValueError (startup fails)."""
         env = os.environ if env is None else env
         values: dict[str, Any] = {}
         for name, (var, low, high) in _BOUNDS.items():
             raw = (env.get(var) or "").strip().replace("_", "")
             if not raw:
                 continue
-            whole = name == "max_active_turns"
+            whole = name != "queue_seconds"
             try:
                 value = int(raw) if whole else float(raw)
             except ValueError:
@@ -65,6 +71,17 @@ class TurnConcurrency:
                 raise ValueError(f"{var} must be between {low:g} and {high:g}, got {raw!r}")
             values[name] = value
         return cls(**values)
+
+
+EXECUTOR_MARGIN = 16  # worker threads beyond the turns' own: bookings, route checks, message slots
+
+
+def executor_workers(config: TurnConcurrency) -> int:
+    """Size of the event loop's default executor (set at startup, design §4.9). A running turn
+    uses one worker thread at a time; a turn cut short may have two (the thread its time limit
+    left running and the record of the interrupted LLM call). The margin serves the bookings'
+    transactions and the routes' short reads, which no longer wait for locks inside a thread."""
+    return 2 * config.max_active_turns + EXECUTOR_MARGIN
 
 
 class TurnSlots:
@@ -140,10 +157,15 @@ class Threads:
     async def run(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         """`await asyncio.to_thread(fn, ...)`, but if the caller is cancelled (the turn's time
         limit), the thread is still tracked until it ends, so `drain` can wait for it."""
+        return await asyncio.shield(self.start(fn, *args, **kwargs))
+
+    def start(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> asyncio.Future:
+        """Start `fn` in a worker thread without waiting; tracked like `run` (for work that
+        must still happen while the turn is being cancelled)."""
         future = asyncio.ensure_future(asyncio.to_thread(fn, *args, **kwargs))
         self._running.add(future)
         future.add_done_callback(self._finished)
-        return await asyncio.shield(future)
+        return future
 
     def _finished(self, future: asyncio.Future) -> None:
         self._running.discard(future)

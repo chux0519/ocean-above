@@ -27,6 +27,7 @@ def respond(status: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(body(code, message), status_code=status)
 
 
+STORE_BUSY = "The service is busy right now and nothing was changed. Please try again in a moment."
 _BY_STATUS = {401: "unauthorized", 404: "not_found", 405: "method_not_allowed", 429: "rate_limited"}
 
 
@@ -55,7 +56,7 @@ def install_handlers(app: FastAPI) -> None:
     async def _store(_: Request, e: StoreUnavailable):
         # app.db lock wait / operation deadline (design §4.9): rolled back, nothing changed; a
         # booking keeps its quote and nonce, so the same click can be retried
-        return respond(503, "data_unavailable", "Route data could not be read right now. Please try again.")
+        return respond(503, "data_unavailable", STORE_BUSY)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, e: RequestValidationError):

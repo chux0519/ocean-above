@@ -194,7 +194,7 @@ def test_n_plus_one_turns_the_last_gets_server_busy_and_nothing_is_stored(world)
     async def go():
         gate = asyncio.Event()
         agent = Agent(world.airline, FakeLLM(default=[Wait(gate), "Hello."]),
-                      concurrency=TurnConcurrency(n, 0.1))
+                      concurrency=TurnConcurrency(n, 0.1, max_turns_per_user=n + 1))
         streams = [agent.stream_turn(world.alice, c, "hi") for c in convs[:n]]
         firsts = [await s.__anext__() for s in streams]  # each holds its slot now
         assert [e.name for e in firsts] == ["user_message"] * n and agent.slots.active == n
@@ -221,7 +221,7 @@ def test_a_queued_turn_runs_when_a_slot_frees_up(world):
     async def go():
         gates = [asyncio.Event(), asyncio.Event()]
         steps = [[Wait(gates[0]), "First."], [Wait(gates[1]), "Second."]]
-        agent = Agent(world.airline, FakeLLM(*steps, default=["Third."]), concurrency=TurnConcurrency(2, 5))
+        agent = Agent(world.airline, FakeLLM(*steps, default=["Third."]), concurrency=TurnConcurrency(2, 5, max_turns_per_user=3))
         a = agent.stream_turn(world.alice, convs[0], "one")
         await a.__anext__()
         b = agent.stream_turn(world.alice, convs[1], "two")

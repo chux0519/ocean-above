@@ -8,10 +8,16 @@ Token accounting is a **soft** cap and not a dollar cap:
 - the provider's `usage.total_tokens` of a call is only known after the call, so the check runs
   between LLM requests: a turn that crosses the cap finishes the call in flight and starts no
   further step;
-- a call (failed or completed) that reports no usage is charged a conservative estimate:
-  `ceil(request characters / CHARS_PER_TOKEN_ESTIMATE) + max_output_tokens_per_call`
-  (every character of the request counted as half a token, plus the whole output allowance);
-- retries are separate calls and are charged too.
+- a call is charged what the provider reported (`usage.total_tokens`, or prompt + completion
+  tokens when that is larger; a total of 0 is not a report);
+- a failed call that never got a response body (HTTP error status, connection / TLS failure)
+  generated nothing and is charged 0 (06 review P1-2);
+- any other call without a usable report is charged a conservative estimate: the request at
+  `CHARS_PER_TOKEN_ESTIMATE` characters per token, plus the output at the same rate from the
+  characters received (a stream cut mid-way, a completion without usage), or the whole
+  `max_output_tokens_per_call` when the output is unknown (the turn's own time limit or the
+  ReplyGuard cut the stream; thinking text is not seen there);
+- retries are separate calls and are charged too, and a retry starts only while tokens are left.
 """
 from __future__ import annotations
 
@@ -84,18 +90,29 @@ class AgentBudget:
         return cls(**values).checked()
 
 
-def estimate_tokens(messages: Any, max_output_tokens: int) -> int:
-    """Conservative charge for a call without reported usage (see the module docstring)."""
+def estimate_tokens(messages: Any, max_output_tokens: int, output_chars: int | None = None) -> int:
+    """Conservative charge for a call without reported usage (see the module docstring):
+    the request's tokens plus the output's - from `output_chars` when known (at most
+    `max_output_tokens`), else the whole `max_output_tokens`."""
     chars = len(json.dumps(messages, ensure_ascii=False, separators=(",", ":"), default=str))
-    return math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE) + max_output_tokens
+    output = max_output_tokens if output_chars is None else min(
+        max_output_tokens, math.ceil(max(output_chars, 0) / CHARS_PER_TOKEN_ESTIMATE))
+    return math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE) + output
+
+
+def _count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 def reported_tokens(usage: Any) -> int | None:
-    """`usage.total_tokens` when the provider reported a usable one."""
-    total = usage.get("total_tokens") if isinstance(usage, dict) else None
-    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+    """The provider's token count of a call, or None when it reported nothing usable.
+    `max(total_tokens, prompt_tokens + completion_tokens)`: a proxy that fills only the parts,
+    or sends a total of 0, is not taken as "this call was free" (06 review P2-1)."""
+    if not isinstance(usage, dict):
         return None
-    return total
+    total = max(_count(usage.get("total_tokens")),
+                _count(usage.get("prompt_tokens")) + _count(usage.get("completion_tokens")))
+    return total or None
 
 
 class BudgetTracker:
@@ -115,22 +132,34 @@ class BudgetTracker:
         """None when another LLM step may start (and counts it), else the fallback problem."""
         if self.steps >= self.budget.max_steps:
             return {"kind": "max_steps", "value": str(self.budget.max_steps)}
-        if self.tokens >= self.budget.max_total_tokens_per_turn:
-            return {"kind": "token_budget", "value": str(self.budget.max_total_tokens_per_turn)}
+        if (stop := self.out_of_tokens()) is not None:
+            return stop
         self.steps += 1
         self._step_calls = 0
         return None
 
-    def charge(self, usage: Any, request_messages: Any) -> tuple[int, bool]:
-        """Count one LLM call (completed, failed or retried). Returns (tokens charged, estimated)."""
+    def out_of_tokens(self) -> dict | None:
+        """The token_budget problem once the turn's tokens are used up (checked before every
+        step and before every retry), else None."""
+        if self.tokens >= self.budget.max_total_tokens_per_turn:
+            return {"kind": "token_budget", "value": str(self.budget.max_total_tokens_per_turn)}
+        return None
+
+    def charge(self, usage: Any, request_messages: Any, *, output_chars: int | None = None,
+               no_response: bool = False) -> tuple[int, bool]:
+        """Count one LLM call (completed, failed or retried); see the module docstring.
+        `no_response`: the call failed before any response body was read. `output_chars`: the
+        output characters received (None: unknown). Returns (tokens charged, estimated)."""
         total = reported_tokens(usage)
-        if total is None:
-            total = estimate_tokens(request_messages, self.budget.max_output_tokens_per_call)
-            self.estimated_calls += 1
+        if total is not None:
             self.tokens += total
-            return total, True
+            return total, False
+        if no_response:
+            return 0, False
+        total = estimate_tokens(request_messages, self.budget.max_output_tokens_per_call, output_chars)
+        self.estimated_calls += 1
         self.tokens += total
-        return total, False
+        return total, True
 
     # ---------------------------------------------------------------- tool calls -----------
     def admit_tool_call(self) -> str | None:

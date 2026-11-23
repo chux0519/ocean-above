@@ -52,6 +52,12 @@ class Completion:
     def total_tokens(self) -> int | None:
         return (self.usage or {}).get("total_tokens")
 
+    @property
+    def output_chars(self) -> int:
+        """Characters the model produced: text, reasoning, tool call names and arguments."""
+        return len(self.content) + len(self.reasoning) + sum(
+            len(str(c.get("name") or "")) + len(str(c.get("arguments") or "")) for c in self.tool_calls)
+
 
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 INVALID_TOOL_NAME = "invalid_tool"
@@ -119,10 +125,19 @@ class _ThinkSplitter:
 
 
 class LLMError(Exception):
-    def __init__(self, message: str, *, retryable: bool, status: int | None = None):
+    """A failed LLM call. `received` says what it may have cost (06 review P1-2): None when no
+    response body was read (HTTP error status, connection / TLS failure, timeout before the
+    response): the provider generated nothing. Otherwise the number of output characters
+    (text, reasoning, tool call names and arguments) received before the stream broke. `usage`:
+    the usage block, if the provider sent one before the failure."""
+
+    def __init__(self, message: str, *, retryable: bool, status: int | None = None,
+                 received: int | None = None, usage: dict | None = None):
         super().__init__(message)
         self.retryable = retryable
         self.status = status
+        self.received = received
+        self.usage = usage
 
 
 class LLM(Protocol):
@@ -193,6 +208,7 @@ class OpenAIChatClient:
         think = _ThinkSplitter()
         calls: dict[int, dict] = {}
         headers = {"Authorization": f"Bearer {self.config.api_key}", "Accept": "text/event-stream"}
+        received: int | None = None  # output characters, once a 200 response is being read
         try:
             async with self._http().stream("POST", f"{self.config.base_url}/chat/completions",
                                            json=body, headers=headers) as response:
@@ -203,6 +219,7 @@ class OpenAIChatClient:
                         detail = ": " + self._scrub((await response.aread()).decode("utf-8", "replace"))[:300]
                     raise LLMError(f"LLM HTTP {status}{detail}", status=status,
                                    retryable=status in (408, 409, 429) or status >= 500)
+                received = 0
                 async for line in response.aiter_lines():
                     if not line.startswith("data:"):
                         continue  # blank separators, `: keep-alive` comments
@@ -224,7 +241,9 @@ class OpenAIChatClient:
                         delta = choice.get("delta") or {}
                         if delta.get("reasoning_content"):  # thinking: collected, never yielded
                             done.reasoning += delta["reasoning_content"]
+                            received += len(delta["reasoning_content"])
                         if delta.get("content"):
+                            received += len(delta["content"])
                             visible, thought = think.feed(delta["content"])
                             done.reasoning += thought
                             if visible:
@@ -233,24 +252,29 @@ class OpenAIChatClient:
                         for part in delta.get("tool_calls") or []:
                             call = calls.setdefault(part.get("index", 0), {"id": "", "name": "", "arguments": ""})
                             function = part.get("function") or {}
+                            received += len(function.get("name") or "") + len(function.get("arguments") or "")
                             call["id"] = part.get("id") or call["id"]
                             call["name"] += function.get("name") or ""
                             call["arguments"] += function.get("arguments") or ""
                         if choice.get("finish_reason"):
                             done.finish_reason = choice["finish_reason"]
-        except LLMError:
+        except LLMError as exc:
+            exc.received, exc.usage = received, done.usage
             raise
         except (httpx.HTTPError, httpx.StreamError) as exc:  # timeouts, connections, cut streams
-            raise LLMError(f"LLM transport error: {type(exc).__name__}", retryable=True) from None
+            raise LLMError(f"LLM transport error: {type(exc).__name__}", retryable=True,
+                           received=received, usage=done.usage) from None
         except Exception as exc:  # a chunk of an unexpected shape, undecodable bytes, ...
-            raise LLMError(f"LLM stream could not be read: {type(exc).__name__}", retryable=True) from None
+            raise LLMError(f"LLM stream could not be read: {type(exc).__name__}", retryable=True,
+                           received=received, usage=done.usage) from None
         visible, thought = think.finish()
         done.reasoning += thought
         if visible:
             done.content += visible
             yield TextDelta(visible)
         if done.finish_reason is None:
-            raise LLMError("LLM stream ended without a finish_reason", retryable=True)
+            raise LLMError("LLM stream ended without a finish_reason", retryable=True,
+                           received=received, usage=done.usage)
         for index in sorted(calls):
             call = calls[index]
             call["id"] = call["id"] or f"call_{index}"

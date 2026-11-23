@@ -32,6 +32,7 @@ from .locks import ConversationBusy, ConversationLocks
 
 QUOTE_TTL = timedelta(minutes=15)
 BOOK_LOCK_TIMEOUT = 5.0  # seconds a click waits for a running chat turn of its conversation
+BOOK_MAX_PENDING_PER_USER = 2  # clicks of one user in progress at once (book_async); more: conversation_busy
 MIN_SECRET_BYTES = 16
 OPEN = ("quoted", "presented")  # the non-terminal quote states
 _QUOTE_CARD_TYPES = ("quote", "booking_request")
@@ -98,6 +99,7 @@ class Airline:
         if not isinstance(nonce_secret, bytes) or len(nonce_secret) < MIN_SECRET_BYTES:
             raise ValueError(f"nonce_secret must be bytes, at least {MIN_SECRET_BYTES} long")
         self._secret = nonce_secret
+        self._booking: dict[str, int] = {}  # user id -> book_async clicks in progress (event loop only)
 
     # ================================================================== tools (chat turn) ====
     def find_city(self, name: str) -> Result:
@@ -268,26 +270,58 @@ class Airline:
         and waits up to `lock_timeout` seconds for a running chat turn, then refuses with
         conversation_busy (None waits without limit). On the event loop use `book_async`.
         """
+        quote = self._book_quote(user_id, quote_id)
+        try:
+            with self.locks.hold(quote["conversation_id"], timeout=lock_timeout):
+                outcome = self._book_transaction(user_id, quote_id, nonce)
+        except ConversationBusy:
+            raise BookingError("conversation_busy") from None
+        return _booking_result(outcome)
+
+    async def book_async(self, user_id: str, quote_id: str, nonce: str, *,
+                         lock_timeout: float | None = BOOK_LOCK_TIMEOUT) -> dict:
+        """`book` for async callers (the HTTP endpoint), same checks and order.
+
+        The click waits for the conversation lock **on the event loop** (`hold_async`), not in a
+        worker thread: a click that waits for a running chat turn holds no thread, so clicks
+        cannot use up the shared executor that every chat turn needs (06 review P1-1). Only the
+        short read and the booking transaction run in worker threads. At most
+        `BOOK_MAX_PENDING_PER_USER` clicks of one user are in progress at once; more are refused
+        with conversation_busy (retryable, nothing changed)."""
+        quote = await asyncio.to_thread(self._book_quote, user_id, quote_id)
+        if self._booking.get(user_id, 0) >= BOOK_MAX_PENDING_PER_USER:
+            raise BookingError("conversation_busy")
+        self._booking[user_id] = self._booking.get(user_id, 0) + 1
+        try:
+            async with self.locks.hold_async(quote["conversation_id"], timeout=lock_timeout):
+                outcome = await _to_thread_to_the_end(self._book_transaction, user_id, quote_id, nonce)
+        except ConversationBusy:
+            raise BookingError("conversation_busy") from None
+        finally:
+            self._booking[user_id] -= 1
+            if not self._booking[user_id]:
+                del self._booking[user_id]
+        return _booking_result(outcome)
+
+    def _book_quote(self, user_id: str, quote_id: str) -> dict:
+        """B1 before any waiting: the quote must exist and be the user's."""
         with self.store.read() as con:
             quote = records.get_quote(con, quote_id)
         if quote is None or quote["user_id"] != user_id:  # B1
             raise BookingError("not_found")
-        try:
-            with self.locks.hold(quote["conversation_id"], timeout=lock_timeout):
-                with self.store.write() as con:  # B7: one BEGIN IMMEDIATE transaction
-                    outcome = self._book(con, user_id, quote_id, nonce)
-        except ConversationBusy:
-            raise BookingError("conversation_busy") from None
-        # A refusal may have changed the quote (expired / stale), so it is raised after COMMIT.
-        if isinstance(outcome, BookingError):
-            raise outcome
-        return outcome
+        return quote
 
-    async def book_async(self, user_id: str, quote_id: str, nonce: str, *,
-                         lock_timeout: float | None = BOOK_LOCK_TIMEOUT) -> dict:
-        """`book` for async callers: runs in a worker thread, so the event loop (and the chat
-        turn that may hold the conversation lock) keeps running while the click waits."""
-        return await asyncio.to_thread(self.book, user_id, quote_id, nonce, lock_timeout=lock_timeout)
+    def _book_transaction(self, user_id: str, quote_id: str, nonce: str) -> dict | BookingError:
+        """The booking itself; the caller holds the conversation lock."""
+        try:
+            # Load a changed locations.db before the write lock is taken (06 review P2-7): the
+            # strict re-check inside the transaction then only hashes the file. Errors here are
+            # left to that re-check, so the refusal order does not change.
+            self.networks.current()
+        except NetworkDataError:
+            pass
+        with self.store.write() as con:  # B7: one BEGIN IMMEDIATE transaction
+            return self._book(con, user_id, quote_id, nonce)
 
     def _book(self, con: sqlite3.Connection, user_id: str, quote_id: str, nonce: str) -> dict | BookingError:
         now = self.store.clock()
@@ -451,6 +485,31 @@ class Airline:
 
 
 # ---------------------------------------------------------------------- helpers ---------------
+def _booking_result(outcome: dict | BookingError) -> dict:
+    # A refusal may have changed the quote (expired / stale), so it is raised after COMMIT.
+    if isinstance(outcome, BookingError):
+        raise outcome
+    return outcome
+
+
+async def _to_thread_to_the_end(fn, /, *args):
+    """`asyncio.to_thread`, but a cancelled caller still waits for the thread to end: the
+    transaction cannot be stopped, and the conversation lock must not be released while it runs."""
+    future = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+    cancelled = False
+    while True:
+        try:
+            result = await asyncio.shield(future)
+            break
+        except asyncio.CancelledError:
+            if future.done():
+                raise
+            cancelled = True  # keep waiting (bounded by app.db's timeouts), then re-raise
+    if cancelled:
+        raise asyncio.CancelledError()
+    return result
+
+
 def _floor(moment: datetime) -> datetime:
     return parse_iso(iso(moment))
 
