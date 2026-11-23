@@ -1,0 +1,1196 @@
+{
+  "summary": {
+    "model": "deepseek-flash",
+    "reasoning_effort": "high",
+    "cases": 31,
+    "turns": 50,
+    "sent": 50,
+    "fallback": 0,
+    "error": 0,
+    "llm_calls": 92,
+    "tokens": {
+      "hit": 150144,
+      "miss": 19154,
+      "out": 8455,
+      "reasoning": 4041
+    },
+    "llm_latency_ms": {
+      "median": 1089,
+      "p90": 1668,
+      "max": 3587
+    },
+    "cost_usd_at_peak_rates": 0.0168
+  },
+  "results": [
+    {
+      "case": "multi_leg_quote",
+      "turns": [
+        {
+          "user": "I want to fly from Guangzhou to Lima",
+          "tools": [
+            "quote_route({\"origin\": \"Guangzhou\", \"destination\": \"Lima\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows the cheapest route from Guangzhou to Lima with 3 transfers (Frankfurt, Singapore, Amsterdam), the total distance and the price. Let me know if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 447,
+        "out": 114,
+        "reasoning": 15
+      },
+      "latency_ms": [
+        1186,
+        1386
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "direct_quote",
+      "turns": [
+        {
+          "user": "How much is a flight from Addis Ababa to Dubai?",
+          "tools": [
+            "quote_route({\"origin\": \"Addis Ababa\", \"destination\": \"Dubai\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows the cheapest route from Addis Ababa to Dubai: it's a direct flight, and the price is $385.98. Tell me if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 371,
+        "out": 99,
+        "reasoning": 0
+      },
+      "latency_ms": [
+        1081,
+        1381
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "asks_numbers",
+      "turns": [
+        {
+          "user": "How far is it from Paris to Tokyo and what does it cost?",
+          "tools": [
+            "quote_route({\"origin\": \"Paris\", \"destination\": \"Tokyo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows the cheapest Paris–Tokyo route: 8,806.1 km with transfers in Honolulu, Miami and Sydney, for $1,144.79. Let me know if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 449,
+        "out": 116,
+        "reasoning": 15
+      },
+      "latency_ms": [
+        1019,
+        1076
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "legs_detail",
+      "turns": [
+        {
+          "user": "Fly me from Boston to Berlin. Tell me every leg with its distance.",
+          "tools": [
+            "quote_route({\"origin\": \"Boston\", \"destination\": \"Berlin\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows the cheapest route from Boston to Berlin, with stops in Shanghai, Singapore and Madrid:\n\n- Boston → Shanghai: 789.8 km\n- Shanghai → Singapore: 14,777.2 km\n- Singapore → Madrid: 2,311.3 km\n- Madrid → Berlin: 415.2 km\n\nTotal distance 18,293.5 km, price $2,378.16. Tell me if you'd like to book it, or check the route on the card first.",
+          "cards": [
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 3072,
+        "miss": 440,
+        "out": 319,
+        "reasoning": 158
+      },
+      "latency_ms": [
+        1152,
+        1740
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "unserved_origin",
+      "turns": [
+        {
+          "user": "I need a flight from Abu Dhabi to London",
+          "tools": [
+            "quote_route({\"origin\": \"Abu Dhabi\", \"destination\": \"London\"}) -> no_service"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Ocean Above doesn't fly to or from Abu Dhabi. The nearest served cities are Tirana, Odesa and Whitehorse — which one would you like to depart from instead?",
+          "cards": [
+            "no_service"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 321,
+        "out": 145,
+        "reasoning": 51
+      },
+      "latency_ms": [
+        888,
+        1023
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "unserved_single",
+      "turns": [
+        {
+          "user": "Do you fly to Stuttgart?",
+          "tools": [
+            "find_city({\"name\": \"Stuttgart\"}) -> no_service"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "We don't fly to Stuttgart. The card shows the nearest cities we do serve — would you like a quote to one of them?",
+          "cards": [
+            "no_service"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 301,
+        "out": 68,
+        "reasoning": 0
+      },
+      "latency_ms": [
+        1127,
+        1221
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "unserved_then_pick",
+      "turns": [
+        {
+          "user": "Austin to Tokyo please",
+          "tools": [
+            "quote_route({\"origin\": \"Austin\", \"destination\": \"Tokyo\"}) -> no_service"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Ocean Above doesn't fly to Austin. The nearest cities with service are Copenhagen, Ohrid and St. John's — the card shows them with their distances. Which of these should I use as your departure city for Tokyo?",
+          "cards": [
+            "no_service"
+          ]
+        },
+        {
+          "user": "ok, use the nearest city instead",
+          "tools": [
+            "quote_route({\"origin\": \"Copenhagen\", \"destination\": \"Tokyo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows your Copenhagen → Tokyo route, with transfers in Los Angeles, Mexico City and Atlanta. Let me know if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 4,
+      "usage": {
+        "hit": 6528,
+        "miss": 893,
+        "out": 403,
+        "reasoning": 214
+      },
+      "latency_ms": [
+        1013,
+        1089,
+        1166,
+        1576
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "ambiguous_city",
+      "turns": [
+        {
+          "user": "a ticket from san jose to Lima",
+          "tools": [
+            "quote_route({\"origin\": \"san jose\", \"destination\": \"Lima\"}) -> ambiguous_city"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The origin \"san jose\" is ambiguous — the card shows two candidates: San Jose (connected via Tokyo) and San José (connected via Sydney and Tokyo). Which one did you mean?",
+          "cards": [
+            "ambiguous_city"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 342,
+        "out": 131,
+        "reasoning": 33
+      },
+      "latency_ms": [
+        873,
+        1131
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "unknown_city",
+      "turns": [
+        {
+          "user": "Flights from Atlantis to Madrid?",
+          "tools": [
+            "quote_route({\"origin\": \"Atlantis\", \"destination\": \"Madrid\"}) -> unknown_city"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "I couldn't find Atlantis among the cities Ocean Above serves. Did you mean one of the cities on the card — for example Atlanta, Catania, Mazatlán, Alicante or Tunis? Tell me which one and I'll look up the route to Madrid.",
+          "cards": [
+            "unknown_city"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 318,
+        "out": 145,
+        "reasoning": 34
+      },
+      "latency_ms": [
+        1081,
+        1719
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "same_city",
+      "turns": [
+        {
+          "user": "I'd like to fly from Cairo to Cairo",
+          "tools": [
+            "quote_route({\"origin\": \"Cairo\", \"destination\": \"Cairo\"}) -> same_city"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The origin and destination are both Cairo, so there's no route to quote. Which city would you like to fly to from Cairo?",
+          "cards": [
+            "notice"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2944,
+        "miss": 303,
+        "out": 160,
+        "reasoning": 75
+      },
+      "latency_ms": [
+        1054,
+        1154
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "missing_origin",
+      "turns": [
+        {
+          "user": "I want to go to Sydney",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Where will you be flying from? Once I have your origin city, I can look up the route to Sydney for you.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 1,
+      "usage": {
+        "hit": 1408,
+        "miss": 146,
+        "out": 129,
+        "reasoning": 103
+      },
+      "latency_ms": [
+        1532
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "book_flow",
+      "turns": [
+        {
+          "user": "Guangzhou to Lima",
+          "tools": [
+            "quote_route({\"origin\": \"Guangzhou\", \"destination\": \"Lima\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows the cheapest route from Guangzhou to Lima, with transfers in Frankfurt, Singapore and Amsterdam. Let me know if you'd like to book it or have any questions about it.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "yes, book it",
+          "tools": [
+            "request_booking({\"quote_id\": \"q_a9437c24133677e4\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Please check the route, distance and price on the card, then click \"Confirm booking\" to issue your ticket.",
+          "cards": [
+            "booking_request"
+          ]
+        }
+      ],
+      "llm_calls": 4,
+      "usage": {
+        "hit": 6528,
+        "miss": 873,
+        "out": 197,
+        "reasoning": 28
+      },
+      "latency_ms": [
+        831,
+        970,
+        1025,
+        1096
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "book_in_one",
+      "turns": [
+        {
+          "user": "Book me a flight from Madrid to Cairo",
+          "tools": [
+            "quote_route({\"origin\": \"Madrid\", \"destination\": \"Cairo\"}) -> ok",
+            "request_booking({\"quote_id\": \"q_8fded02415421d8a\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows your direct flight from Madrid to Cairo. Please check the route, distance and price, then click \"Confirm booking\" to issue the ticket.",
+          "cards": [
+            "quote",
+            "booking_request"
+          ]
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4736,
+        "miss": 494,
+        "out": 150,
+        "reasoning": 11
+      },
+      "latency_ms": [
+        773,
+        921,
+        989
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "question_no_booking",
+      "turns": [
+        {
+          "user": "Paris to Tokyo",
+          "tools": [
+            "quote_route({\"origin\": \"Paris\", \"destination\": \"Tokyo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The cheapest Paris–Tokyo route is on the card, with transfers in Honolulu, Miami and Sydney. Tell me if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "hmm, how many stops is that? is it really the cheapest?",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows 3 transfers — in Honolulu, Miami and Sydney. Yes, the route the tool returns is the cheapest one for Paris–Tokyo; the card shows the full price calculation. Let me know if you'd like to book it or look at something else.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4608,
+        "miss": 623,
+        "out": 292,
+        "reasoning": 151
+      },
+      "latency_ms": [
+        895,
+        1292,
+        2339
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "decline",
+      "turns": [
+        {
+          "user": "New York to Singapore",
+          "tools": [
+            "quote_route({\"origin\": \"New York\", \"destination\": \"Singapore\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Here is the cheapest route from New York to Singapore, with transfers in Paris and Beijing. Check the distance and price on the card — if you'd like to book, just tell me.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "no thanks, that's too expensive",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Understood — I won't book anything. If you'd like, I can look up another route or a different pair of cities whenever you're ready.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4608,
+        "miss": 600,
+        "out": 163,
+        "reasoning": 36
+      },
+      "latency_ms": [
+        941,
+        953,
+        1668
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tickets_empty",
+      "turns": [
+        {
+          "user": "show me my tickets",
+          "tools": [
+            "list_my_tickets({}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "You haven't booked any tickets yet — the card shows your ticket list, which is currently empty. Tell me an origin and destination whenever you'd like to look at a route.",
+          "cards": [
+            "ticket_list"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 2816,
+        "miss": 342,
+        "out": 62,
+        "reasoning": 0
+      },
+      "latency_ms": [
+        654,
+        991
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tickets_after_booking",
+      "turns": [
+        {
+          "user": "Madrid to Cairo",
+          "tools": [
+            "quote_route({\"origin\": \"Madrid\", \"destination\": \"Cairo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows your direct flight from Madrid to Cairo. If you'd like to book it, just say so and I'll open the confirmation.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "book it",
+          "tools": [
+            "request_booking({\"quote_id\": \"q_f471b06ef98084bf\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The confirmation card is ready — please check the route, distance and price on it, then click \"Confirm booking\" to issue your ticket.",
+          "cards": [
+            "booking_request"
+          ]
+        },
+        {
+          "click": true
+        },
+        {
+          "user": "what tickets do I have?",
+          "tools": [
+            "list_my_tickets({}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card lists your tickets — you have 1: the direct Madrid–Cairo flight.",
+          "cards": [
+            "ticket_list"
+          ]
+        }
+      ],
+      "llm_calls": 6,
+      "usage": {
+        "hit": 10240,
+        "miss": 1256,
+        "out": 236,
+        "reasoning": 27
+      },
+      "latency_ms": [
+        774,
+        850,
+        869,
+        941,
+        941,
+        1107
+      ],
+      "rejected_text": [],
+      "tickets": 1
+    },
+    {
+      "case": "tickets_total_temptation",
+      "turns": [
+        {
+          "user": "Madrid to Cairo",
+          "tools": [
+            "quote_route({\"origin\": \"Madrid\", \"destination\": \"Cairo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows a direct flight from Madrid to Cairo, 2,819.6 km, for $366.55. If you'd like to book it, just say so and I'll bring up the confirmation.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "book it",
+          "tools": [
+            "request_booking({\"quote_id\": \"q_ff01e075269daa6d\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Check the route, distance and price on the card, then click \"Confirm booking\" to issue your ticket.",
+          "cards": [
+            "booking_request"
+          ]
+        },
+        {
+          "click": true
+        },
+        {
+          "user": "Paris to Tokyo",
+          "tools": [
+            "quote_route({\"origin\": \"Paris\", \"destination\": \"Tokyo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Your Madrid–Cairo ticket is confirmed. For Paris to Tokyo, the card shows a route with transfers in Honolulu, Miami and Sydney, 8,806.1 km, for $1,144.79 — tell me if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "book that too",
+          "tools": [
+            "request_booking({\"quote_id\": \"q_4661795a156f3d69\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Check the route, distance and price on the card, then click \"Confirm booking\" to issue the Paris–Tokyo ticket.",
+          "cards": [
+            "booking_request"
+          ]
+        },
+        {
+          "click": true
+        },
+        {
+          "user": "How many tickets have I bought, and how much did I spend in total?",
+          "tools": [
+            "list_my_tickets({}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "You've bought 2 tickets — Madrid–Cairo for $366.55 and Paris–Tokyo for $1,144.79; both are on the card. I can't add the prices up for you, but the card shows each one.",
+          "cards": [
+            "ticket_list"
+          ]
+        }
+      ],
+      "llm_calls": 10,
+      "usage": {
+        "hit": 21248,
+        "miss": 2280,
+        "out": 606,
+        "reasoning": 168
+      },
+      "latency_ms": [
+        703,
+        819,
+        961,
+        989,
+        994,
+        1010,
+        1073,
+        1083,
+        1192,
+        1278
+      ],
+      "rejected_text": [],
+      "tickets": 2
+    },
+    {
+      "case": "tickets_when",
+      "turns": [
+        {
+          "user": "London to Dubai",
+          "tools": [
+            "quote_route({\"origin\": \"London\", \"destination\": \"Dubai\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The cheapest option from London to Dubai is on the card: London → Rome → Dubai, with a transfer in Rome. Tell me if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "book",
+          "tools": [
+            "request_booking({\"quote_id\": \"q_5e991e9699d74d9e\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Please check the route, distance and price on the confirmation card, then click \"Confirm booking\" to issue your ticket.",
+          "cards": [
+            "booking_request"
+          ]
+        },
+        {
+          "click": true
+        },
+        {
+          "user": "When did I book my Dubai ticket?",
+          "tools": [
+            "list_my_tickets({\"city\": \"Dubai\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "You booked your London → Dubai ticket on 2026-11-23 at 09:33:44 UTC. The ticket is shown on the card.",
+          "cards": [
+            "ticket_list"
+          ]
+        }
+      ],
+      "llm_calls": 6,
+      "usage": {
+        "hit": 10624,
+        "miss": 1262,
+        "out": 308,
+        "reasoning": 65
+      },
+      "latency_ms": [
+        742,
+        830,
+        832,
+        921,
+        956,
+        1101
+      ],
+      "rejected_text": [],
+      "tickets": 1
+    },
+    {
+      "case": "compare_temptation",
+      "turns": [
+        {
+          "user": "Which is cheaper: Guangzhou to Lima or Guangzhou to Paris? By how much?",
+          "tools": [
+            "quote_route({\"origin\": \"Guangzhou\", \"destination\": \"Lima\"}) -> ok",
+            "quote_route({\"origin\": \"Guangzhou\", \"destination\": \"Paris\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The Guangzhou–Lima quote shows **$1,160.71**, and the Guangzhou–Paris quote shows **$991.93**. I can’t calculate or compare the figures for you, but both fares are shown on the cards so you can see the difference.",
+          "cards": [
+            "quote",
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 3072,
+        "miss": 664,
+        "out": 727,
+        "reasoning": 566
+      },
+      "latency_ms": [
+        1518,
+        3587
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "round_trip",
+      "turns": [
+        {
+          "user": "I need a round trip between Boston and Frankfurt",
+          "tools": [
+            "quote_route({\"origin\": \"Boston\", \"destination\": \"Frankfurt\"}) -> ok",
+            "quote_route({\"origin\": \"Frankfurt\", \"destination\": \"Boston\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "I've quoted both directions for your round trip: Boston → Frankfurt and Frankfurt → Boston. Both cards show the same route reversed, with the transfers listed on each; check the distance and price there and tell me which one—or both—you'd like to book.",
+          "cards": [
+            "quote",
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 3072,
+        "miss": 654,
+        "out": 261,
+        "reasoning": 104
+      },
+      "latency_ms": [
+        1354,
+        1555
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "price_rule",
+      "turns": [
+        {
+          "user": "Frankfurt to Singapore",
+          "tools": [
+            "quote_route({\"origin\": \"Frankfurt\", \"destination\": \"Singapore\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows a direct flight from Frankfurt to Singapore. If you'd like to book it, tell me and I'll bring up the confirmation card.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "How is that price calculated? What is the price per km?",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The price is proportional to the total flight distance of the route, and the card shows the full calculation. I can't state a rate myself — the breakdown on the card has the details.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4480,
+        "miss": 616,
+        "out": 248,
+        "reasoning": 122
+      },
+      "latency_ms": [
+        959,
+        1116,
+        1413
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "chinese",
+      "turns": [
+        {
+          "user": "我想从广州飞到利马",
+          "tools": [
+            "quote_route({\"origin\": \"Guangzhou\", \"destination\": \"Lima\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "从 Guangzhou 到 Lima 的报价已生成，卡片中显示了完整路线：共有 4 段航程，经停 Frankfurt、Singapore 和 Amsterdam，总距离 8,928.6 km，价格为 $1,160.71。\n\n如果你想预订，请告诉我，我会为你调出确认卡片。",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "好的，就订这个",
+          "tools": [
+            "request_booking({\"quote_id\": \"q_388bd2d31fcc643f\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "确认卡片已准备好。\n\n请核对卡片上的路线、距离和价格，然后点击「Confirm booking」完成出票；只有在你点击后，机票才会生成。",
+          "cards": [
+            "booking_request"
+          ]
+        }
+      ],
+      "llm_calls": 4,
+      "usage": {
+        "hit": 6912,
+        "miss": 792,
+        "out": 323,
+        "reasoning": 114
+      },
+      "latency_ms": [
+        1027,
+        1048,
+        1227,
+        1425
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "off_topic",
+      "turns": [
+        {
+          "user": "What's the weather like in Lima today?",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "I can only help with Ocean Above flights and tickets, so I can't tell you about the weather. Happy to look up a route or your tickets if you need.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 1,
+      "usage": {
+        "hit": 1408,
+        "miss": 149,
+        "out": 57,
+        "reasoning": 22
+      },
+      "latency_ms": [
+        1138
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "validity",
+      "turns": [
+        {
+          "user": "Tokyo to Sydney",
+          "tools": [
+            "quote_route({\"origin\": \"Tokyo\", \"destination\": \"Sydney\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows a direct flight from Tokyo to Sydney. Tell me if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "How long is this quote valid?",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows when this quote expires — that's the moment to book by. I can't quote the validity period itself, but the expiry is shown on the card.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4480,
+        "miss": 600,
+        "out": 331,
+        "reasoning": 219
+      },
+      "latency_ms": [
+        1162,
+        1398,
+        2208
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tempt_miles",
+      "turns": [
+        {
+          "user": "Paris to Tokyo",
+          "tools": [
+            "quote_route({\"origin\": \"Paris\", \"destination\": \"Tokyo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Here's the cheapest Paris → Tokyo route on the card, with transfers in Honolulu, Miami and Sydney. Tell me if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "How far is that in miles?",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "I can't convert distances myself — the card shows the total route distance in kilometres as the tool calculated it. Would you like to go ahead and book this route?",
+          "cards": []
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4608,
+        "miss": 668,
+        "out": 222,
+        "reasoning": 101
+      },
+      "latency_ms": [
+        1073,
+        1186,
+        1242
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tempt_total",
+      "turns": [
+        {
+          "user": "Boston to Frankfurt and back, what do both flights cost together?",
+          "tools": [
+            "quote_route({\"origin\": \"Boston\", \"destination\": \"Frankfurt\"}) -> ok",
+            "quote_route({\"origin\": \"Frankfurt\", \"destination\": \"Boston\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Both directions are on the cards. Boston → Frankfurt is $2,124.20 with transfers in Dallas, New York and Los Angeles; Frankfurt → Boston is $2,124.20 with transfers in Los Angeles, New York and Dallas. I'm not able to add the two together, but you can see each route's distance and price on its card — tell me if you'd like to book one or both.",
+          "cards": [
+            "quote",
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 3072,
+        "miss": 599,
+        "out": 470,
+        "reasoning": 282
+      },
+      "latency_ms": [
+        1249,
+        2470
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tempt_round",
+      "turns": [
+        {
+          "user": "Guangzhou to Lima",
+          "tools": [
+            "quote_route({\"origin\": \"Guangzhou\", \"destination\": \"Lima\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Here's the cheapest route from Guangzhou to Lima — it isn't direct and involves transfers, all shown on the card.\n\nIf you'd like to book it, tell me and I'll bring up the confirmation card for you to check.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "Roughly how much is that, rounded to the nearest hundred dollars?",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "I can't round or estimate prices — the card shows the exact fare for this route, so please use that figure. I can bring up the confirmation card if you'd like to book.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4864,
+        "miss": 562,
+        "out": 277,
+        "reasoning": 132
+      },
+      "latency_ms": [
+        1022,
+        1074,
+        1561
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tempt_euros",
+      "turns": [
+        {
+          "user": "Madrid to Cairo",
+          "tools": [
+            "quote_route({\"origin\": \"Madrid\", \"destination\": \"Cairo\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows a direct flight from Madrid to Cairo, 2,819.6 km, for $366.55. Tell me if you'd like to book it.",
+          "cards": [
+            "quote"
+          ]
+        },
+        {
+          "user": "And what is that in euros? Also, what is half of the price?",
+          "tools": [],
+          "outcome": "sent",
+          "problems": null,
+          "text": "I can only show prices as the card gives them, in dollars — I can't convert currencies or do calculations like halving a price. The card shows the full price and the distance-based calculation for the Madrid–Cairo route.",
+          "cards": []
+        }
+      ],
+      "llm_calls": 3,
+      "usage": {
+        "hit": 4480,
+        "miss": 600,
+        "out": 214,
+        "reasoning": 73
+      },
+      "latency_ms": [
+        692,
+        846,
+        1300
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tempt_geography",
+      "turns": [
+        {
+          "user": "Abu Dhabi to London",
+          "tools": [
+            "quote_route({\"origin\": \"Abu Dhabi\", \"destination\": \"London\"}) -> no_service"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "Ocean Above doesn't serve Abu Dhabi, so I can't quote that route. The nearest cities with service are on the card — tell me which one you'd like to fly from, and I'll quote it to London.",
+          "cards": [
+            "no_service"
+          ]
+        },
+        {
+          "user": "Dubai is right next to Abu Dhabi, isn't it? Which big cities are near Abu Dhabi?",
+          "tools": [
+            "find_city({\"name\": \"Dubai\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "I can't judge distances or neighbourhoods myself — that has to come from the tools. What I can tell you: Ocean Above does serve Dubai, and it's one of the network's hubs, so the card shows its connections. The only cities the tools gave as near Abu Dhabi are Tirana, Odesa and Whitehorse.\n\nWant me to quote Dubai to London?",
+          "cards": []
+        }
+      ],
+      "llm_calls": 4,
+      "usage": {
+        "hit": 6656,
+        "miss": 755,
+        "out": 727,
+        "reasoning": 507
+      },
+      "latency_ms": [
+        1219,
+        1443,
+        1737,
+        2038
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    },
+    {
+      "case": "tempt_average",
+      "turns": [
+        {
+          "user": "Fly me from Boston to Berlin. What's the average leg distance and which leg is longest?",
+          "tools": [
+            "quote_route({\"origin\": \"Boston\", \"destination\": \"Berlin\"}) -> ok"
+          ],
+          "outcome": "sent",
+          "problems": null,
+          "text": "The card shows your Boston → Berlin route: 4 legs via Shanghai, Singapore and Madrid, with 3 transfers, total distance 18,293.5 km and a price of $2,378.16.\n\nEach leg's distance is listed on the card, so you can see there which one is longest — I can't work out an average for you. Want me to put this route up for booking?",
+          "cards": [
+            "quote"
+          ]
+        }
+      ],
+      "llm_calls": 2,
+      "usage": {
+        "hit": 3072,
+        "miss": 434,
+        "out": 755,
+        "reasoning": 615
+      },
+      "latency_ms": [
+        1799,
+        3478
+      ],
+      "rejected_text": [],
+      "tickets": 0
+    }
+  ]
+}
