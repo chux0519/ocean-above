@@ -93,8 +93,8 @@ Browser (Next.js, TS)                      FastAPI (Python)
 | 迭代 | 内容 | 实施者 / 模型 | 验收档 |
 |---|---|---|---|
 | 02-core | 后端脚手架（uv、FastAPI 健康检查）、core/ 全部 + 属性测试 + 全对一致性 | worker，最强模型（算法与正确性） | A：测试差分 + lint |
-| 03-agent | store/、llm client、loop、tools、确认闸门 + 不变式模型测试、假 LLM 测试、eval 框架和首批用例 | worker，最强模型 | A + 一次真模型 eval 报告 |
-| 04-web | Next.js + shadcn/Tailwind UI、API 对接、移动端适配，补 DESIGN §3–6 | worker，前端用较快模型，审查由协调者 | A：ego-browser 桌面 + 手机截图、Impeccable + shadcn 审查 |
+| 03-agent | store/、`airline/` 服务接口、llm client、loop、tools、确认闸门 + 不变式模型测试、**SSE 流式输出**、假 LLM 测试、eval 框架和首批用例 | worker，最强模型 | A + 一次真模型 eval 报告 |
+| 04-web | Next.js + shadcn/Tailwind UI、**Google 登录 + 演示登录**、streamdown 流式渲染、API 对接、移动端适配，补 DESIGN §3–6 | worker，前端用较快模型，审查由协调者 | A：ego-browser 桌面 + 手机截图、Impeccable + shadcn 审查 |
 | 05-deliver | README（运行方式）、设计文档（题目要求的 5 个部分 + 可选项）、prompt history 导出、端到端演示 | 协调者 | A + 演示录屏 |
 
 - 02 和 04 的前半（脚手架、静态页面）可以并行，最多 2 个 worker。API 契约由协调者在 03 开工前写定。
@@ -129,6 +129,12 @@ Browser (Next.js, TS)                      FastAPI (Python)
 ## Acceptance（本计划）
 - 用户确认架构、工具设计、确认闸门、价格舍入规则、迭代路线和下面的开放问题。
 - 确认后：写 02-core 详细计划（含测试清单），再开 worker。
+
+## 追加决定（2026-11-23，设计文档 v0 review 后）
+- 流式输出提前到 03；前端用流式 Markdown 渲染组件（`streamdown` 优先）。
+- Google 登录现在做（04），用户在 GCP 建 OAuth client；保留演示登录兜底（待确认）。
+- 不上 MCP；`airline/` 作为领域边界，将来可拆成 MCP server。时刻 / 座位不实现、不编造。
+- 详见 `docs/design/design.md` v1。
 
 ## Open questions for the user
 - 无（已全部由用户决定，见上）。

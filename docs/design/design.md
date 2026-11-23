@@ -1,6 +1,6 @@
-# Ocean Above 订票助手 — 设计文档（草稿 v0，2026-11-23）
+# Ocean Above 订票助手 — 设计文档（草稿 v1，2026-11-23）
 
-> 状态：**待用户 review**。确认后作为 02–05 迭代的依据；交付前（迭代 05）整理成最终设计文档（覆盖 take-home 要求的
+> 状态：v0 已 review（§12 三问均确认）；v1 加入流式输出、Google 登录、领域边界（为将来 MCP 预留），**待用户 review**。确认后作为 02–05 迭代的依据；交付前（迭代 05）整理成最终设计文档（覆盖 take-home 要求的
 > 5 个部分 + 可选项）。冲突时以 `Quotr Agent Dev Engineer take-home.md` 为准。
 
 ## 0. 一句话
@@ -38,6 +38,10 @@ FSR（*From Seeing to Reporting*）指出：模型能逐条列出正确的记录
 - `locations.db` 是唯一事实来源，只读打开，不复制数据；文件指纹一变就重载。
 - 精确值计算和存储，只在显示时舍入。
 - 依赖最小化，agent loop 自己写；图算法用 networkx。
+- **领域边界（为将来扩展预留，现在不上 MCP）**：航空公司侧的能力（城市、报价、下单、查票，以及将来的时刻、座位、
+  库存）集中在 `airline/` 服务接口后面；agent 只依赖这个接口，不直接碰 core 和数据库。接口的方法、参数、返回记录
+  和 LLM 工具一一对应，将来可以原样拆成 MCP server 或接真实订票系统，agent 和评测不用改。
+- 流式输出：工具卡片和文本逐步推给前端（§4.7）。
 - 未经用户确认完整路线、距离、价格，绝不下单；由服务端强制，不靠 prompt。
 
 ## 2. 架构
@@ -57,8 +61,10 @@ flowchart LR
       LLMC["llm client<br/>(httpx, OpenAI 兼容)"]
       Tools["tools<br/>参数校验 + 分发"]
       Render["renderer<br/>引用填充 + 数字守卫"]
-      Gate["confirmation gate"]
+      Gate["confirmation gate<br/>(对话侧条件)"]
     end
+    Airline["airline/ 服务接口<br/>报价 · 下单复核 · 查票<br/>(将来可拆为 MCP server)"]
+    Auth["auth<br/>Google ID token 核验<br/>演示登录"]
     subgraph Core["core/ (纯函数, 确定性)"]
       Net["network<br/>加载 · 校验 · 指纹"]
       Route["routing<br/>hub 约束 Dijkstra"]
@@ -76,20 +82,26 @@ flowchart LR
   API --> Loop
   API -->|"确认按钮"| Gate
   Loop <--> LLMC <--> LLM
-  Loop --> Tools --> Core
-  Tools --> Gate
+  Loop --> Tools --> Airline --> Core
+  Tools --> Gate --> Airline
+  API --> Auth
+  Auth -.->|"核验令牌 (JWKS)"| Google["Google Identity"]
   Loop --> Render
   Net --> LDB
   Route --> Net
   Price --> Net
   Places --> Net
-  Tools & Gate & Loop & API --> Store --> ADB
+  Airline & Loop & API & Auth --> Store --> ADB
 ```
 
 模块边界：
 - `core/` 不知道 LLM、HTTP、app.db 的存在，只吃 `Network` 和参数，返回记录或明确的错误类型。可单独穷举测试。
-- `agent/` 不直接读 locations.db，只通过 tools 调 core。
-- 下单只有一个入口：`Gate.book(quote_id, ...)`。LLM 工具和界面按钮都走它。
+- `airline/` 是航空公司侧的服务接口：`find_city`、`quote_route`、`book(quote_id, confirmation)`、`list_tickets`，
+  内部调 core 和 store；负责下单复核（B1、B5–B7）和权限（只能操作自己的报价和票）。将来的时刻、座位接口也放这里，
+  现在**不实现、不编造数据**（locations.db 里没有这些信息）。
+- `agent/` 不直接读 locations.db 或 core，只通过 tools → `airline/`。
+- 下单只有一个入口：`Gate.book(...)` 先检查对话侧条件（B2–B4），通过后签发确认凭证交给 `airline.book`。LLM 工具和
+  界面按钮都走它。
 - 所有 LLM 请求和响应、工具调用和结果都落库，既用于「查看历史会话」，也用于溯源和离线评测回放。
 
 ## 3. 一轮对话的数据流
@@ -247,6 +259,22 @@ def run_turn(conv, user_text) -> AssistantMessage:
 | 超过 MAX_STEPS | 模板回复，附本轮已产生的记录 |
 | 用户在 LLM 回复前又发消息 | 同一会话串行处理（每会话一把锁） |
 
+### 4.7 流式输出
+- 传输：`POST /api/conversations/{id}/messages` 返回 SSE（`text/event-stream`），前端用 fetch 逐段读取。
+- 事件：
+  | 事件 | 内容 | 时机 |
+  |---|---|---|
+  | `status` | 「正在查询航线…」等进度 | 每次工具调用前后 |
+  | `card` | 行程卡 / 票卡 / 票据列表（完全由记录渲染） | 工具返回后立即推，不等 LLM 写字 |
+  | `delta` | 已渲染的文本片段 | LLM 流式输出时 |
+  | `replace` | 整条回复替换为代码模板 | 流中途守卫失败时 |
+  | `done` / `error` | 消息 id、最终 quote 状态 | 结束 |
+- 流式渲染 + 守卫：服务端维护一个小缓冲区，普通文字直接推；遇到 `{{` 暂存到 `}}` 为止，替换为记录值后再推；
+  遇到引用之外的数字立即停推，改用模板回复并发 `replace`。白名单：Markdown 有序列表序号、日期、记录 id。
+- LLM 的工具调用参数在流里是分片的，后端拼完整后才执行。
+- 落库的是最终版本（`text_raw` + `text_rendered`）；quote 在 `done` 前才置为 `presented`。
+- 断线：后端照常跑完一轮并落库，前端重连后拉会话即可看到完整结果。
+
 ## 5. 路线、距离、价格
 
 - 图：hub–hub 边来自 `hub_links`，非 hub–hub 边来自 `connected_hubs`；双向。非 hub 城市只能当端点（只在 hub 换乘）。
@@ -314,6 +342,10 @@ Gate 条件（全部满足才下单；编号规则写入 `docs/design/state_inva
   给出新报价，要求重新确认。
 - **B7** 写票和改 quote 状态在同一个数据库事务里。
 
+分工：B2–B4 是对话侧条件，由 agent 的 Gate 检查，通过后签发确认凭证（quote id、用户、确认所在的用户消息 id）；
+B1、B5–B7 是航空公司侧条件，由 `airline.book` 检查（它必须收到凭证才下单）。现在两者在同一进程，将来 `airline/`
+拆成独立服务（如 MCP server）时，分工不变，凭证改为签名令牌。
+
 LLM 层面的辅助（不作为安全依据）：prompt 要求先展示后确认；评测里有「含糊回复不应下单」「改了目的地后旧报价不能下单」等轨迹用例。
 
 ## 7. 数据模型（app.db）
@@ -330,7 +362,10 @@ erDiagram
 
   users {
     text id PK
-    text username UK
+    text auth_provider
+    text provider_sub UK
+    text email
+    text display_name
     text created_at
   }
   conversations {
@@ -390,25 +425,42 @@ erDiagram
 ```
 
 - 精确值存成十进制字符串；`text_raw`（LLM 原文，含引用）和 `text_rendered`（渲染后）都存，方便溯源。
-- 用户系统：只输用户名，httpOnly cookie 存用户 id，无密码（take-home 允许）。
+- 用户系统（§8.1）：Google 登录为主，演示登录为辅；`(auth_provider, provider_sub)` 唯一标识用户。
 
 ## 8. API（草案，03 迭代定稿）
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/session` | 用户名登录（不存在则创建） |
+| POST | `/api/auth/google` | 提交 Google ID token，后端核验后发会话 cookie |
+| POST | `/api/auth/demo` | 演示登录（仅 `DEMO_LOGIN=1` 时启用） |
+| POST | `/api/auth/logout` | 退出 |
+| GET | `/api/me` | 当前用户 |
 | GET | `/api/conversations` | 会话列表（要求 10） |
 | POST | `/api/conversations` | 新会话 |
 | GET | `/api/conversations/{id}` | 会话全部消息 + 卡片 |
-| POST | `/api/conversations/{id}/messages` | 发消息，返回 assistant 消息（文本 + 卡片） |
+| POST | `/api/conversations/{id}/messages` | 发消息，SSE 流式返回（§4.7） |
 | POST | `/api/quotes/{id}/book` | 行程卡上的确认按钮（同一个 gate） |
 | GET | `/api/quotes/{id}/trace` | 计算依据 |
 | GET | `/api/tickets` | 我的机票（要求 9） |
+
+### 8.1 登录
+- 前端用 Google Identity Services 的登录按钮拿到 **ID token**（不走授权码流程，不需要 client secret，
+  不申请任何 Google API 权限，只要 `openid email profile`）。
+- 后端核验 ID token：用 Google 公布的 JWKS 验签，检查 `aud` = 我们的 client ID、`iss`、`exp`、`email_verified`；
+  通过后发**自己的** httpOnly、SameSite=Lax 会话 cookie（服务端会话表或签名 cookie），之后不再依赖 Google。
+  依赖：`google-auth`（官方库，做验签）或 `PyJWT[crypto]` + JWKS 缓存，在 04 开工时选一个并写明理由。
+- 演示登录：`DEMO_LOGIN=1` 时显示「用用户名进入」，方便评审在本地无 Google 配置时运行；线上可关。
+- 配置：`GOOGLE_CLIENT_ID`（后端）和 `NEXT_PUBLIC_GOOGLE_CLIENT_ID`（前端，同一个值，非机密）。
+- 限制：Google 只接受 `http://localhost` 或 https 域名作为 JavaScript 来源；用局域网 IP（0.0.0.0 绑定后从别的机器访问）
+  打开时 Google 登录不可用，用演示登录或 localhost。
 
 ## 9. 前端
 
 - 页面：登录、聊天（会话列表 + 对话 + 卡片）、我的机票、历史会话只读查看。
 - shadcn/ui + Tailwind；移动端：会话列表变抽屉、卡片单列、触控目标 ≥ 44px、无横向滚动。
+- Markdown 流式渲染：优先 Vercel `streamdown`（react-markdown 的流式替代，处理未闭合的 Markdown、按块增量渲染）；
+  开工前核实体积，只启用需要的部分（不要代码高亮、数学公式、mermaid）；不合适则用 `react-markdown` + 按块 memo。
+- 文本里引用已在服务端渲染好，前端不做数字处理；卡片是独立组件，不经过 Markdown。
 - 行程卡：起点 → 中转 → 终点的航段列表、每段距离、总距离、价格、有效期倒计时、「确认预订」按钮、可展开「计算依据」。
 - 审查：Impeccable（critique / audit / detect）+ shadcn 对应 skill；ego-browser 桌面和手机截图。
 
@@ -431,10 +483,14 @@ erDiagram
   按钮路径作为兜底，评测覆盖含糊用例。
 - 数字守卫可能误伤（如用户自己提到的数字）→ 白名单 + 回退模板。
 - 单进程 SQLite；部署 Cloudflare 时需评估 Python Workers + D1 的适配（部署前再问）。
-- 下一步候选：流式输出、多乘客、日期和库存、多语言、支付、管理端改航线后的通知。
+- 航班时刻、座位、库存：接口位置预留在 `airline/`，现在不实现、不编造。
+- 下一步候选：把 `airline/` 拆成 MCP server（权限、真实订票系统对接）、多乘客、日期和库存、多语言、支付、
+  管理端改航线后的通知。
 
-## 12. 待你决定 / review 的点
+## 12. 决定记录
+- 2026-11-23 v0 review：引用占位符 + 数字守卫符合 FSR 思路 ✔；`book_quote` 带用户确认原话（B4）✔；中文草稿，05 出英文版 ✔。
+- 2026-11-23：流式输出提前到 03；Markdown 流式渲染组件（`streamdown` 优先）；Google 登录现在就做（04），
+  用户自己在 GCP 建凭证；MCP 对当前版本 overkill，不做，只保留 `airline/` 领域边界便于将来拆分。
 
-1. §1.1 的引用占位符 + 数字守卫做法（LLM 不写任何数字）是否符合你对 FSR 方法论的理解？
-2. §4.4 `book_quote` 要求 LLM 传用户确认原话（B4），是否保留？
-3. 本文档用中文写，交付前（05）出英文版作为最终设计文档，可以吗？
+## 13. 待你决定 / review 的点
+1. 保留演示登录（`DEMO_LOGIN=1`）作为评审本地运行的兜底，可以吗？
