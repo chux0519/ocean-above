@@ -11,10 +11,9 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   takes over.
 - Tunnel: a dedicated remotely-managed tunnel `ocean-above-homelab` in the Cloudflare account that owns
   `potafree.net`, routing `ocean-above.potafree.net` → `http://127.0.0.1:18765`.
-  - Status 2026-11-23: DNS edit on `potafree.net` confirmed (homelab created and removed a test TXT record); the
-    homelab agent will add the CNAME. **Blocked:** creating the tunnel returns 403 with the current token. Needs
-    `Account › Cloudflare Tunnel › Edit` on that account, or the account admin creates the tunnel and puts the
-    connector credentials on the homelab via a secure channel. Not needed before iteration 04.
+  - Status 2026-11-23: **live.** Tunnel `ocean-above-homelab` created in the `potafree.net` account, proxied CNAME
+    in place, connector enabled at boot (4 active connections). `https://ocean-above.potafree.net/health` returns 200
+    from the placeholder service on `127.0.0.1:18765` (TLS verified). Compose's Caddy takes over the same port.
 
 ## What we hand over for each deploy
 - Repo URL, branch or commit.
