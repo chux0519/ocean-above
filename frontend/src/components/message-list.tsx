@@ -5,7 +5,7 @@ import { Markdown } from "@/components/markdown";
 import { CardView } from "@/components/cards";
 import { cn } from "@/lib/utils";
 
-function Bubble({ m, streaming, readOnly, onBooked }: { m: Pick<Message, "role" | "text" | "cards">; streaming?: boolean; readOnly?: boolean; onBooked?: () => void }) {
+function Bubble({ m, streaming, readOnly, onBooked, onAsk }: { m: Pick<Message, "role" | "text" | "cards">; streaming?: boolean; readOnly?: boolean; onBooked?: () => void; onAsk?: (t: string) => void }) {
   const user = m.role === "user";
   return (
     <div className={cn("flex flex-col gap-2", user ? "items-end" : "items-start")}>
@@ -14,15 +14,15 @@ function Bubble({ m, streaming, readOnly, onBooked }: { m: Pick<Message, "role" 
           {user ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : <Markdown text={m.text} streaming={streaming} />}
         </div>
       )}
-      {m.cards.map((c, i) => <CardView key={i} card={c} streaming={streaming} readOnly={readOnly} onBooked={onBooked} />)}
+      {m.cards.map((c, i) => <CardView key={i} card={c} streaming={streaming} readOnly={readOnly} onBooked={onBooked} onAsk={onAsk} />)}
     </div>
   );
 }
 
-export function MessageList({ messages, draft, readOnly, onBooked }: { messages: Message[]; draft?: Draft | null; readOnly?: boolean; onBooked?: () => void }) {
+export function MessageList({ messages, draft, readOnly, onBooked, onAsk }: { messages: Message[]; draft?: Draft | null; readOnly?: boolean; onBooked?: () => void; onAsk?: (t: string) => void }) {
   return (
     <div className="space-y-4" data-testid="messages">
-      {messages.map((m) => <Bubble key={m.id} m={m} readOnly={readOnly} onBooked={onBooked} />)}
+      {messages.map((m) => <Bubble key={m.id} m={m} readOnly={readOnly} onBooked={onBooked} onAsk={onAsk} />)}
       {draft && (
         <>
           <Bubble m={{ role: "assistant", text: draft.text, cards: draft.cards }} streaming readOnly={readOnly} />

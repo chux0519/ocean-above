@@ -9,6 +9,7 @@ afterEach(() => vi.restoreAllMocks());
 const bookable = () => {
   const c = structuredClone(cardOf("quote"));
   c.state = { status: "presented", bookable: true, nonce: "n_3c1d9e", ticket_id: null };
+  c.expires_at = new Date(Date.now() + 10 * 60_000).toISOString();
   return c;
 };
 
@@ -56,11 +57,11 @@ describe("quote / booking_request card", () => {
     expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ nonce: "n_3c1d9e" });
   });
 
-  it("shows the server error on a stale booking", async () => {
+  it("shows an explanation on a stale booking", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(fixtureJson("booking_error_stale")), { status: 409 })));
     render(<CardView card={bookable()} onBooked={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "Confirm booking" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Route data changed");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Route data changed since this quote");
   });
 
   it("expands the calculation trace", async () => {

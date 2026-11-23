@@ -12,6 +12,7 @@ type RouteFields = {
   id: string; origin: string; destination: string; legs: Leg[]; transfers: string[];
   distance_display: string; price_display: string; distance: string; price: string;
   expires_at: string; state: CardState;
+  similar_names?: { city: string; connected_hubs: string[] }[];
 };
 export type QuoteCard = RouteFields & { type: "quote" };
 export type BookingRequestCard = RouteFields & { type: "booking_request" };

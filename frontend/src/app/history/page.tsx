@@ -1,19 +1,25 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ConversationSummary } from "@/lib/types";
 import { Shell } from "@/components/shell";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 
 function History() {
   const [items, setItems] = useState<ConversationSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { api.conversations().then(setItems).catch((e) => setError(e.message)); }, []);
+  const load = useCallback(() => {
+    setError(null); setItems(null);
+    api.conversations().then(setItems).catch((e) => setError(e.message ?? "Could not load history"));
+  }, []);
+  useEffect(load, [load]);
   return (
     <div className="h-full overflow-y-auto p-3 sm:p-6">
       <h1 className="mb-3 text-lg font-semibold">Conversation history</h1>
-      {error && <p role="alert" className="text-danger">{error}</p>}
-      {items?.length === 0 && <p className="text-muted">No conversations yet.</p>}
+      {!items && !error && <LoadingState label="Loading conversations…" />}
+      {error && <ErrorState message={error} onRetry={load} />}
+      {items?.length === 0 && <EmptyState>No conversations yet. Start one in Chat.</EmptyState>}
       <ul className="space-y-2">
         {items?.map((c) => (
           <li key={c.id}>
