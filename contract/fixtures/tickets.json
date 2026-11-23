@@ -1,0 +1,45 @@
+{
+  "tickets": [
+    {
+      "type": "ticket",
+      "id": "t_91b2",
+      "quote_id": "q_7f3a",
+      "origin": "Guangzhou",
+      "destination": "Lima",
+      "legs": [
+        {
+          "from": "Guangzhou",
+          "to": "Frankfurt",
+          "distance_display": "1,362.1 km",
+          "distance": "1362.100000000000000000000000000000"
+        },
+        {
+          "from": "Frankfurt",
+          "to": "Singapore",
+          "distance_display": "1,872.4 km",
+          "distance": "1872.400000000000000000000000000000"
+        },
+        {
+          "from": "Singapore",
+          "to": "Amsterdam",
+          "distance_display": "4,097.1 km",
+          "distance": "4097.100000000000000000000000000000"
+        },
+        {
+          "from": "Amsterdam",
+          "to": "Lima",
+          "distance_display": "1,597.0 km",
+          "distance": "1597.000000000000000000000000000000"
+        }
+      ],
+      "transfers": [
+        "Frankfurt",
+        "Singapore",
+        "Amsterdam"
+      ],
+      "distance_display": "8,928.6 km",
+      "price_display": "$1,160.71",
+      "booked_at": "2026-11-23T08:03:12Z"
+    }
+  ]
+}

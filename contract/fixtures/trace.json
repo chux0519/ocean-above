@@ -1,0 +1,73 @@
+{
+  "quote_id": "q_7f3a",
+  "formula": "price = Σ sqrt(dx²+dy²) × 0.13 USD; Decimal prec 50, stored to 30 dp",
+  "algorithm": "hub all-pairs (networkx) + endpoint enumeration; tie-break: legs, names",
+  "network_fingerprint": "sha256:0f1e2d…",
+  "legs": [
+    {
+      "from": "Guangzhou",
+      "to": "Frankfurt",
+      "distance_display": "1,362.1 km",
+      "distance": "1362.100000000000000000000000000000",
+      "from_coord": [
+        -9278,
+        3445
+      ],
+      "to_coord": [
+        -7957,
+        3113
+      ],
+      "source": "locations.connected_hubs(Guangzhou)"
+    },
+    {
+      "from": "Frankfurt",
+      "to": "Singapore",
+      "distance_display": "1,872.4 km",
+      "distance": "1872.400000000000000000000000000000",
+      "from_coord": [
+        -7957,
+        3113
+      ],
+      "to_coord": [
+        -6991,
+        1509
+      ],
+      "source": "hub_links(Frankfurt, Singapore)"
+    },
+    {
+      "from": "Singapore",
+      "to": "Amsterdam",
+      "distance_display": "4,097.1 km",
+      "distance": "4097.100000000000000000000000000000",
+      "from_coord": [
+        -6991,
+        1509
+      ],
+      "to_coord": [
+        -7318,
+        -2575
+      ],
+      "source": "hub_links(Singapore, Amsterdam)"
+    },
+    {
+      "from": "Amsterdam",
+      "to": "Lima",
+      "distance_display": "1,597.0 km",
+      "distance": "1597.000000000000000000000000000000",
+      "from_coord": [
+        -7318,
+        -2575
+      ],
+      "to_coord": [
+        -6546,
+        -3973
+      ],
+      "source": "locations.connected_hubs(Lima)"
+    }
+  ],
+  "distance": "8928.600000000000000000000000000000",
+  "price": "1160.718000000000000000000000000000",
+  "distance_display": "8,928.6 km",
+  "price_display": "$1,160.71",
+  "note": "Price is computed from the unrounded distance, so displayed distance × 0.13 can differ from the displayed price by one cent."
+}

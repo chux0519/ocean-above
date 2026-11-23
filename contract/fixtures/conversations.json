@@ -1,0 +1,18 @@
+{
+  "conversations": [
+    {
+      "id": "c_01",
+      "title": "Guangzhou to Lima",
+      "created_at": "2026-11-23T08:00:00Z",
+      "updated_at": "2026-11-23T08:03:12Z",
+      "preview": "Your ticket is booked."
+    },
+    {
+      "id": "c_00",
+      "title": "Abu Dhabi",
+      "created_at": "2026-11-22T10:00:00Z",
+      "updated_at": "2026-11-22T10:01:00Z",
+      "preview": "Abu Dhabi has no service yet."
+    }
+  ]
+}

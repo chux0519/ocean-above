@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "stale",
+    "message": "Route data changed since this quote. Please ask for a new quote."
+  }
+}
