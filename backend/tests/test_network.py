@@ -168,3 +168,44 @@ def test_provider_never_serves_stale_network_after_bad_edit(tmp_path, real_db):
     con.commit()
     con.close()
     assert provider.current().cities["Guangzhou"].x == 3
+
+
+def test_wal_mode_database_is_refused(tmp_path):
+    """Named regression (T2 review, finding 1): committed changes in `-wal` are outside the bytes
+    the fingerprint hashes, so strict change detection would miss them. Refuse such a file."""
+    import sqlite3
+
+    from app.core.network import NetworkProvider
+
+    path = make_db(tmp_path / "wal.db", [("H1", "0,0", 1, ""), ("H2", "3,4", 1, "")], [("H1", "H2")])
+    provider = NetworkProvider(path)
+    assert provider.current(strict=True).cities["H2"].x == 3
+
+    admin = sqlite3.connect(path)
+    try:
+        admin.execute("pragma journal_mode = wal")
+        admin.execute("update locations set coordinate = '30,40' where city_name = 'H2'")
+        admin.commit()
+        for strict in (True, False):
+            with pytest.raises(NetworkDataError, match="WAL"):
+                provider.current(strict=strict)
+        with pytest.raises(NetworkDataError, match="WAL"):
+            load_network(path)
+        admin.execute("pragma journal_mode = delete")
+    finally:
+        admin.close()
+    assert provider.current(strict=True).cities["H2"].x == 30  # readable again, with the new data
+
+
+def test_leftover_non_empty_wal_file_is_refused(tmp_path):
+    from app.core.network import NetworkProvider
+
+    path = make_db(tmp_path / "left.db", [("H1", "0,0", 1, ""), ("H2", "3,4", 1, "")], [("H1", "H2")])
+    provider = NetworkProvider(path)
+    provider.current()
+    wal = tmp_path / "left.db-wal"
+    wal.write_bytes(b"x" * 32)
+    with pytest.raises(NetworkDataError, match="-wal"):
+        provider.current(strict=True)
+    wal.write_bytes(b"")  # an empty one is harmless
+    assert provider.current(strict=True).cities["H2"].y == 4

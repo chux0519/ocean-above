@@ -170,6 +170,22 @@ def _sha256(path: Path) -> str:
         raise NetworkDataError(f"cannot read {path}: {exc}") from exc
 
 
+def _refuse_wal(path: Path) -> None:
+    """A database in WAL mode keeps committed changes in `<name>-wal`, outside the bytes the
+    fingerprint hashes, so a change could go unnoticed. Such a file is refused, not read."""
+    try:
+        with path.open("rb") as fh:
+            header = fh.read(20)
+        wal = Path(f"{path}-wal")
+        wal_size = wal.stat().st_size if wal.exists() else 0
+    except OSError as exc:
+        raise NetworkDataError(f"cannot read {path}: {exc}") from exc
+    if len(header) >= 20 and (header[18] == 2 or header[19] == 2):
+        raise NetworkDataError(f"{path} is in WAL journal mode; use a rollback-journal database")
+    if wal_size:
+        raise NetworkDataError(f"{path} has a non-empty -wal file; checkpoint it and switch off WAL")
+
+
 def _read_rows(path: Path) -> tuple[list[tuple], list[tuple]]:
     uri = path.resolve().as_uri() + "?mode=ro"
     try:
@@ -192,6 +208,7 @@ def load_network(path: str | Path) -> Network:
     path = Path(path)
     for _ in range(3):
         before = _stat(path)
+        _refuse_wal(path)
         digest = _sha256(path)
         locations, links = _read_rows(path)
         if _stat(path) == before and _sha256(path) == digest:
@@ -218,6 +235,11 @@ class NetworkProvider:
         with self._lock:
             stat = _stat(self.path)
             if self._net is not None:
+                try:
+                    _refuse_wal(self.path)  # also when the main file's bytes did not change
+                except NetworkDataError:
+                    self._net = None
+                    raise
                 if stat == self._stat and not strict:
                     return self._net
                 if _sha256(self.path) == self._net.fingerprint.sha256 and _stat(self.path) == stat:
