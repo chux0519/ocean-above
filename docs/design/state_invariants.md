@@ -31,3 +31,9 @@ Design context: `docs/design/design.md` §6.
 - Seeds are fixed in CI. A failing seed prints its shrunk sequence and is kept as a named regression case.
 - Layers: pure model test over `airline/` → API driven with fakes (clock, LLM, locations.db copy) → UI scenario
   (ego-browser) for the click path.
+
+## U. Usage limits
+- **U1 Daily cap.** For every user and UTC day, messages let through ≤ `DAILY_MESSAGES_PER_USER`; counting and the
+  reservation happen in one write transaction; a refused message stores nothing. (Model test:
+  `test_reservations_match_a_reference_count`.) Known: the site token budget is checked at message start, so turns
+  already running may overshoot it by their own cost; a `conversation_busy` message has already used its slot.
