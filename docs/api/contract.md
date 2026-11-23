@@ -1,4 +1,4 @@
-# API and card contract (v1.2, 2026-11-23)
+# API and card contract (v1.3, 2026-11-23)
 
 Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
 `contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
@@ -13,6 +13,10 @@ script, not by the production core) — correctness is tested in the backend, no
   Common codes: `unauthorized` (401), `not_found` (404; also for other users' objects), `bad_request` (400),
   `rate_limited` (429), `llm_unavailable` (503).
 - Login endpoints are throttled per client IP (10 / minute) → 429 `rate_limited`.
+- Request bodies over 64 KB → 413 `payload_too_large`. Non-GET requests whose `Sec-Fetch-Site` is `cross-site` /
+  `same-site`, or whose `Origin` does not match the host → 403 `forbidden_origin`.
+- Session cookie `oa_session` = `user.epoch.expires.sig`; `POST /api/auth/logout` revokes **all** sessions of the user.
+- Invite login: one account per invite code (the code identifies the account; `name` is only the display name).
 - `POST /api/conversations/{id}/messages` returns **429 `rate_limited` before any SSE** when the user's daily message
   limit or the site's daily token budget is reached; nothing is stored; `error.message` says which limit and when it
   resets (UTC midnight), and the body adds `"scope": "user" | "site"`, `"resets_at"`. Booking, tickets, history
