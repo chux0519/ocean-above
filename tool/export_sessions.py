@@ -29,7 +29,7 @@ PATTERNS = {
     'SLACK_TOKEN': r'\bxox[abprs]-[A-Za-z0-9\-]{10,}\b',
     'PRIVATE_KEY': r'-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----',
 }
-MIN_LITERAL = 8  # shorter env values (ports, flags) are not secrets and would over-match
+MIN_LITERAL = 8  # applies to .env values; .redact.local entries are taken as given  # shorter env values (ports, flags) are not secrets and would over-match
 
 
 def env_secrets(files):
@@ -81,6 +81,10 @@ def main():
     envs = a.env_file if a.env_file is not None else [
         p for p in ROOT.rglob('.env*')
         if p.is_file() and not p.name.endswith('.example') and 'node_modules' not in p.parts]
+    # .redact.local (gitignored, NAME=value lines): extra literals that are not secrets in .env but must not ship,
+    # e.g. the VPS origin IP behind Cloudflare.
+    if (ROOT / '.redact.local').is_file():
+        envs.append(ROOT / '.redact.local')
     literals = env_secrets(envs)
     report, total = [], 0
     for src, rel in sources(a.extra):

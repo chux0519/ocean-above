@@ -17,3 +17,4 @@ data/
 # Runtime copy of locations.db for docker compose (not versioned; see README)
 /locations/
 .claude/settings.local.json
+.redact.local
