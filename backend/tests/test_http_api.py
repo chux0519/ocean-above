@@ -78,14 +78,19 @@ def test_health_and_config(client, world):
     assert res.json()["network_fingerprint"].startswith("sha256:")
     assert client.get("/health").json()["status"] == "ok"  # the old path stays
     cfg = client.get("/api/config")
-    assert cfg.json() == {"dev_login": True, "google_client_id": None}
-    assert_shape(SCHEMAS_CONFIG, cfg.json())
+    assert cfg.json() == {"dev_login": True, "invite_login": False, "google_client_id": None}
+    # null is allowed (contract `string|null`); the fixture shows the configured form (test_auth.py)
+    assert set(cfg.json()) == set(json.loads((FIXTURES / "config.json").read_text()))
 
 
 def test_config_without_dev_account(world):
     with TestClient(create_app(world.db, make_settings(world, dev_user="", dev_password=""))) as c:
         assert c.get("/api/config").json()["dev_login"] is False
-        assert_error(c.post("/api/auth/dev", json={"username": "", "password": ""}), 401, "invalid_credentials")
+        assert_error(c.post("/api/auth/dev", json={"username": "", "password": ""}), 404, "not_found")
+    # one of the two is not enough
+    with TestClient(create_app(world.db, make_settings(world, dev_password=""))) as c:
+        assert c.get("/api/config").json()["dev_login"] is False
+        assert_error(c.post("/api/auth/dev", json={"username": "demo", "password": ""}), 404, "not_found")
 
 
 def test_sse_ping(client):
@@ -117,12 +122,15 @@ def test_login_me_logout(client):
     res = client.post("/api/auth/dev", json={"username": "demo", "password": "pw"})
     assert res.status_code == 200
     user = res.json()
-    assert set(user) == {"id", "display_name", "auth_provider"} and user["auth_provider"] == "dev"
+    assert set(user) == {"id", "display_name", "auth_provider", "email"} and user["auth_provider"] == "dev"
+    assert user["email"] is None
     assert user["id"].startswith("u_")
     cookie = res.headers["set-cookie"].lower()
     assert "oa_session=" in cookie and "httponly" in cookie and "samesite=lax" in cookie and "secure" not in cookie
-    assert client.get("/api/me").json() == user
-    assert_shape(SCHEMAS_ME, user)
+    me = client.get("/api/me").json()
+    assert {k: v for k, v in me.items() if k != "usage"} == user
+    assert me["usage"] == {"messages_today": 0, "daily_limit": 50, "resets_at": "2026-11-24T00:00:00Z"}
+    assert_shape(SCHEMAS_ME, me)
     again = client.post("/api/auth/dev", json={"username": "demo", "password": "pw"}).json()
     assert again["id"] == user["id"]  # same account every time
     res = client.post("/api/auth/logout")

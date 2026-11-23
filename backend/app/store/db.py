@@ -270,6 +270,14 @@ class Store:
         with self.write() as con:
             return records.set_conversation_title(con, user_id, conversation_id, title)
 
+    def first_user_text(self, user_id: str, conversation_id: str) -> str:
+        """The first non-blank user message of a conversation the user owns ("" when none)."""
+        from . import records
+
+        with self.read() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.first_user_text(con, conversation_id)
+
     def add_message(self, user_id: str, conversation_id: str, role: str, text: str,
                     cards: list | tuple = (), guard_problems: Any = None) -> dict:
         """Store a message as is. Assistant messages that carry quote or booking-request cards

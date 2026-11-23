@@ -4,26 +4,45 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
+import math
+from datetime import datetime, time as dtime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..agent import Agent, LLMConfig, LLMNotConfigured, OpenAIChatClient, encode_stream
+from ..agent.loop import TITLE_CHARS
 from ..agent.sse import HEADERS as SSE_HEADERS, MEDIA_TYPE as SSE_MEDIA_TYPE
 from ..airline import Airline, NotFound
 from ..core.network import NetworkProvider
 from ..store import Store
 from . import session
+from .google import GoogleVerifier, InvalidToken, KeysUnavailable
+from .logins import InviteCodes, Throttle, clean_name, client_ip, name_key
 from .errors import ApiError, install_handlers, respond
 from .settings import SESSION_TTL_SECONDS, Settings
 
 PING_COUNT = 5
+NEW_CONVERSATION_TITLE = "New conversation"
+GOOGLE_NAME_MAX = 80
+
+log = logging.getLogger(__name__)
 
 
 class Credentials(BaseModel):
     username: str
     password: str
+
+
+class GoogleCredential(BaseModel):
+    credential: str
+
+
+class Invite(BaseModel):
+    code: str
+    name: str
 
 
 class Text(BaseModel):
@@ -49,7 +68,39 @@ def _octets(text: str) -> bytes:
 
 
 def user_view(user: dict) -> dict:
-    return {"id": user["id"], "display_name": user["display_name"], "auth_provider": user["auth_provider"]}
+    return {"id": user["id"], "display_name": user["display_name"], "auth_provider": user["auth_provider"],
+            "email": user["email"]}
+
+
+def usage_view(settings: Settings, now: datetime) -> dict:
+    """Stub until the limits module (L2) counts messages; the shape is the contract's `Usage`."""
+    tomorrow = datetime.combine(now.astimezone(timezone.utc).date() + timedelta(days=1), dtime(0), timezone.utc)
+    return {"messages_today": 0, "daily_limit": settings.daily_messages_per_user,
+            "resets_at": tomorrow.strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
+def summary_view(store: Store, user_id: str, summary: dict) -> dict:
+    """Contract: the title is never empty — first user message, else "New conversation"."""
+    if summary["title"].strip():
+        return summary
+    first = " ".join(store.first_user_text(user_id, summary["id"]).split())[:TITLE_CHARS]
+    return {**summary, "title": first or NEW_CONVERSATION_TITLE}
+
+
+def throttle_login(request: Request) -> None:
+    """Login endpoints: at most N attempts per client IP per minute (contract), else 429."""
+    s: Settings = request.app.state.settings
+    ip = client_ip(request.client.host if request.client else None, request.headers, s.trusted_proxies)
+    wait = request.app.state.login_throttle.hit(ip)
+    if wait is not None:
+        raise ApiError(429, "rate_limited", "Too many sign-in attempts. Please wait a minute and try again.",
+                       headers={"Retry-After": str(max(1, math.ceil(wait)))})
+
+
+def _signed_in(settings: Settings, user: dict) -> JSONResponse:
+    response = JSONResponse(user_view(user))
+    _set_cookie(response, settings, user["id"])
+    return response
 
 
 def _set_cookie(response, settings: Settings, user_id: str) -> None:
@@ -69,20 +120,56 @@ def build_router() -> APIRouter:
     @r.get("/config")
     def config(request: Request) -> dict:
         s: Settings = request.app.state.settings
-        return {"dev_login": s.dev_login, "google_client_id": s.google_client_id}
+        return {"dev_login": s.dev_login, "invite_login": s.invite_login, "google_client_id": s.google_client_id}
 
     @r.post("/auth/dev")
     def auth_dev(creds: Credentials, request: Request):
         s: Settings = request.app.state.settings
+        if not s.dev_login:
+            raise ApiError(404, "not_found", "Not found.")
+        throttle_login(request)
         # surrogatepass: a lone surrogate in the JSON must be a wrong password, not a 500
         ok = s.dev_login and hmac.compare_digest(_octets(creds.username), _octets(s.dev_user)) \
             & hmac.compare_digest(_octets(creds.password), _octets(s.dev_password))
         if not ok:
             raise ApiError(401, "invalid_credentials", "Wrong username or password.")
         user = request.app.state.store.upsert_user("dev", s.dev_user, s.dev_user)
-        response = JSONResponse(user_view(user))
-        _set_cookie(response, s, user["id"])
-        return response
+        return _signed_in(s, user)
+
+    @r.post("/auth/google")
+    def auth_google(body: GoogleCredential, request: Request):
+        s: Settings = request.app.state.settings
+        verifier: GoogleVerifier | None = request.app.state.google
+        if verifier is None:
+            raise ApiError(404, "not_found", "Not found.")
+        throttle_login(request)
+        try:
+            who = verifier.verify(body.credential)
+        except KeysUnavailable:
+            raise ApiError(503, "auth_unavailable",
+                           "Google sign-in is unavailable right now. Please try again later.") from None
+        except InvalidToken as e:
+            log.info("google sign-in rejected: %s", e)  # the reason only, never the token
+            raise ApiError(401, "invalid_credentials", "Google sign-in could not be verified.") from None
+        name = " ".join((who.name or who.email or "Google user").split())[:GOOGLE_NAME_MAX] or "Google user"
+        user = request.app.state.store.upsert_user("google", who.sub, name, who.email)
+        return _signed_in(s, user)
+
+    @r.post("/auth/invite")
+    def auth_invite(body: Invite, request: Request):
+        s: Settings = request.app.state.settings
+        codes: InviteCodes = request.app.state.invite_codes
+        if not codes:
+            raise ApiError(404, "not_found", "Not found.")
+        throttle_login(request)
+        index = codes.match(body.code)
+        if index is None:
+            raise ApiError(401, "invalid_credentials", "That invite code is not valid.")
+        name = clean_name(body.name)
+        if name is None:
+            raise ApiError(400, "bad_request", "The name must be 1–40 characters.")
+        user = request.app.state.store.upsert_user("invite", f"{index}:{name_key(name)}", name)
+        return _signed_in(s, user)
 
     @r.post("/auth/logout")
     def logout(request: Request):
@@ -92,12 +179,15 @@ def build_router() -> APIRouter:
         return response
 
     @r.get("/me")
-    def me(user: dict = Depends(current_user)) -> dict:
-        return user_view(user)
+    def me(request: Request, user: dict = Depends(current_user)) -> dict:
+        store: Store = request.app.state.store
+        return {**user_view(user), "usage": usage_view(request.app.state.settings, store.clock())}
 
     @r.get("/conversations")
     def conversations(request: Request, user: dict = Depends(current_user)) -> dict:
-        return {"conversations": request.app.state.store.list_conversations(user["id"])}
+        store: Store = request.app.state.store
+        return {"conversations": [summary_view(store, user["id"], c)
+                                  for c in store.list_conversations(user["id"])]}
 
     @r.post("/conversations")
     async def new_conversation(request: Request, user: dict = Depends(current_user)) -> dict:
@@ -110,13 +200,15 @@ def build_router() -> APIRouter:
                 ok = False
             if not ok:
                 raise ApiError(400, "bad_request", "The request body is not valid.")
-        return await asyncio.to_thread(request.app.state.store.create_conversation, user["id"])
+        created = await asyncio.to_thread(request.app.state.store.create_conversation, user["id"])
+        return {**created, "title": created["title"] or NEW_CONVERSATION_TITLE}
 
     @r.get("/conversations/{conversation_id}")
     def conversation(conversation_id: str, request: Request, user: dict = Depends(current_user)) -> dict:
         summary = request.app.state.store.get_conversation(user["id"], conversation_id)
         if summary is None:
             raise ApiError(404, "not_found", "Conversation not found.")
+        summary = summary_view(request.app.state.store, user["id"], summary)
         return {**summary, "messages": request.app.state.airline.messages(user["id"], conversation_id)}
 
     @r.post("/conversations/{conversation_id}/messages")
@@ -172,6 +264,9 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
     API key configured there is no agent and the message route answers 503 llm_unavailable."""
     app.state.settings = settings
     app.state.store = store = Store(settings.app_db, **({"clock": clock} if clock else {}))
+    app.state.google = GoogleVerifier(settings.google_client_id) if settings.google_client_id else None
+    app.state.invite_codes = InviteCodes(settings.invite_codes)
+    app.state.login_throttle = Throttle(settings.login_attempts_per_minute, 60.0)
     app.state.airline = airline = Airline(store, networks, nonce_secret=settings.nonce_secret)
     if llm is None:
         try:

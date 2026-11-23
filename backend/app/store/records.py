@@ -99,6 +99,16 @@ def set_conversation_title(con, user_id: str, conversation_id: str, title: str) 
     return cur.rowcount == 1
 
 
+def first_user_text(con, conversation_id: str) -> str:
+    """Text of the conversation's first non-blank user message, or "" (title fallback)."""
+    row = con.execute(
+        "SELECT text FROM messages WHERE conversation_id = ? AND role = 'user' AND trim(text) <> '' "
+        "ORDER BY seq LIMIT 1",
+        (conversation_id,),
+    ).fetchone()
+    return "" if row is None else row["text"]
+
+
 def conversation_owner(con, conversation_id: str) -> str | None:
     row = con.execute("SELECT user_id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
     return None if row is None else row["user_id"]

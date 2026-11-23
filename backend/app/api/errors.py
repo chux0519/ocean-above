@@ -11,8 +11,8 @@ from ..core.network import NetworkDataError
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str):
-        self.status, self.code, self.message = status, code, message
+    def __init__(self, status: int, code: str, message: str, headers: dict | None = None):
+        self.status, self.code, self.message, self.headers = status, code, message, headers
 
 
 def body(code: str, message: str) -> dict:
@@ -29,7 +29,9 @@ _BY_STATUS = {401: "unauthorized", 404: "not_found", 405: "method_not_allowed", 
 def install_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api(_: Request, e: ApiError):
-        return respond(e.status, e.code, e.message)
+        response = respond(e.status, e.code, e.message)
+        response.headers.update(e.headers or {})
+        return response
 
     @app.exception_handler(NotFound)
     async def _not_found(_: Request, e: NotFound):
