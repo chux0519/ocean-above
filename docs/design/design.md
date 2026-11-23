@@ -540,6 +540,9 @@ flowchart LR
 - ReplyGuard 拦不住用文字写出的数；可能误伤用户提到的其他数字 → 白名单 + 模板回退，回退率在评测里统计。
 - 单进程、单 worker、SQLite；并发量有限，demo 足够。
 - 航班时刻、座位、库存：接口位置预留在 `airline/`，现在不实现、不编造。
+- Bonus（必交物之后）：thinking level 作为用户高级选项（默认 high）；BYOK（用户自带 key，只在浏览器保存、按请求发送，
+  服务端不存不记）；默认 key 由网关层限流；用评测框架 bench DeepSeek flash 各 thinking level 的通过率与成本，
+  选最划算的默认值。
 - 下一步候选：把 `airline/` 拆成 MCP server（权限、真实订票系统对接）、多乘客、日期和库存、多语言、支付、
   管理端改航线后的通知。
 
