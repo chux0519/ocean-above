@@ -63,7 +63,8 @@
             "bookable": false,
             "nonce": null,
             "ticket_id": "t_91b2"
-          }
+          },
+          "similar_names": []
         }
       ],
       "created_at": "2026-11-23T08:00:04Z"
@@ -126,7 +127,8 @@
             "bookable": false,
             "nonce": null,
             "ticket_id": "t_91b2"
-          }
+          },
+          "similar_names": []
         }
       ],
       "created_at": "2026-11-23T08:02:53Z"

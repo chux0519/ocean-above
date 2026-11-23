@@ -1,4 +1,4 @@
-# API and card contract (v1, 2026-11-23)
+# API and card contract (v1.1, 2026-11-23)
 
 Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
 `contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
@@ -56,7 +56,9 @@ type Card = QuoteCard | BookingRequestCard | TicketCard | TicketListCard | NoSer
 
 type QuoteCard = { type: "quote"; id: string /* q_ */; origin: string; destination: string
   legs: Leg[]; transfers: string[]; distance_display: string; price_display: string
-  distance: string; price: string; expires_at: string; state: CardState }
+  distance: string; price: string; expires_at: string; state: CardState
+  similar_names: { city: string; connected_hubs: string[] }[] }   // other cities equal to an endpoint after accent
+                                                                   // folding (San Jose / San José); [] normally
 type BookingRequestCard = Omit<QuoteCard, "type"> & { type: "booking_request" }   // id is the quote id
 type TicketCard = { type: "ticket"; id: string /* t_ */; quote_id: string; origin: string; destination: string
   legs: Leg[]; transfers: string[]; distance_display: string; price_display: string; booked_at: string }
