@@ -17,6 +17,7 @@ function send(res, status, body, headers = {}) {
 }
 
 // Scenario switches for screenshots/tests: POST /__mock {"book":"stale","message":"busy","tickets":"empty","history":"error","delay":800,"conversation":"error"}
+// login: google|invite|dev (only that method; default = config fixture); message: limit|site_limit (429)
 // confirm: multileg; book: stale|expired|invalid_nonce|already_booked|conversation_busy|data_unavailable; message: busy|drop; tickets/history/conversation: empty|error
 let scn = {};
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -71,8 +72,23 @@ http.createServer(async (req, res) => {
   if (scn.delay && p.startsWith("/api/") && !/messages$/.test(p)) await wait(scn.delay);
   const auth = loggedIn || process.env.MOCK_OPEN === "1";
   if (p === "/api/health") return send(res, 200, { status: "ok", network_fingerprint: "sha256:mock" });
-  if (p === "/api/config") return send(res, 200, json("config"));
+  if (p === "/api/config") {
+    const c = json("config");
+    // MOCK_GOOGLE_CLIENT_ID: a real (public) client id so the GIS button renders on localhost; any credential is accepted here.
+    if (process.env.MOCK_GOOGLE_CLIENT_ID) c.google_client_id = process.env.MOCK_GOOGLE_CLIENT_ID;
+    if (scn.login) Object.assign(c, { dev_login: scn.login === "dev", invite_login: scn.login === "invite", google_client_id: scn.login === "google" ? c.google_client_id : null });
+    return send(res, 200, c);
+  }
   if (p === "/api/auth/dev" && req.method === "POST") { loggedIn = true; return send(res, 200, json("me")); }
+  if (p === "/api/auth/invite" && req.method === "POST") {
+    let b = ""; for await (const c of req) b += c;
+    const { code, name } = JSON.parse(b || "{}");
+    if (code !== "example-invite") return send(res, 401, { error: { code: "invalid_credentials", message: "That invite code is not valid." } });
+    loggedIn = true; return send(res, 200, { ...json("me"), id: "u_inv", display_name: name, auth_provider: "invite", email: null });
+  }
+  if (p === "/api/auth/google" && req.method === "POST") {
+    loggedIn = true; return send(res, 200, { ...json("me"), id: "u_g", display_name: "Example User", auth_provider: "google", email: "user@example.com" });
+  }
   if (p === "/api/auth/logout") { loggedIn = false; return send(res, 200, { ok: true }); }
   if (!auth) return send(res, 401, { error: { code: "unauthorized", message: "Please sign in" } });
   if (p === "/api/me") return send(res, 200, json("me"));
@@ -88,6 +104,8 @@ http.createServer(async (req, res) => {
     return send(res, 200, conversation());
   }
   if (/\/messages$/.test(p)) {
+    if (scn.message === "limit") return send(res, 429, json("rate_limited"));
+    if (scn.message === "site_limit") return send(res, 429, { error: { code: "rate_limited", message: "The demo has used today's message budget. It resets at 00:00 UTC.", scope: "site", resets_at: "2026-11-24T00:00:00Z" } });
     if (scn.message === "busy") {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       return res.end('event: error\ndata: {"code":"conversation_busy","message":"A reply is still being generated."}\n\n');

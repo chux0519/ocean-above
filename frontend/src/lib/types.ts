@@ -1,5 +1,8 @@
 // Mirrors docs/api/contract.md. Keep in sync through the coordinator only.
-export type User = { id: string; display_name: string; auth_provider: "dev" | "google" };
+export type User = { id: string; display_name: string; auth_provider: "dev" | "google" | "invite"; email: string | null };
+export type Usage = { messages_today: number; daily_limit: number; resets_at: string };
+export type Me = User & { usage: Usage };
+export type AppConfig = { dev_login: boolean; invite_login: boolean; google_client_id: string | null };
 export type ConversationSummary = { id: string; title: string; created_at: string; updated_at: string; preview: string };
 export type Leg = { from: string; to: string; distance_display: string; distance: string };
 export type CardState = {

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { cn } from "@/lib/utils";
+import { LimitNotice, type Limited } from "@/components/limit-notice";
 import { CloseIcon, MenuIcon, PlusIcon, SendIcon } from "@/components/icons";
 
 const EXAMPLES = ["I want to fly from Guangzhou to Lima", "Can I fly from Abu Dhabi?", "Which tickets do I have?"];
@@ -36,7 +37,7 @@ function ConversationList({ items, loading, activeId, onSelect, onNew }: { items
   );
 }
 
-function Chat() {
+function Chat({ onUsage }: { onUsage?: () => void }) {
   const [list, setList] = useState<ConversationSummary[]>([]);
   const [listState, setListState] = useState<"loading" | "ready" | "error">("loading");
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -56,6 +57,7 @@ function Chat() {
     return () => { window.removeEventListener("keydown", onKey); opener?.focus(); };
   }, [drawer]);
   const [error, setError] = useState<string | null>(null);
+  const [limited, setLimited] = useState<Limited | null>(null);
   const [retry, setRetry] = useState<(() => void) | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const streaming = state.draft !== null || sending;
@@ -106,10 +108,11 @@ function Chat() {
   async function submit(t: string, fromInput = false) {
     t = t.trim();
     if (!t || streaming) return;
-    setError(null); setRetry(null); setSending(true);
+    setError(null); setRetry(null); setLimited(null); setSending(true);
     let id = activeId;
     let stored = false;          // user_message seen: the server kept the text
     let busy = false;            // conversation_busy: nothing stored, keep the input
+    let limit: Limited | null = null; // 429 rate_limited: nothing stored, keep the input
     let streamError: string | null = null;
     let lost = false;
     try {
@@ -123,10 +126,18 @@ function Chat() {
       });
     } catch (err) {
       if (err instanceof ApiError) {
-        if (err.code === "conversation_busy") busy = true; else streamError = err.message;
+        if (err.code === "conversation_busy") busy = true;
+        else if (err.status === 429) limit = { scope: err.scope ?? null, message: err.message };
+        else streamError = err.message;
       } else lost = true; // network drop
     }
     setSending(false);
+    if (limit) {
+      setState((s) => ({ ...s, draft: null }));
+      setLimited(limit);
+      onUsage?.();
+      return; // nothing stored: no reload, input untouched
+    }
     if (busy) {
       setState((s) => ({ ...s, draft: null }));
       setError("A reply is still being written. Your message is kept — try again in a moment.");
@@ -140,6 +151,7 @@ function Chat() {
       if (!reloaded && id) { const cid = id; setRetry(() => () => select(cid)); }
     } else if (streamError) setError(streamError);
     refreshList().catch(() => {});
+    onUsage?.();
   }
 
   function send(e: React.FormEvent) { e.preventDefault(); void submit(text, true); }
@@ -181,6 +193,7 @@ function Chat() {
           <div ref={bottom} />
         </div>
         <form onSubmit={send} className="border-t border-hairline bg-surface px-3 py-2 sm:px-6 sm:py-3">
+          {limited && <LimitNotice limited={limited} />}
           <div className="mx-auto flex max-w-3xl gap-2">
             <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="Where do you want to go?" aria-label="Message" className="flex-1" />
             <Button type="submit" aria-label="Send" disabled={streaming || !text.trim()}><SendIcon /><span className="hidden sm:inline">Send</span></Button>
@@ -192,5 +205,5 @@ function Chat() {
 }
 
 export default function ChatPage() {
-  return <Shell>{() => <Chat />}</Shell>;
+  return <Shell>{({ refreshUser }) => <Chat onUsage={refreshUser} />}</Shell>;
 }

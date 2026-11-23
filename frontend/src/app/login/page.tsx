@@ -1,27 +1,25 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
-import { Button } from "@/components/ui/button";
+import type { AppConfig } from "@/lib/types";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Alert } from "@/components/ui/alert";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LoginOptions, msg } from "@/components/login-options";
+import { SiteFooter } from "@/components/site-footer";
+import { ErrorState, LoadingState } from "@/components/states";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true); setError(null);
-    try { await api.login(username, password); router.replace("/chat"); }
-    catch (err) { setError(err instanceof Error ? err.message : "Login failed"); }
-    finally { setBusy(false); }
-  }
+  const load = useCallback(() => {
+    setError(null);
+    api.config().then(setConfig).catch((e) => setError(msg(e, "Could not load the sign-in options.")));
+  }, []);
+  useEffect(load, [load]);
+  const done = useCallback(() => router.replace("/chat"), [router]);
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -29,22 +27,22 @@ export default function LoginPage() {
         <span className="text-base font-bold tracking-[-0.01em]">Ocean Above</span>
         <ThemeToggle tone="shell" />
       </header>
-      <main className="flex flex-1 items-start justify-center px-4 pt-[12vh] pb-10">
+      <main className="flex flex-1 items-start justify-center px-4 pt-[8vh] pb-6">
         <Card className="w-full max-w-sm">
           <h1 className="text-2xl font-bold tracking-[-0.01em]">Sign in</h1>
           <p className="mt-1 text-sm text-ink-2">Book flights in plain language. You confirm every leg, the distance and the price before anything is booked.</p>
-          <form onSubmit={submit} className="mt-5 space-y-4">
-            <label className="block text-sm font-medium">Username
-              <Input className="mt-1" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
-            </label>
-            <label className="block text-sm font-medium">Password
-              <Input className="mt-1" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
-            </label>
-            {error && <Alert role="alert">{error}</Alert>}
-            <Button type="submit" className="w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
-          </form>
+          <div className="mt-5">
+            {error ? <ErrorState message={error} onRetry={load} />
+              : config ? <LoginOptions config={config} onDone={done} />
+              : <LoadingState label="Loading sign-in options…" />}
+          </div>
+          <p className="mt-5 text-xs text-ink-2">
+            By signing in you agree to the <Link href="/terms" className="underline underline-offset-2 hover:text-ink">Terms of Service</Link> and
+            the <Link href="/privacy" className="underline underline-offset-2 hover:text-ink">Privacy Policy</Link>. This is a demo: no real flights or payments.
+          </p>
         </Card>
       </main>
+      <SiteFooter />
     </div>
   );
 }

@@ -1,0 +1,9 @@
+import type { Metadata } from "next";
+import { LegalPage } from "@/components/legal-page";
+
+export const metadata: Metadata = { title: "Terms of Service · Ocean Above" };
+export const dynamic = "force-static";
+
+export default function TermsPage() {
+  return <LegalPage title="Terms of Service" />;
+}

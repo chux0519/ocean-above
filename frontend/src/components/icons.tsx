@@ -1,6 +1,6 @@
 import type { LucideIcon, LucideProps } from "lucide-react";
 import {
-  ArrowRight, Check, ChevronRight, CircleAlert, Clock, LogOut, Menu, Monitor, Settings, Moon, Plus, RotateCw, SendHorizontal, Sun, X,
+  ArrowRight, Check, ChevronRight, CircleAlert, CircleUser, Clock, LogOut, Menu, Monitor, Settings, Moon, Plus, RotateCw, SendHorizontal, Sun, X,
 } from "lucide-react";
 
 /** App icon set: lucide-react, named imports only (tree-shaken). 20 px, 1.75 stroke, decorative by default. */
@@ -25,3 +25,4 @@ export const SystemIcon = icon(Monitor);
 export const SunIcon = icon(Sun);
 export const MoonIcon = icon(Moon);
 export const SettingsIcon = icon(Settings);
+export const AccountIcon = icon(CircleUser);

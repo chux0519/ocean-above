@@ -6,5 +6,9 @@ const config: NextConfig = {
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiOrigin}/api/:path*` }];
   },
+  // Google Identity Services opens a popup that must be able to post the credential back to this page.
+  async headers() {
+    return [{ source: "/:path*", headers: [{ key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" }] }];
+  },
 };
 export default config;
