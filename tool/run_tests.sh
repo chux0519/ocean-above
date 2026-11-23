@@ -5,7 +5,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 status=0
 if [ -d backend ]; then
-  (cd backend && uv run pytest -q --tb=short -rf) 2>&1 | tee /dev/stderr \
+  (cd backend && HYPOTHESIS_PROFILE=ci uv run pytest -q --tb=short -rf) 2>&1 | tee /dev/stderr \
     | sed -nE 's/^FAILED ([^ ]+)( - .*)?$/FAIL backend: \1/p'
   [ "${PIPESTATUS[0]}" -ne 0 ] && status=1
 fi
