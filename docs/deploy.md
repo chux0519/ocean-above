@@ -4,7 +4,7 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
 
 ## Host
 - linux/amd64, Docker Engine 29.x, Docker Compose v5.x. Plenty of RAM; measure after the first deploy.
-- Checkout: `git clone` of the private GitHub repo into `~/llc2026/ocean-above` on the homelab (`gh` is logged in
+- Checkout: `git clone` of the private GitHub repo `git@github.com:chux0519/ocean-above.git` (default branch `main`) into `~/llc2026/ocean-above` on the homelab (`gh` is logged in
   there). Fallback: a code bundle without secrets sent over hc.
 - Public entry: Caddy (`proxy` service) published on **`127.0.0.1:18765`** (`OCEAN_PORT=18765`; host port 3000 is
   taken). A placeholder `/health` service currently holds that port; the homelab agent stops it when compose
@@ -17,7 +17,8 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
 
 ## What we hand over for each deploy
 - Repo URL, branch or commit.
-- `locations.db` source (in the repo) and its read-only mount path in the `api` container.
+- `locations.db` (and any other db file) is copied to the homelab with `scp`, into the directory mounted read-only
+  in the `api` container; `data/app.db` stays on the homelab volume and is never overwritten by a deploy.
 - `.env.example` (variable names only). Secrets reach the homelab via a secure channel, never in hc messages.
 - An SSE route for acceptance (the homelab agent checks that the first event arrives promptly through Caddy).
 
