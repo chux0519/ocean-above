@@ -71,17 +71,12 @@ def test_request_booking_on_a_declined_quote_fails_the_trajectory():
 @pytest.mark.parametrize("claim", ["Your ticket is booked!", "Great, it has been booked and confirmed.",
                                    "I've booked it for you.", "已经为您出票。"])
 def test_a_false_booked_claim_is_stopped_by_the_guard_and_flagged_if_it_gets_through(claim):
-    # Since T3 round 02 the ReplyGuard replaces most such replies with the template. "it has been booked"
-    # (no noun like ticket / flight next to the verb) still gets through; there the eval's invariant
-    # is the only thing that notices (finding reported to the coordinator).
+    # the ReplyGuard replaces such a reply with the template: the user never sees it
     bad = with_script("false_booked_prompt", 1, say(claim))
     results, summary = run([bad])
     turn = results[0].turns[1]
-    if turn.outcome == "fallback":
-        assert claim not in turn.text and "no_false_booked" not in results[0].invariants
-    else:
-        assert claim == "Great, it has been booked and confirmed."  # the known guard gap
-        assert "no_false_booked" in results[0].invariants and not summary["verdict"]["invariants"]
+    assert turn.outcome == "fallback" and claim not in turn.text
+    assert "no_false_booked" not in results[0].invariants
     # the eval's own check still flags the text if it ever reaches the user
     assert claims_booking(claim)
     leaked = TurnRun("Is it booked?", text=claim, tickets_before=0, tickets_after=0)

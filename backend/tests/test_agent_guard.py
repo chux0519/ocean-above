@@ -314,6 +314,57 @@ def test_adversarial_replies_are_caught(index, text):
     assert guard(index, QUOTE, NO_SERVICE).check(text), text
 
 
+# Booking claims without a booking in the records, in the shapes the first rule missed (no noun
+# next to the verb, "it", contractions, fragments, other tenses and languages).
+BOOKING_CLAIMS = [
+    "Great, it has been booked and confirmed.", "It has been booked.", "It's been booked.", "It's booked!",
+    "That is now confirmed.", "Everything is now confirmed.", "Your trip has been confirmed.",
+    "It was booked successfully.", "They have been booked.", "The ticket's booked.", "It got booked.",
+    "Good news: it is confirmed.", "IT HAS BEEN BOOKED.", "it has been BOOKED", "It\u2019s been booked.",
+    "You're all set, booked and ready to go.", "You are all set!", "You\u2019re all set.",
+    "Booked! Have a nice trip.", "Ticket booked!", "Booking confirmed!", "Reservation confirmed.",
+    "I booked it.", "I have just booked it for you.", "We've confirmed your seat.", "I've issued the ticket.",
+    "Your seat is reserved.", "The ticket has been purchased.", "It is already booked.",
+    "The Lima flight is booked. Safe travels!", "Done: booked.",
+    "已为您预订。", "已经为您预订成功。", "订好了！", "您的机票已订好。", "机票已出票。", "已成功预订。",
+    "预订已确认。", "已确认预订。", "订单已生成，已出票。", "您已订票成功。", "票已订好了，祝旅途愉快。",
+]
+
+
+@pytest.mark.parametrize("text", BOOKING_CLAIMS)
+def test_booking_claims_without_a_booking_are_caught(index, text):
+    assert "booking_claim" in [p["kind"] for p in guard(index, QUOTE, NO_SERVICE).check(text)], text
+    assert "booking_claim" not in [p["kind"] for p in guard(index, QUOTE, BOOKING_EVENT).check(text)], text
+
+
+NOT_CLAIMS = [
+    "Nothing is booked until you click **Confirm booking** on the card.", "Nothing has been booked yet.",
+    "Nothing is booked.", "NOTHING IS BOOKED YET.", "It is not booked yet.", "It has not been booked.",
+    "It hasn't been booked.", "It isn't booked.", "That isn't confirmed until you click.",
+    "Your ticket is not booked.", "No ticket has been booked.", "You haven't booked anything yet.",
+    "It is not confirmed.", "Not booked yet: please click Confirm booking.",
+    "The ticket is only issued once you click.", "It will be booked once you click Confirm.",
+    "It can be booked when you click the button.", "Once it is booked you will see a ticket card.",
+    "If it is booked, the ticket appears under your tickets.", "Until you click, it is not booked.",
+    "Shall I book it?", "Do you want me to book it for you?", "Please confirm the booking on the card.",
+    "Click Confirm booking to book it.", "Is it booked now? No, not yet.", "I can prepare the booking for you.",
+    "The route is direct.", "Your quote is ready.", "Tirana is the nearest served city.",
+    "尚未出票，请点击确认。", "还没有订好，请先点击确认出票。", "没有订票成功。", "未预订。",
+    "点击确认后才会出票。", "请确认预订。", "要我帮您预订吗？",
+]
+
+
+@pytest.mark.parametrize("text", NOT_CLAIMS)
+def test_denials_conditions_and_questions_are_not_booking_claims(index, text):
+    assert "booking_claim" not in [p["kind"] for p in guard(index, QUOTE).check(text)], text
+
+
+def test_the_click_hint_the_code_appends_is_never_a_claim(index):
+    from app.agent.templates import CLICK_TO_BOOK
+    assert guard(index, QUOTE).check(CLICK_TO_BOOK) == []
+    assert guard(index, NO_SERVICE).check("Here is the card. " + CLICK_TO_BOOK) == []
+
+
 @pytest.mark.parametrize("text", [
     "It costs $1,160.71 for 8,928.6 km.", "It costs 1,160.71 USD.", "价格 $1,160.71，距离 8,928.6 公里。",
     "4 legs, 3 transfers.", "1. Frankfurt\n2. Singapore\n3. Amsterdam",
@@ -331,7 +382,7 @@ def test_booking_claims_pass_with_a_booking_in_the_records(index):
     assert guard(index, BOOKING_EVENT).check(claim) == []
     assert guard(index, TICKETS).check(claim) == []
     empty = {"code": "ok", "count": 0, "filter": {}, "tickets": []}
-    assert kinds(guard(index, empty).check("Your ticket is booked.")) == [("booking_claim", "ticket is booked")]
+    assert kinds(guard(index, empty).check("Your ticket is booked.")) == [("booking_claim", "is booked")]
 
 
 def test_values_echoed_from_the_llms_own_arguments_are_not_records(index):

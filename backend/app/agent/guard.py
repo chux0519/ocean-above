@@ -225,26 +225,46 @@ def _strings_and_counts(value: Any, strings: list[str], counts: list[Decimal]) -
 def _is_booking_evidence(record: Any) -> bool:
     if not isinstance(record, dict):
         return False
-    if record.get("event") == "ticket_booked_by_user_click":
-        return True
+    if record.get("event") == "ticket_booked_by_user_click" or (
+            record.get("code") == "already_booked" and record.get("ticket_id")):
+        return True  # the quote was booked: by the user's click, or already before
     return record.get("code") == "ok" and isinstance(record.get("tickets"), list) and bool(record["tickets"])
 
 
-# Affirmative "it is booked" phrasing. Negations and instructions ("Nothing is booked until you
-# click", "the ticket is only issued once you click") do not match.
+# Affirmative "it is booked" phrasing, with or without a noun next to the verb ("it has been booked
+# and confirmed", "that is now confirmed", "you're all set", "已为您预订"). Instructions and
+# conditions ("the ticket is only issued once you click") are excluded by the lookahead; denials
+# and conditions that come first ("Nothing is booked", "not booked", "If it is booked") by `_DENIED`.
+_BE = r"(?:\bis|\bare|\bwas|\bwere|\b(?:has|have|had)\s+been|\bgot|['\u2019]s(?:\s+been)?|['\u2019]ve\s+been)"
 _BOOKED = re.compile(
     r"(?ix)"
-    r"\b(?:ticket|booking|flight|reservation|trip|seat)s?\b[^.!?\n]{0,40}?"
-    r"\b(?:is|are|has\s+been|have\s+been|was|were|got)\s+(?:now\s+|all\s+|successfully\s+)?"
-    r"(?:booked|confirmed|issued|reserved)\b(?!\s+(?:only|until|once|after|when|if|as\s+soon))"
-    r"|\b(?:I|I've|I\s+have|we|we've|we\s+have)\s+(?:now\s+|just\s+|successfully\s+)?"
+    rf"{_BE}\s+(?:(?:now|all|just|already|successfully|officially|fully)\s+)*"
+    r"(?:booked|confirmed|issued|reserved|purchased|ticketed)\b(?!\s+(?:only|until|once|after|when|if|as\s+soon))"
+    r"|\b(?:ticket|booking|reservation|seat|flight)s?\s+(?:booked|confirmed|issued|reserved)\b"
+    r"(?!\s+(?:only|until|once|after|when|if|as\s+soon))"
+    r"|(?:^|[.!?\n:;]\s*)(?:booked|reserved)\s*[!.]"
+    r"|\b(?:I|I've|I\u2019ve|I\s+have|we|we've|we\u2019ve|we\s+have)\s+(?:now\s+|just\s+|successfully\s+)?"
     r"(?:booked|issued|reserved|confirmed)\b"
     r"|\bsuccessfully\s+(?:booked|issued|reserved)\b"
     r"|\bbooking\s+(?:is\s+)?(?:confirmed|complete[d]?|successful)\b"
-    r"|\byou(?:'re|\s+are)\s+(?:all\s+)?booked\b"
+    r"|\byou(?:['\u2019]re|\s+are)\s+(?:all\s+)?(?:booked|set)\b"
     r"|\bbooked\s+(?:it|this|that)\s+for\s+you\b"
-    r"|已(?:经)?(?:为您|帮您|给您|替您|为你|帮你|给你)?(?:出票|订好|预订成功|成功预订|预订|订票|确认预订)"
-    r"|(?:出票|预订|订票)成功|订好了")
+    r"|(?<![未没])已(?:经)?(?:成功)?(?:为您|帮您|给您|替您|为你|帮你|给你)?"
+    r"(?:出票|订好|订妥|预订成功|成功预订|预订|订票|确认预订|确认|生成订单)"
+    r"|(?:出票|预订|订票)成功|订好了|(?:预订|订单)已确认")
+# Words shortly before a match that make it a denial, a condition or a question.
+_DENIED = re.compile(r"(?i)\b(?:not|nothing|never|no|yet|if|until|unless|once|when|before|whether|can|could|will|"
+                     r"would|should|may|might)\b|n['\u2019]t\b|[?？]|未|没|尚|不|如果|一旦|请")
+
+
+def booking_claim(text: str) -> str | None:
+    """The first phrase of `text` that says a booking was made, or None."""
+    for match in _BOOKED.finditer(text):
+        sentence_start = max(text.rfind(c, 0, match.start()) for c in ".!?\n。！？;；") + 1
+        before = text[max(sentence_start, match.start() - 24):match.start()]
+        if not _DENIED.search(before):
+            return match.group(0)
+    return None
 
 
 class ReplyGuard:
@@ -306,9 +326,9 @@ class ReplyGuard:
             if unit == "bad" or value not in self.numbers[unit]:
                 problems.append({"kind": "number", "value": written})
         if not self.booking_evidence:
-            claim = _BOOKED.search(text)
+            claim = booking_claim(text)
             if claim:
-                problems.append({"kind": "booking_claim", "value": claim.group(0)})
+                problems.append({"kind": "booking_claim", "value": claim})
         for written, (year, month, day) in scan.dates:
             known = ((year, month, day) in self.dates if year is not None
                      else (month, day) in self._partial_dates
