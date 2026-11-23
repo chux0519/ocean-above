@@ -34,7 +34,7 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   write implementation notes. They never launch other agents, touch shared resources, merge or release.
 - Launch: `tool/spawn_worker.sh <name> <worktree> [sonnet]`. Model by difficulty: mechanical work → a fast
   model; design, concurrency, protocol, security, native → the strongest model. State the choice in the plan.
-- Machine load: at most 2 workers and 1 browser-automation session; heavy commands run with `nice -n 10`.
+- Machine load: at most 4 workers (user, 2026-11-23: the machine is idle enough) and 1 browser-automation session at a time; heavy commands run with `nice -n 10`.
 
 ## Never lose work
 - Every change goes through a branch and a PR; the coordinator merges and pushes main right away.
