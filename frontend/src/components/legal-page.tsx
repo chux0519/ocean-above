@@ -7,11 +7,27 @@ import { parseInline, type Inline } from "@/lib/markdown";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SiteFooter } from "@/components/site-footer";
 
+const EMAIL = /([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
+
+/** Plain text, with e-mail addresses split into separate elements. A proxy that rewrites literal addresses
+ *  (Cloudflare Email Address Obfuscation) would otherwise change the HTML after render and break hydration (#418). */
+function plain(v: string): ReactNode {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of v.matchAll(EMAIL)) {
+    out.push(v.slice(last, m.index));
+    out.push(<span key={m.index}>{m[1]}<span>@</span>{m[2]}</span>);
+    last = m.index + m[0].length;
+  }
+  out.push(v.slice(last));
+  return out;
+}
+
 /** Inline markdown from our own legal text: **bold**, *italic* / _italic_ (whole-line, e.g. "Last updated"). */
 function inline(nodes: Inline[]): ReactNode {
   return nodes.map((n, i) => {
     switch (n.t) {
-      case "text": return <Fragment key={i}>{n.v}</Fragment>;
+      case "text": return <Fragment key={i}>{plain(n.v)}</Fragment>;
       case "br": return <br key={i} />;
       case "b": return <strong key={i} className="font-semibold">{inline(n.c)}</strong>;
       case "i": return <em key={i}>{inline(n.c)}</em>;
