@@ -15,9 +15,8 @@ operate, no payments are taken and tickets have no value.
   receive your password and request no other Google data or permissions.
 - If you sign in with an invite code: the name you enter.
 - What you do in the app: your messages, the assistant's replies, quotes and the demo tickets you book.
-- Technical data needed to run the service: request logs (including IP address), rotated automatically and used only to operate
-  the service, and a session
-  cookie that keeps you signed in.
+- Technical data needed to run the service: request logs (including IP address), rotated automatically and used
+  only to operate the service, and a session cookie that keeps you signed in.
 
 **How we use it**
 - To run the assistant, show your tickets and your conversation history, and enforce usage limits.
