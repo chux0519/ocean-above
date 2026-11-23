@@ -180,6 +180,8 @@ stateDiagram-v2
   CallLLM --> Fallback: LLM 错误且重试用尽
   ExecTools --> CallLLM: 结果追加（step < MAX_STEPS）；卡片已推送
   ExecTools --> Fallback: step = MAX_STEPS
+  ExecTools --> Fallback: 每轮工具调用用尽且有被拒调用
+  ExecTools --> Fallback: 本轮 token ≥ 软上限
   StreamReply --> StreamReply: 一句通过校验 → 推送
   StreamReply --> Fallback: 某句校验失败 → replace
   StreamReply --> Persist: 文本结束
@@ -278,6 +280,7 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 | 超过 MAX_STEPS | 模板回复，附本轮已产生的记录 |
 | 用户在回复完成前又发消息 / 点按钮 | 同会话串行（每会话一把锁，聊天和出票接口共用）；uvicorn 单 worker |
 | 超出限额 | 明确提示（每用户每日消息上限、全站每日预算） |
+| 本轮工具调用或 token 超出预算 | 超出的工具调用不执行并回结构化拒绝；需要结束时模板回复（`tool_budget` / `token_budget`），见 §4.8 |
 
 ### 4.7 流式输出
 - 传输：`POST /api/conversations/{id}/messages` 返回 SSE（`text/event-stream`），前端用 fetch 逐段读取。
@@ -293,6 +296,34 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 - 卡片按钮在 `done` 之前禁用；之后的按钮状态（可订 / 已出票 / 已过期）一律以服务端当前 quote 状态为准，
   包括断线重连后拉到的历史卡片。
 - 断线：后端照常跑完一轮并落库，前端重连后拉会话即可看到完整结果。
+
+### 4.8 每轮预算（06 P0a，#32）
+集中在 `agent/budget.py`：`AgentBudget`（配置）+ `BudgetTracker`（一轮的计数）。loop 只在两处问它：每次调 LLM 前
+（`stop_before_step`）和每个工具调用前（`admit_tool_call`）。
+
+| 预算 | 默认 | 环境变量（范围） | 超出时 |
+|---|---|---|---|
+| LLM 步数 | 6 | `AGENT_MAX_STEPS`（1–20） | 模板回复，`max_steps` |
+| 每步工具调用 | 4 | `AGENT_MAX_TOOL_CALLS_PER_STEP`（1–16） | 多出的不执行，回结构化拒绝，本轮继续 |
+| 每轮工具调用 | 12 | `AGENT_MAX_TOOL_CALLS_PER_TURN`（1–64） | 多出的不执行，回结构化拒绝，本步结束后模板回复，`tool_budget` |
+| 单次输出 token（含思考） | 4096 | `AGENT_MAX_OUTPUT_TOKENS_PER_CALL`（256–32768） | 请求的 `max_tokens`；截断 → 模板（`truncated`） |
+| 每轮总 token（软上限） | 20000 | `AGENT_MAX_TOTAL_TOKENS_PER_TURN`（1000–1000000） | 不再开始下一步，模板回复，`token_budget` |
+| 每轮总时长 | 90 s | `AGENT_MAX_TURN_SECONDS`（5–600） | 模板回复（`turn_timeout`）；没有产出 → `llm_unavailable` |
+
+环境变量不合法（非数字、越界、非整数）时应用启动失败，不会带着错误的预算运行。
+
+- **工具调用逐个计数**，不是按 LLM 步计数。一次 completion 里超出的调用**不执行**（不发 `status`、不碰 airline），
+  每个都得到一条 `{"code":"tool_budget_exceeded","message":…,"limit":"per_step"|"per_turn"}` 工具结果，
+  所以每个 `tool_call_id` 都有回应，协议有效；拒绝也像普通调用一样存入 `tool_calls`（`error = "budget: …"`），
+  下一轮重建的上下文与记录的 completion 对齐。拒绝不是记录：不进 ReplyGuard，模板也不引用它。
+- **token 软上限**：用服务商回报的 `usage.total_tokens`，在两次 LLM 请求之间检查——调用前无法精确知道一次请求会用多少
+  token，所以正在进行的那一步会跑完，超出后只是不再开始下一步。失败的调用和重试也计入；没有回报 usage 的调用（部分
+  流式失败、某些服务商）按保守估计计：`ceil(请求 JSON 字符数 / 2) + 单次输出上限`。每次调用的计费写在
+  `llm_calls.response.budget`（`charged_tokens`、`estimated`、`turn_tokens`）；`llm_calls.tokens` 仍只存服务商回报的值，
+  全站每日预算（§8.2）照旧按它累计。**这不是严格的费用上限**：单次调用最多可以超出剩余额度一整步，价格也按模型而异。
+- **预算停止永远不出票、不改 quote 状态**：agent 本来就没有出票路径；被拒的 `request_booking` 不执行，所以不会出现确认卡。
+  已执行的工具结果和卡片照常保留，assistant 消息照常存储（模板），会话保持良构。
+- 停止时记一条 warning 日志（步数、已执行/被拒调用数、token、估计次数）。
 
 ## 5. 路线、距离、价格
 
