@@ -1,18 +1,33 @@
 # State invariants
 
-Timing bugs (pushes vs snapshots vs taps vs the clock, retries, trials, notifications) are checked by
-model-based tests: a small reference model plus seeded random event sequences, every invariant asserted
-after every event. A new timing bug gets a new rule id here first, then a test.
+Booking and confirmation rules are checked by model-based tests: a small reference model plus seeded random event
+sequences, every invariant asserted after every event. A new state bug gets a new rule id here first, then a test.
+Design context: `docs/design/design.md` §6.
 
 ## Event alphabet
-`<event>(<args>)`, … — e.g. `launch`, `resume`, `clock(+Δ)`, `clock_back(Δ)`, `network_fail`,
-`purchase_ok`, `reinstall`.
+`quote(user, conv, origin, dest)`, `stream_done(conv)` (cards presented, nonces issued),
+`user_message(conv, text)` (incl. negations and questions), `llm_request_booking(conv, quote)`,
+`click_book(user, quote, nonce)`, `click_book_concurrent(user, quote, nonce)`, `replay_nonce(quote, nonce)`,
+`clock(+Δ)`, `db_change(kind)` (leg removed / coordinate moved / unrelated row changed / file replaced),
+`other_user_click(quote, nonce)`, `disconnect_reconnect(conv)`.
 
-## <Group letter>. <Area>
-- **X1 <Short name>.** <One sentence that a test can check after any event.>
-- **X2 …**
+## B. Booking
+- **B1 Ownership.** A ticket exists only if its quote belongs to the user who clicked.
+- **B2 Presented.** A ticket exists only if its quote reached `presented` (its full card was sent with `done`) before the click.
+- **B3 Click only.** Every ticket is caused by exactly one `click_book` with a valid, unused nonce for that quote; no
+  other event (in particular `llm_request_booking`, any `user_message`) ever creates a ticket.
+- **B4 Validity.** No ticket for a quote older than 15 minutes at click time.
+- **B5 Idempotent.** At most one ticket per quote, under replay and concurrent clicks.
+- **B6 Fresh.** A ticket's legs, coordinates, distance and price strings equal a fresh recomputation on the
+  `locations.db` current at click time, and the route is still the cheapest; otherwise the quote is `stale` and no ticket.
+- **B7 Atomic.** Quote status and tickets never disagree: `booked` ⇔ exactly one ticket.
+
+## Q. Quotes
+- **Q1 No supersede.** Creating a quote never changes the status of another quote.
+- **Q2 Button state.** The button state a client sees (after `done` or reconnect) equals the server's quote state.
+- **Q3 Terminal.** `booked`, `expired`, `stale` never change again.
 
 ## Process
 - Seeds are fixed in CI. A failing seed prints its shrunk sequence and is kept as a named regression case.
-- Three layers: pure model test → real UI driven with fakes (clock, network, payments) → device scenario
-  script with PHASE marks for recording.
+- Layers: pure model test over `airline/` → API driven with fakes (clock, LLM, locations.db copy) → UI scenario
+  (ego-browser) for the click path.

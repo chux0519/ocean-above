@@ -93,13 +93,16 @@ Browser (Next.js, TS)                      FastAPI (Python)
 | 迭代 | 内容 | 实施者 / 模型 | 验收档 |
 |---|---|---|---|
 | 02-core | 后端脚手架（uv、FastAPI 健康检查）、core/ 全部 + 属性测试 + 全对一致性 | worker，最强模型（算法与正确性） | A：测试差分 + lint |
-| 03-agent | store/、`airline/` 服务接口、llm client、loop、tools、确认闸门 + 不变式模型测试、**SSE 流式输出**、假 LLM 测试、eval 框架和首批用例 | worker，最强模型 | A + 一次真模型 eval 报告 |
-| 04-web | Next.js + shadcn/Tailwind UI、**Google 登录 + 演示登录**、streamdown 流式渲染、API 对接、移动端适配，补 DESIGN §3–6 | worker，前端用较快模型，审查由协调者 | A：ego-browser 桌面 + 手机截图、Impeccable + shadcn 审查 |
-| 05-deliver | README（运行方式）、设计文档（题目要求的 5 个部分 + 可选项）、prompt history 导出、端到端演示 | 协调者 | A + 演示录屏 |
+| 03-slice | store/、`airline/`、llm client、loop、tools、ReplyGuard、出票条件 B1–B7 + 模型测试、SSE、假 LLM 测试、eval 框架和首批用例、API（固定账号）、**最简前端**（聊天 / 我的机票 / 历史）、docker compose、README 初稿。**结束时本地 `docker compose up` 可端到端演示** | worker，最强模型（前端可另开较快模型 worker） | A + 一次真模型 eval 报告 |
+| 04-web | shadcn/Tailwind UI、移动端、streamdown、全部卡片、计算依据、补 DESIGN §3–6；部署到 homelab（不公开） | worker，前端用较快模型，审查由协调者 | A：ego-browser 桌面 + 手机截图、Impeccable + shadcn 审查 |
+| 05-launch | Google 登录 + 多用户、邀请码登录、限额与预算、OAuth 发布、demo 公开 | worker + 协调者 | A + 线上验证 |
+| 06-deliver | 英文最终设计文档（按 take-home 5 个标题）、README 定稿、最终 eval 报告、prompt history 最终导出与脱敏扫描 | 协调者 | A |
 
 - 02 和 04 的前半（脚手架、静态页面）可以并行，最多 2 个 worker。API 契约由协调者在 03 开工前写定。
-- **prompt history**：主会话和每个 worker 的原始会话都要导出到 `prompt history/`（含失败尝试），只删密钥。
-  所以 worker 用 `tool/spawn_worker.sh` 启动后记录会话 id，交付前统一导出。
+- **prompt history**：主会话、每个 worker、评审会话、homelab 上协助部署的 agent 会话都要导出到 `prompt history/`
+  （含失败尝试），只删密钥。用 `tool/export_sessions.py`，**每个迭代结束导出一次并提交**，不留到最后
+  （Claude Code 默认只保留约 30 天的本地会话）。
+- README 和设计文档每个迭代增量更新，不压到最后。
 
 ## 用户决定（2026-11-23）
 1. 下单：自然语言确认和卡片按钮两条路都通，都走服务端闸门。
@@ -135,6 +138,11 @@ Browser (Next.js, TS)                      FastAPI (Python)
 - Google 登录现在做（04），用户在 GCP 建 OAuth client；保留演示登录兜底（待确认）。
 - 不上 MCP；`airline/` 作为领域边界，将来可拆成 MCP server。时刻 / 座位不实现、不编造。
 - 详见 `docs/design/design.md` v1。
+
+## 设计评审后的修改（2026-11-23，用户确认全部推荐）
+- 见 `docs/design/design.md` v2 §12。迭代路线已按「先交付必交物」调整为上表。
+- 数据事实补充：`San Jose`（直连 Tokyo）和 `San José`（直连 Sydney、Tokyo）是两个城市，去重音后同名；
+  库内坐标是虚构的，最近有服务城市常与地理常识不同（Abu Dhabi → Tirana、Stuttgart → Novi Sad、Austin → Copenhagen）。
 
 ## Open questions for the user
 - 无（已全部由用户决定，见上）。

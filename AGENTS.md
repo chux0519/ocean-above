@@ -13,14 +13,19 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   backend code; the LLM only parses intent, calls tools, and phrases results the algorithms produced.
   Every number shown to the user comes from a tool result.
 - **Nothing is booked without explicit user confirmation** of the full route (every leg and transfer city),
-  distance and price.
+  distance and price. Booking is triggered **only by the user clicking** a confirm card (one-time nonce);
+  the LLM can only make the confirm card appear (`request_booking`), never book.
+- Reply text is checked by value: every number and every in-db city name in LLM text must appear in this
+  turn's records (or the user's message); otherwise the reply is replaced by a code template.
 - Dev: servers bind `0.0.0.0`, any port. Auth in dev: one fixed account from env (no Google).
 - Delivery and deploy: `docker compose up` (web + api + Caddy proxy, one exposed port). Demo:
   `ocean-above.potafree.net` on the homelab behind Cloudflare Tunnel; may move to a VPS with the same compose.
   Google login and multi-user flow are finished before the demo goes public. Homelab deploy questions go to
   the hc agent named "potafree.net" on the homelab machine. Details: [docs/deploy.md](docs/deploy.md).
 - Deliverables include `prompt history/` with the **raw, unedited** agent sessions (only secrets removed),
-  so it is excluded from the forbidden-names lint.
+  so it is excluded from the forbidden-names lint. Export with `tool/export_sessions.py` at the end of every
+  iteration (main session, workers, reviewers, the homelab deploy agent). README and the design doc are updated
+  every iteration, not at the end.
 
 ## Roles
 - **Coordinator** (main session): talks with the user, writes plans and acceptance criteria, reviews every diff
@@ -90,8 +95,9 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   - deterministic replay: the agent loop runs against a scripted fake LLM in the normal test suite, so loop,
     tool dispatch and confirmation gating are tested for free; real-model evals run on demand and record
     model, date, pass rate and cost in the iteration's acceptance notes.
-- **Numbers:** compute and store exact values (full-precision decimals from integer coordinates); round only
-  when displaying. Never feed a rounded value back into a calculation.
+- **Numbers:** one canonical pricing function (Decimal, prec 50, explicit context, stored to 30 dp); round
+  only when displaying. Never feed a rounded value back into a calculation. Call them "high-precision", not
+  "exact".
 - **Freshness before booking:** a booking re-reads `locations.db` (fingerprint check), recomputes the quoted
   route and compares it with the stored quote and the business DB; any difference → no booking, re-quote and
   ask the user to confirm again.
