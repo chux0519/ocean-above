@@ -20,3 +20,4 @@ Pitfalls we have hit. `R*` rules are checked by `tool/review_lint.py` (run one w
 | M11 | City lookup never auto-picks among names equal after accent folding (`San Jose` / `San José`). | Design review P0-1. |
 | M12 | Every id-bearing endpoint checks ownership, not only booking. | Design review P2-5. |
 | M13 | Sessions exported with `tool/export_sessions.py` and secret-scanned at the end of every iteration. | Design review P1-6. |
+| M14 | No Decimal method or operator without an explicit context in pricing/routing (`ctx.add`, `quantize(..., context=ctx)`). | 02-core: context-less `scaleb` rounded edge weights to 28 digits. |

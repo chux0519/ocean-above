@@ -63,7 +63,7 @@ def redact(text, literals):
 def sources(extra):
     for d in sorted(PROJECTS.glob('*ocean-above*')):
         for f in sorted(d.rglob('*')):
-            if f.is_file():
+            if f.is_file() and 'memory' not in f.relative_to(d).parts:  # memory notes are not sessions
                 yield f, Path('claude-code') / d.name / f.relative_to(d)
     for e in extra:
         e = Path(e)
