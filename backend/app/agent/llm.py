@@ -13,9 +13,10 @@ from typing import Any, AsyncIterator, Protocol
 
 import httpx
 
+from .budget import AgentBudget
 from .config import EFFORTS, LLMConfig
 
-MAX_TOKENS = 4096  # includes the reasoning tokens of thinking mode
+MAX_TOKENS = AgentBudget().max_output_tokens_per_call  # includes the reasoning tokens of thinking mode
 
 
 @dataclass(frozen=True)

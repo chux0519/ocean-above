@@ -53,7 +53,7 @@ def _ambiguous(query: str, candidates: list[dict]) -> str:
 
 def _sentences(o: Outcome) -> list[str]:
     d, code = o.payload, o.code
-    if code in ("invalid_arguments", "unknown_tool"):
+    if code in ("invalid_arguments", "unknown_tool", "tool_budget_exceeded"):
         return []
     if code == "tool_failed":
         return ["Flight data is temporarily unavailable. Please try again in a moment."]

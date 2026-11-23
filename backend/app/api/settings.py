@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..agent.budget import AgentBudget
 from .logins import parse_codes, parse_networks
 
 DEFAULT_APP_DB = Path(__file__).resolve().parents[2] / "data" / "app.db"
@@ -31,6 +32,7 @@ class Settings:
     login_attempts_per_minute: int = 10
     daily_messages_per_user: int = 50  # chat messages per user per UTC day (limits.py)
     daily_token_budget: int = 2_000_000  # site-wide sum of llm_calls.tokens per UTC day (limits.py)
+    agent_budget: AgentBudget = field(default_factory=AgentBudget)  # per-turn agent budgets (AGENT_*)
     ping_interval: float = 2.0  # /api/debug/sse-ping spacing, seconds
 
     @property
@@ -71,4 +73,5 @@ class Settings:
             s.daily_messages_per_user = int(env["DAILY_MESSAGES_PER_USER"])
         if env.get("DAILY_TOKEN_BUDGET", "").strip().replace("_", "").isdigit():
             s.daily_token_budget = int(env["DAILY_TOKEN_BUDGET"].strip().replace("_", ""))
+        s.agent_budget = AgentBudget.from_env(env)  # ValueError on a bad AGENT_* value: fail at startup
         return s

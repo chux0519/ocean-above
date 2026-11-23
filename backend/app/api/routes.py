@@ -314,11 +314,13 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
     app.state.airline = airline = Airline(store, networks, nonce_secret=settings.nonce_secret)
     if llm is None:
         try:
-            llm = OpenAIChatClient(LLMConfig.from_env())
+            llm = OpenAIChatClient(LLMConfig.from_env(),
+                                   max_tokens=settings.agent_budget.max_output_tokens_per_call)
         except LLMNotConfigured:
             llm = None
     app.state.llm = llm
-    app.state.agent = Agent(airline, llm, **(agent_kwargs or {})) if llm is not None else None
+    agent_kwargs = {"budget": settings.agent_budget, **(agent_kwargs or {})}
+    app.state.agent = Agent(airline, llm, **agent_kwargs) if llm is not None else None
 
 
 async def shutdown(app: FastAPI) -> None:

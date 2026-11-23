@@ -16,22 +16,24 @@ import asyncio
 import logging
 import time
 from contextlib import aclosing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from ..airline import ConversationBusy, NotFound
+from .budget import AgentBudget, BudgetTracker, refusal
 from .context import build_context
 from .guard import CityIndex, ReplyGuard, SentenceBuffer
 from .config import EFFORTS
 from .llm import LLM, Completion, LLMError, TextDelta
 from .prompt import system_prompt
 from .templates import CLICK_TO_BOOK, fallback_reply
-from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, Outcome, Toolbox
+from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, MAX_RAW_ARGUMENTS, Outcome, Toolbox
 
 log = logging.getLogger(__name__)
 
-MAX_STEPS = 6
-TURN_TIMEOUT = 90.0  # a whole turn (all LLM calls, tools, retries); then the template reply
+DEFAULT_BUDGET = AgentBudget()
+MAX_STEPS = DEFAULT_BUDGET.max_steps
+TURN_TIMEOUT = DEFAULT_BUDGET.max_turn_seconds  # a whole turn (all LLM calls, tools, retries); then the template reply
 LOCK_TIMEOUT = 10.0  # waiting for another turn of the same conversation; then conversation_busy
 MAX_USER_CHARS = 2000
 TITLE_CHARS = 60
@@ -61,6 +63,7 @@ class _Turn:
     user_message: dict
     guard: ReplyGuard
     emit: Callable[[str, dict], None]
+    budget: BudgetTracker = field(default_factory=lambda: BudgetTracker(DEFAULT_BUDGET))
     reasoning_effort: str | None = None  # per-request thinking level; None = the client's default
     text: str = ""  # released so far
     cards: list[dict] = field(default_factory=list)
@@ -74,19 +77,26 @@ def message_view(message: dict) -> dict:
 
 
 class Agent:
-    def __init__(self, airline: Any, llm: LLM, *, max_steps: int = MAX_STEPS,
+    def __init__(self, airline: Any, llm: LLM, *, budget: AgentBudget | None = None,
+                 max_steps: int | None = None,
                  ping_interval: float = 15.0, retries: int = 2, backoff: float = 0.5,
-                 llm_timeout: float = 60.0, turn_timeout: float = TURN_TIMEOUT,
+                 llm_timeout: float = 60.0, turn_timeout: float | None = None,
                  lock_timeout: float | None = LOCK_TIMEOUT,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+        """`budget`: the per-turn limits (design §4.8; default `AgentBudget()`). `max_steps` and
+        `turn_timeout` override its fields (tests, older callers)."""
+        budget = budget or DEFAULT_BUDGET
+        if max_steps is not None:
+            budget = replace(budget, max_steps=max_steps)
+        if turn_timeout is not None:
+            budget = replace(budget, max_turn_seconds=turn_timeout)
+        self.budget = budget
         self.llm = llm
         self.store = airline.store
-        self.max_steps = max_steps
         self.ping_interval = ping_interval
         self.retries = retries
         self.backoff = backoff
         self.llm_timeout = llm_timeout
-        self.turn_timeout = turn_timeout
         self.lock_timeout = lock_timeout
         self._sleep = sleep
         self._tools = Toolbox(airline)
@@ -97,6 +107,14 @@ class Agent:
         self._networks = airline.networks
         self._index: tuple[str, CityIndex] | None = None
         self._tasks: set[asyncio.Task] = set()
+
+    @property
+    def max_steps(self) -> int:
+        return self.budget.max_steps
+
+    @property
+    def turn_timeout(self) -> float:
+        return self.budget.max_turn_seconds
 
     # ------------------------------------------------------------------ public -------------
     def stream_turn(self, user_id: str, conversation_id: str, text: str, *,
@@ -174,7 +192,8 @@ class Agent:
         today = store.clock().date()
         guard = ReplyGuard(index, records=context.records, user_text=text,
                            earlier_user_texts=context.user_texts[:-1], today=today)
-        turn = _Turn(user_id, conversation_id, user_message, guard, emit, reasoning_effort)
+        turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
+                     reasoning_effort)
         messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
 
         try:
@@ -189,6 +208,9 @@ class Agent:
                 raise
             log.exception("chat turn failed after producing output (conversation %s)", conversation_id)
             fallback = [{"kind": "internal_error", "value": type(exc).__name__}]
+        if fallback is not None and fallback[0]["kind"] in ("max_steps", "token_budget", "tool_budget"):
+            log.warning("chat turn stopped by its budget (conversation %s): %s %s", conversation_id,
+                        fallback[0]["kind"], turn.budget.snapshot())
         if fallback is not None and fallback[0]["kind"] in ("llm_error", "turn_timeout") \
                 and not turn.outcomes and not turn.text:
             emit("error", {"code": "llm_unavailable", "message": LLM_UNAVAILABLE})
@@ -197,8 +219,14 @@ class Agent:
 
     async def _steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
         """The LLM / tool steps of a turn. Returns None when the LLM's text can stay, otherwise
-        the problems that make the template reply replace it."""
-        for _ in range(self.max_steps):
+        the problems that make the template reply replace it.
+
+        Budgets (design §4.8): a step starts only while steps and tokens are left; each tool call
+        runs only while calls are left for the step and the turn. A call that is not admitted is
+        never executed: it gets a `tool_budget_exceeded` result (stored like any tool call, so
+        every tool call of the completion has its result and the stored history stays well-formed).
+        Once the turn's calls are used up and a call was refused, the turn ends with the template."""
+        while (stop := turn.budget.stop_before_step()) is None:
             try:
                 completion = await self._llm_step(turn, messages)
             except _GuardFailed as failed:
@@ -210,20 +238,31 @@ class Agent:
                     return [{"kind": "empty_reply", "value": ""}]
                 return None
             messages.append(completion.assistant_message())
+            turn_exhausted = False
             for call in completion.tool_calls:
-                turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
-                outcome = await asyncio.to_thread(self._tools.run, turn.user_id, turn.conversation_id,
-                                                  call["name"], call["arguments"])
+                refused = turn.budget.admit_tool_call()
+                if refused is None:
+                    turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
+                    outcome = await asyncio.to_thread(self._tools.run, turn.user_id, turn.conversation_id,
+                                                      call["name"], call["arguments"])
+                else:
+                    turn_exhausted = turn_exhausted or refused == "per_turn"
+                    payload = refusal(refused, self.budget)
+                    outcome = Outcome(call["name"], str(call["arguments"])[:MAX_RAW_ARGUMENTS], payload["code"], payload,
+                                      error=f"budget: {refused}")
                 await asyncio.to_thread(
                     self.store.add_tool_call, turn.user_id, turn.user_message["id"], outcome.name,
                     outcome.args, outcome.payload, error=outcome.error, latency_ms=outcome.latency_ms)
                 turn.outcomes.append(outcome)
-                turn.guard.add_record(outcome.payload)
+                if refused is None:  # a refusal is no record a reply may quote
+                    turn.guard.add_record(outcome.payload)
                 for card in outcome.cards:
                     turn.cards.append(card)
                     turn.emit("card", {"card": card})
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
-        return [{"kind": "max_steps", "value": str(self.max_steps)}]
+            if turn_exhausted:
+                return [{"kind": "tool_budget", "value": str(self.budget.max_tool_calls_per_turn)}]
+        return [stop]
 
     async def _finish(self, turn: _Turn, fallback: list[dict] | None = None) -> None:
         """Persist the assistant message (the `done` moment: quote cards become bookable)."""
@@ -268,7 +307,11 @@ class Agent:
             released = False
             content = blank = ""
 
-            def log_call(response: dict, tokens: int | None = None) -> Awaitable[Any]:
+            def log_call(response: dict, tokens: int | None = None, usage: Any = None) -> Awaitable[Any]:
+                # every attempt counts against the turn's tokens, also failed ones and retries
+                charged, estimated = turn.budget.charge(usage, messages)
+                response = {**response, "budget": {"charged_tokens": charged, "estimated": estimated,
+                                                   "turn_tokens": turn.budget.tokens}}
                 return asyncio.to_thread(
                     self.store.add_llm_call, turn.user_id, turn.conversation_id, request, response,
                     latency_ms=int((time.monotonic() - started) * 1000), tokens=tokens,
@@ -305,7 +348,7 @@ class Agent:
                     raise error from None
                 await self._sleep(self.backoff * 2 ** attempt)
                 continue
-            await log_call(completion.as_record(), completion.total_tokens)
+            await log_call(completion.as_record(), completion.total_tokens, completion.usage)
             return completion
         raise LLMError("unreachable", retryable=False)  # pragma: no cover
 
