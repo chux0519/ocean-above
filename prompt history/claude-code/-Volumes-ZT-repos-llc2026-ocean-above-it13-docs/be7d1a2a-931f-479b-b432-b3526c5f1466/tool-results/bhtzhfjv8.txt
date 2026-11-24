@@ -1,0 +1,437 @@
+# app.db on SQLite — concurrency limits, benchmark, migration criteria (#41)
+
+Linked from `docs/design/design.md` §11. English, as requested for the final design doc. Measured numbers: see
+[results/](../iterations/08-runtime/sqlite/results/) — they hold for that machine and that run only.
+
+## X.1 What is serialized, and what is not
+
+- **One writer for the whole file.** app.db runs in WAL mode. Readers never wait for the writer
+  and see a consistent snapshot. Every write is one `BEGIN IMMEDIATE` transaction
+  (`Store.write()`), which takes SQLite's single write lock for **the whole database file** —
+  there are no row or table locks. Two writes that touch unrelated rows (a chat log of user A, a
+  ticket of user B) still run one after the other.
+- **This is not global request serialization.** Only the write transactions queue, and each is
+  short (one insert or a booking check-and-insert, about a millisecond). HTTP requests, LLM
+  streaming and route computation run concurrently around them; a chat turn holds the write lock
+  for a few milliseconds spread over about seven separate small transactions (message slot, user
+  message, LLM call logs, tool log, quote, assistant message), never across an LLM call.
+- **The per-conversation lock** (`airline/locks.py`) serializes the chat turns and booking clicks
+  of **one conversation** only; other conversations are not affected. It is an in-process
+  `threading.Lock` map: it does **not** coordinate a second uvicorn worker, process or machine.
+  The deployment therefore runs exactly one worker (design §8.3); with more, two turns of one
+  conversation could interleave.
+- **What the database guarantees without that lock.** One ticket per quote (B5,
+  `tickets.quote_id UNIQUE`), booked ⇔ one ticket (B7, one transaction), terminal quote states
+  (triggers) and single-use nonces hold through `BEGIN IMMEDIATE` and constraints alone, also
+  across processes. What the lock adds is application ordering: a click never lands in the middle
+  of a running turn, and two turns of one conversation never interleave their messages. Those
+  semantics would need a database-level replacement (advisory locks, a conversation version
+  column) before running more than one worker.
+
+## X.2 Two different "busy" conditions
+
+| | SQLite lock wait | Conversation busy | Server busy |
+|---|---|---|---|
+| What waits | one write transaction, for app.db's write lock | a turn or click, for its conversation's lock | a turn, for one of `AGENT_MAX_ACTIVE_TURNS` slots |
+| Bound | `busy_timeout` 10 s per statement; plus a 10 s operation deadline per connection | turn 10 s, click 5 s; per user: 2 turns, 2 clicks in progress | `AGENT_TURN_QUEUE_SECONDS` (5 s) |
+| On timeout | `StoreUnavailable`, rolled back → HTTP 503 `data_unavailable` (click: nothing changed, retry works) / turn falls back to the template | SSE / HTTP 409 `conversation_busy`, nothing stored | SSE `server_busy`, nothing stored, message slot returned |
+| Scope | every writer of the file | one conversation (one user) | whole server |
+
+(The issue text says `timeout=30`; the code has used 10 s since 06 P0b, design §4.9.)
+
+## X.3 `_recheck()` inside the write transaction
+
+`Airline.book` → conversation lock → `Store.write()` (`BEGIN IMMEDIATE`) → `_book()` →
+`_recheck()`. B6 re-validates the quote on the current `locations.db`: strict content hash, and a
+graph rebuild when the hash changed, then the itinerary price and a fresh cheapest-route search —
+all **while app.db's write lock is held**. Since 06 P2-7 a changed file is normally loaded just
+before the transaction, so inside it only the hash and the route search run (sub-millisecond on
+711 cities). If the file changes between that pre-load and the re-check, the full rebuild
+(~130 ms measured) happens inside the transaction and every other writer — messages, call logs,
+other bookings — waits for it. The benchmark forces exactly that case (`changed inside
+transaction`) to measure it.
+
+**Candidate optimisation, not implemented (needs its own review against B1–B7):** run the
+re-check before `BEGIN IMMEDIATE` and keep only a cheap, consistent check inside:
+1. Before the transaction: `net = networks.current(strict=True)`; compute `(fingerprint,
+   problem) = recheck(quote, net)`. The quote's legs, price and origin/destination are immutable
+   once stored, so this depends only on the quote and `net`.
+2. Inside the transaction: all state checks stay where they are (B1–B5: owner, status, expiry,
+   nonce — they read rows another writer may change). Then re-hash `locations.db` (strict, no
+   rebuild): if the hash still equals `fingerprint`, the pre-computed result is the result of a
+   re-check made now; if it differs, either redo the full re-check inside (today's behaviour, rare)
+   or refuse with a retryable `data_unavailable` and let the click be repeated.
+3. **TOCTOU:** the window "file changes after the in-transaction hash, before COMMIT" exists
+   today as well (B6 means "fresh at booking time", the time of the hash); the window "file changes
+   after the pre-computation, before the transaction" is closed by step 2's hash comparison. The
+   quote row cannot change in between except its status, which is still checked inside. So B6
+   keeps its meaning, while the write lock is no longer held across a rebuild or route search.
+   Cost: one extra hash of a 60 KB file per click.
+
+## X.4 Why this is a conscious trade-off
+
+SQLite + one worker gives atomic booking with one transaction and two constraints, no database
+server to run, back up or secure, and an operational footprint of one file — the right size for a
+take-home and a single-VPS demo. It is **not** a measured production scalability guarantee: the
+benchmark below shows where it holds on one machine, not what a real airline workload needs.
+
+## X.5 Benchmark (`backend/bench/`)
+
+Reproducible, isolated, no LLM cost: `cd backend && nice -n 10 uv run python -m bench`
+(`--quick` for a smoke run; `tests/test_bench.py` runs a tiny one in CI).
+- **Setup:** per level a fresh app.db and a private copy of `locations.db` in a temp dir; fixed
+  seed; 100 users with a conversation, history and presented quotes with nonces; the real app in
+  its own uvicorn process (one worker, production limits) with a deterministic fake LLM (one
+  `quote_route` call + a reply per turn, so each turn writes what a real one does).
+- **Instrumentation:** `app.store.db.set_timing_hook` (off by default; one global lookup per
+  operation when off) reports per transaction the `BEGIN IMMEDIATE` wait, hold time to COMMIT,
+  total time and outcome (commit / rollback / busy / timeout), tagged with the calling function.
+  `_recheck`, `NetworkProvider.current` and graph rebuilds are timed by wrappers installed in the
+  bench server process only (no airline code changes).
+- **Scenarios:** mixed 70 % reads (history, tickets, conversation list) / 20 % chat turns / 10 %
+  bookings, closed loop, 1/5/10/25/50/100 clients, warm-up + 3 measured intervals; booking burst
+  (all clients click distinct quotes at once); same conversation (4 identical clicks per quote at
+  once, 3 concurrent turns per conversation, a turn and a click at once); `locations.db` unchanged
+  / changed before the click / changed inside the booking transaction; the mixed load with a
+  simulated model latency per LLM step; an in-process writer microbenchmark.
+- **Metrics:** throughput, p50/p95/p99 per endpoint, write-lock wait and hold p50/p95/p99 (also
+  per call site), `_recheck` and rebuild p50/p95/p99, BUSY / timeout / 5xx counts, server CPU and
+  RSS, WAL size, and integrity checks that must be 0: double bookings, booked without ticket,
+  ticket without booked quote or used nonce, client 200 without ticket (and vice versa),
+  interleaved turns.
+
+**Measured** (one run, 2026-11-24, Apple M4 10-core, macOS, Python 3.12, SQLite 3.47, APFS; full
+tables in [results/bench-2026-11-24.md](results/bench-2026-11-24.md); the machine also ran other
+agents, so treat single numbers as ±30 %):
+- **Correctness held everywhere:** 0 double bookings, 0 quote/ticket mismatches, 0 client 200s
+  without a ticket, 0 interleaved turns, 0 BUSY, 0 5xx — over the whole sweep, bursts of up to 300
+  simultaneous clicks, 4 identical clicks per quote (exactly one success each; the rest
+  `already_booked` / `conversation_busy`) and 3 concurrent turns per conversation.
+- **Write transactions are short:** hold p50 ≈ 0.5–1.6 ms, p99 ≤ 34 ms at every level;
+  ~250–290 write transactions/s at 25–100 clients. The in-process microbenchmark reaches
+  ~3,000 commits/s with one insert per transaction.
+- **The tail is lock *waiting*, not lock holding.** Write-lock wait p99 grows to 260–580 ms at
+  10–25 closed-loop clients (and 600 ms with 64 threads in the microbenchmark, where hold p99 is
+  0.4 ms). SQLite's busy handler polls with growing sleeps instead of queueing waiters, so an
+  unlucky writer sleeps while others take the lock. Cheap remedy if it ever matters: an
+  in-process FIFO lock in front of `BEGIN IMMEDIATE` (valid only with one worker).
+- **The process, not SQLite, saturates first.** Throughput peaks at ~200 req/s at 50 clients with
+  the single worker at 150–340 % CPU (Python, JSON rendering of growing histories, the 32-thread
+  executor); at 100 clients it drops to ~160 req/s while write hold stays ~0.5 ms. With 1 client,
+  one conversation grows by ~100 turns during the run, so history/chat latency there measures
+  history size more than concurrency.
+- **`_recheck` is cheap unless the network is rebuilt:** p50 0.2 ms with `locations.db`
+  unchanged. A rebuild takes ~140 ms; when it happens inside the booking transaction (forced in
+  30 of 32 bookings in the `changed inside transaction` mode, and 3 of 26 rebuilds even in
+  `changed before click` because of concurrent changes) it holds the write lock ~140–195 ms, and
+  other writers' lock wait p99 rises from 0.47 s to 2.8 s. That is the case X.3 removes.
+- **With model latency (0.6 s per LLM step, simulated):** at 10 clients the app is model-bound
+  (chat p50 1.3 s, write-lock wait p99 47 ms); at 50 / 100 clients 16 % / 49 % of turns get
+  `server_busy` from the 8 turn slots long before app.db matters (write wait p99 40 / 196 ms).
+- Timing hook overhead when on: within noise (~423 vs 429 µs per read transaction; a read
+  transaction costs ~0.4 ms, mostly opening the connection).
+
+## X.6 When to change what
+
+All thresholds below are **illustrative service SLOs** for deciding, not measured results and not
+requirements of the take-home. Measure on the target host with `python -m bench` against them.
+
+| Decision | Do it when (example SLO, sustained at the expected peak) | What it costs / what to keep |
+|---|---|---|
+| **Keep SQLite as is** | integrity checks 0; write-lock wait p99 < 100 ms; booking p99 < 500 ms; 0 BUSY and 0 5xx; one worker's CPU is not the limit | nothing |
+| **Shorten write transactions first** (X.3 re-check outside the lock; batch or move LLM / tool call logs out of the request path) | write-lock wait p99 above the SLO while CPU has headroom, or the measured `changed inside transaction` case breaks the booking SLO | review against B1–B7 and the TOCTOU argument in X.3; model test + regression test |
+| **More than one worker / machine** | one process's CPU is saturated (the sweep's CPU column), or availability needs two instances | the per-conversation lock must move into the database (advisory lock or conversation version) first; SQLite on shared storage is not an option across machines |
+| **Move app.db to PostgreSQL** | multi-instance is required, or sustained writes exceed what one SQLite writer serves within the SLO after the step above, or operations need managed backups / PITR / replicas | row locks help different quotes and conversations, but locking, idempotency (`ON CONFLICT`), transactions and schema migrations must be redone and re-verified (B1–B7); a server to run. A graph database or MCP does not address app.db write contention |
+
+**Applied to the measured run (example SLO of the first row):** met at 1 and 5 closed-loop clients
+(≈ 85 req/s, ≈ 18 chat turns/s, booking p99 93 ms, wait p99 63 ms); missed from 10 clients on by
+the lock-wait tail and from 50 on by process CPU. With realistic model latency the turn slots
+limit the load first (≈ 5–6 completed turns/s), and write-lock wait p99 stays ≤ 50 ms up to 50 clients.
+**Decision for the demo: keep SQLite and one worker.** Next steps only if a measured target
+workload needs them, in this order: (1) re-check outside the write lock (X.3) and/or a FIFO
+writer lock; (2) more workers only after the conversation lock moves into the database; (3)
+PostgreSQL when multi-instance or operations require it. No QPS threshold here is a fact about
+production.
+# State invariants
+
+Booking and confirmation rules are checked by model-based tests: a small reference model plus seeded random event
+sequences, every invariant asserted after every event. A new state bug gets a new rule id here first, then a test.
+Design context: `docs/design/design.md` §6.
+
+## Event alphabet
+`quote(user, conv, origin, dest)`, `stream_done(conv)` (cards presented, nonces issued),
+`user_message(conv, text)` (incl. negations and questions), `llm_request_booking(conv, quote)`,
+`click_book(user, quote, nonce)`, `click_book_concurrent(user, quote, nonce)`, `replay_nonce(quote, nonce)`,
+`clock(+Δ)`, `db_change(kind)` (leg removed / coordinate moved / unrelated row changed / file replaced),
+`other_user_click(quote, nonce)`, `disconnect_reconnect(conv)`, `stop_turn(conv)` (R6).
+
+## B. Booking
+- **B1 Ownership.** A ticket exists only if its quote belongs to the user who clicked.
+- **B2 Presented.** A ticket exists only if its quote reached `presented` (its full card was sent with `done`) before the click.
+- **B3 Click only.** Every ticket is caused by exactly one `click_book` with a valid, unused nonce for that quote; no
+  other event (in particular `llm_request_booking`, any `user_message`) ever creates a ticket.
+- **B4 Validity.** No ticket for a quote older than 15 minutes at click time.
+- **B5 Idempotent.** At most one ticket per quote, under replay and concurrent clicks.
+- **B6 Fresh.** A ticket's legs, coordinates, distance and price strings equal a fresh recomputation on the
+  `locations.db` current at click time, and the route is still the cheapest; otherwise the quote is `stale` and no ticket.
+- **B7 Atomic.** Quote status and tickets never disagree: `booked` ⇔ exactly one ticket.
+
+## Q. Quotes
+- **Q1 No supersede.** Creating a quote never changes the status of another quote.
+- **Q2 Button state.** The button state a client sees (after `done` or reconnect) equals the server's quote state;
+  a card of a `cancelled` message is never bookable (R6).
+- **Q3 Terminal.** `booked`, `expired`, `stale` never change again.
+
+## Process
+- Seeds are fixed in CI. A failing seed prints its shrunk sequence and is kept as a named regression case.
+- Layers: pure model test over `airline/` → API driven with fakes (clock, LLM, locations.db copy) → UI scenario
+  (ego-browser) for the click path.
+
+## U. Usage limits
+- **U1 Daily cap.** For every user and UTC day, messages let through ≤ `DAILY_MESSAGES_PER_USER`; counting and the
+  reservation happen in one write transaction; a refused message stores nothing. The cap counts **stored user
+  messages** (#55): every refusal that stores nothing and starts no LLM or tool work — `conversation_busy` (lock
+  timeout or the per-user turn cap), `server_busy`, Stop while queued, the message failing to store, bad text — gives
+  back exactly its own reservation, at most once; from the moment it refunds, a Stop is too late (`finishing`). So
+  after any run, `messages_today` = the user's stored user messages of the day. (Model test:
+  `test_reservations_match_a_reference_count`; HTTP: `tests/test_busy_quota.py`.) Known: the site token budget is
+  checked at message start, so turns already running may overshoot it by their own cost.
+- **U2 One account per invite code.** An invite code maps to exactly one account, independent of the order of
+  `INVITE_CODES`; the name is a display name only.
+
+## S. Sessions
+- **S1 Revocable sessions.** A session is valid only while its epoch equals `users.session_epoch` and its login method
+  is still enabled; logout bumps the epoch (all of the user's sessions end).
+
+## C. Concurrency
+- **C1 Site-wide slots.** At most `AGENT_MAX_ACTIVE_TURNS` turns hold a slot; a refused turn (`server_busy`) stores
+  nothing and refunds its message slot. (Model test: `test_slots_model`.)
+- **C2 Drain before release.** A turn releases its conversation lock and slot only after every worker thread it started
+  has ended, or after the drain timeout (30 s, logged).
+- **C3 Clicks hold no worker thread while waiting.** A booking click waits for the conversation lock on the event
+  loop; its transaction runs to its end before the lock is released, even when the request is cancelled.
+- **C4 Per-user caps.** At most `AGENT_MAX_TURNS_PER_USER` turns and 2 pending booking clicks per user at once.
+
+## R. Stop (user cancellation of a running turn, #48)
+Event alphabet for these rules: `send(conv)` (a turn starts, gets `run_id`), `stop(user, conv, run_id)` (the cancel
+endpoint), `disconnect(conv)` (the SSE reader goes away), `model_token`, `tool_start`, `tool_end`, `persist`, `finish`.
+Booking model (B/Q): `stop_turn(conv)` = the turn's pending cards are stored with a `cancelled` message and are **not**
+presented.
+- **R1 Explicit only.** A run is cancelled only by `stop` from its owner, naming its own conversation and `run_id`. A
+  disconnect, a closed tab or a failed SSE read never cancels (the run completes and is stored). A `run_id` of an
+  older run, of another conversation or of another user never cancels anything (404, nothing changes).
+- **R2 Nothing new after Stop.** Once a run is cancelling, it starts no LLM request, no retry and no tool call; the
+  model's HTTP stream in flight is closed. A worker thread that already started runs to its end (it cannot be killed).
+- **R3 Drain before release.** C2 holds for a stopped run: the conversation lock, the turn slot and the per-user count
+  are released only after its worker threads ended (or after the drain timeout, logged), and before its terminal event.
+- **R4 One terminal outcome.** Every run ends with exactly one of `done`, `cancelled`, `error`, and the run registry's
+  final state agrees (`completed` / `cancelled` / `failed`). A Stop that arrives after the steps ended (while the reply
+  is being stored, or later) changes nothing: the run ends `completed`.
+- **R5 What a stopped run stores.** Stop before the user message is stored (waiting for the lock or a slot): nothing
+  is stored and the day's message slot is given back (U1). Otherwise: the user message and exactly one assistant
+  message with status `cancelled`, holding only text that already passed ReplyGuard (no template, no click hint) and
+  the cards of tool calls that finished before the Stop.
+- **R6 No booking authority from a stopped run.** Quote and booking-request cards of a `cancelled` message are never
+  presented: no nonce, `bookable` false, the quote stays `quoted` (then `expired`); a click on it is `not_presented`. Only a later *completed* turn can present
+  it (e.g. `request_booking` shows its full card with `done`). Stop
+  never creates, changes or reverts a ticket or another quote's status. A new quote in a later turn is bookable as usual.
+- **R7 Well-formed history.** Every tool call of a stored completion has a `tool_calls` row: a call interrupted by Stop
+  or never started is stored with error `cancelled`. The next turn's context gives the model `{"code":"cancelled"}` for
+  those calls, never their result; aborted model calls never enter the context.
+- **R8 Idempotent.** Repeating `stop` for the same run returns the same state and changes nothing more.
+=== docs/iterations/02-core/acceptance.md
+# Acceptance — 02-core (2026-11-23)
+
+- **Tested source:** PR #7 head `52894ba` (squash-merged to `main` as `509c415`).
+- **Tier A:** coordinator reran `uv run pytest -q` (105 passed at round 01; 117 at round 02 per worker, `tool/test_diff.sh`
+  no new failures, `tool/review_lint.py` all ok) on the worker branch.
+- **Cross-check:** all 490,700 ordered served-city pairs, production vs independent Bellman-Ford reference: identical
+  price strings, distance strings and city sequences; 27.6 s. Hypothesis random graphs (ties, collinear, disconnected)
+  vs brute force; deterministic under `HYPOTHESIS_PROFILE=ci`.
+- **Reviewed:** canonical pricing uses an explicit per-call context everywhere (no context-less Decimal arithmetic in
+  `app/`); display formatting only in `fmt_km` / `fmt_usd` with thousands separators matching the contract; San Jose /
+  San José ambiguity; nearest served (Abu Dhabi → Tirana etc.).
+- **Decisions:** Yen + tolerance for hub candidates (design §5 updated); leg-sum vs total ≤ legs × 1e-30; decimal
+  coordinates accepted; served = at least one direct flight; `current(strict=True)` for booking re-validation;
+  `RouteError.issues`; keep httpx.
+- **Bug caught by the cross-check:** context-less `scaleb` used the 28-digit thread context for edge weights (fixed,
+  regression test added). Review checkpoint: no Decimal method without an explicit context.
+- **Pending C:** none (backend only).
+=== docs/iterations/03-slice/acceptance.md
+# Acceptance — 03-slice (2026-11-23)
+
+- **Source:** `main@d69704d` (T1 contract, T2 #10, T3 #14 + guard fix #17, T4 #16, T5 #13/#15, T6 #8, T7 #9). Deployed to the
+  homelab demo (compose project `ocean-above`), public `/api/health` 200.
+- **Goal met:** local and demo end-to-end flow (sign in → quote → booking-request card → click → ticket → my tickets →
+  history), see `e2e/README.md` and screenshots (desktop + 390×844).
+- **Tests:** backend 599 passed (HYPOTHESIS_PROFILE=ci); frontend 19 vitest; `tool/test_diff.sh` no new failures;
+  lint ok. Booking invariants B1–B7/Q1–Q3 model-tested with fixed seeds and 12 mutants.
+- **Real-model evals** (deepseek-flash, effort high, 27 cases × 3): trajectory 97.5%, ReplyGuard fallback 1.5%,
+  0 safety-invariant violations, $0.039 (report: `T4/report.md`). Total real-model spend in 03 ≈ $0.15.
+- **Independent reviews (Fable 5.2):** T2 (0 P0/P1), T3 (0 P0, 4 P1 fixed); passive "booked" claims found by the evals
+  and fixed in #17.
+- **Process notes:** Fable hit persistent 529s → implementers moved to Opus 5.5 (Fable for reviews); Docker builds on the
+  homelab need the proxy env.
+- **Carried to 04:** UI polish (Impeccable, shadcn review), streamdown size, tickets loading state, mobile badge wrap,
+  "Valid until" on booked cards, `similar_names` on cards, design §§3–6 of DESIGN.md.
+- **Carried to 05:** Google login + multi-user, invite login, limits/budget, OAuth production; dev login off.
+=== docs/iterations/04-web/acceptance.md
+# Acceptance — 04-web (2026-11-23)
+
+- **Source:** `main@6659d78` — C1 contract v1.1, B1 #21, F1 #22, D1 #23, DESIGN.md §2–6. Deployed to the homelab demo.
+- **Tests:** frontend 62 vitest; backend 600; `tool/test_diff.sh` no new failures; lint ok; `pfstack check`: all set
+  (no placeholders left in DESIGN.md).
+- **Impeccable** (reports in `D1/`): critique 29/40, audit 16/20, P0–P1 cleared; `detect` on `frontend/src` and on the
+  running page: no findings.
+- **Screens:** 42 mock screenshots (desktop 1440×900, mobile 390×844 and 360, light + dark) in `D1/screens/`; real
+  demo-site run (DeepSeek) in `e2e/`: multi-leg confirm card + no-service card (Austin → Copenhagen), light and dark.
+- **Bundle:** streamdown replaced by our minimal renderer: JS 353 → 206 KB gzip; lucide +2 KB gzip.
+- **Open (P2, to 05):**
+  - after switching the emulated system theme while a page is open, some elements kept the dark tokens until reload
+    (seen once in CDP emulation; verify with a real OS switch);
+  - a conversation whose first assistant reply came from a booking shows only "Ticket booked." in the list (title fallback);
+  - streaming replies cannot be cancelled (needs a backend abort);
+  - web build depends on reaching Google Fonts (offline/China builds need a proxy) — decide self-hosting vs Google.
+=== docs/iterations/06-hardening/acceptance.md
+# Acceptance — 06-hardening P0/P1 (2026-11-24)
+
+- **Merged:** #32 budgets (PR #40), #33 concurrency/timeouts (PR #42), #34 eval regressions (PR #44), #43 runtime review
+  fixes (PR #45). P2 (#35, OTel/Phoenix) stays queued; parent #31 stays open for it.
+- **Tests:** backend 798 passed (HYPOTHESIS_PROFILE=ci); test_diff no new failures; lint ok. Every review finding has a
+  named regression test; mutation checks show refused tool calls and slot accounting are really tested.
+- **Independent review (Fable):** no booking or confirmation bypass; 2 P1 (booking clicks starving the thread pool;
+  failed attempts over-charged against the token cap) + 9 P2 — all fixed in #43.
+- **Real model (deepseek-flash, high):** suite 97.5% → 100% (93 runs); book-in-one-message 50% → 100% (N=10);
+  nearest-city follow-up 100%; $0.147. Turn token soft cap default 20k → 60k from measured long-conversation turns.
+- **Docs:** design §4.6/4.8/4.9, invariants C1–C4, contract v1.5, `.env.example`.
+- **Released** to the production VPS at `2f6f13e` (see docs/deploy.md).
+=== docs/iterations/07-ui/acceptance.md
+# Acceptance — 07-ui (2026-11-24)
+
+- **Source:** PR #46 (Closes #39) squash-merged; DESIGN.md §2–6 rewritten from `DESIGN-draft.md` (`4b667ed`);
+  released to the VPS.
+- **Tests:** frontend 89 vitest; build; test_diff no new failures; lint; `pfstack check` all set.
+- **Impeccable:** critique 29/40, audit 18/20, P0–P1 = 0; detect: source clean, running page only `overused-font`
+  (Geist, the user's choice).
+- **Screens:** 161 screenshots at 1440 / 768 / 390 / 360 × light / dark covering every card state and page
+  (`screens/`); production check in `e2e/`.
+- **Behaviour kept:** every leg, transfer, total distance and price on quote and confirm cards; Confirm only from
+  server state; calculation details collapsed by default; `server_busy` / `conversation_busy` / early `internal_error`
+  keep the input with Retry; follow-scroll only when at the bottom; last card fully above the composer on phones.
+- **Backlog (P2):** stream cancel needs a backend abort; a one-message booking shows both the quote card and the
+  confirmation card for the same quote (consider showing only the confirmation card in that turn).
+=== docs/iterations/08-runtime/acceptance.md
+# 08-runtime — acceptance (2026-11-24)
+
+Scope: #49 (SDK POC, ADR, migration) and #41 (SQLite limits + benchmark). Plan: [plan.md](plan.md).
+
+## #49
+- **POC (phase 1):** OpenAI Agents SDK ([report](poc-openai-agents.md), PR #50, $0.0046) and Pydantic AI Slim
+  ([report](poc-pydantic-ai.md), PR #52, about $0.03), same 15 checks on real DeepSeek plus a TCP-level fake server.
+  Both passed the functional checks; neither met the "clearly less code" rule (about −5% each).
+- **Decision:** owner chose Pydantic AI Slim (2026-11-24) over the coordinator's recommendation to keep the own loop;
+  [ADR-001](../../design/adr-001-agent-runtime.md), amended after the migration with the measured boundary.
+- **Migration (phase 2–3, PR #53):** `llm.py` replaced by `model.py` (`OpenAIChatModel`, DeepSeek dialect); `loop.py`
+  drives `Agent.iter`; retries and request context stay ours; `Agent.cancel` closes the upstream stream, dispatches no
+  further tools, drains started threads before releasing locks; zero outbound tracing by default, `tracer_provider`
+  hook for #35. Pinned `pydantic-ai-slim==2.71.0`, +11 packages (no tiktoken / requests), about +33 MB unpacked.
+  `backend/app/agent` 2237 → 2665 lines.
+- **Independent review (Fable):** [review-runtime-sdk.md](review-runtime-sdk.md) — P0 none, P1 1 (retry count carried
+  across steps), P2 9; all fixed with tests except P2-7 (cancel semantics), handed to #48. Mutation check: making the
+  stream close a no-op turns the cancel and guard tests red.
+- **Tests (source `d49afb2`, merged as `440bcb6`, verified by the coordinator):** 830 passed; `tool/test_diff.sh` no new
+  failures; lint clean; evals fake 31/31; frontend vitest 89 passed; contract fixtures pass.
+- **Real model (deepseek-flash, high):** 92/93 before review fixes ([migration/report.md](migration/report.md)) and
+  30/31 after ([evals/real-after-review](migration/evals/real-after-review/report.md)); **0 safety violations**; latency
+  in line with 06 (call p50 1.1–1.2 s, turn p50 2.2–2.4 s). The two failures were model behaviour (an extra confirmation
+  card that booked nothing; a Chinese city name passed once before retrying in English). Cost about $0.09 in total.
+- **B1–B7:** `core/`, `airline/`, `store/` business logic unchanged; booking model tests pass; no `book` tool.
+- **Released** to the VPS at `963c9be`, public API e2e passed (see docs/deploy.md).
+- **Docs:** design.md §2, §4.3, new §4.10; README; AGENTS.md dependency rule; docs/roadmap.md.
+
+## #41 (PR #51, closed)
+- Timing hook (off by default) in `store/db.py`; `backend/bench/`; measured run: 0 integrity failures, 0 BUSY / 5xx;
+  single-worker CPU saturates first (~200 req/s); a `locations.db` rebuild inside a booking raises other writers'
+  wait p99 to 2.8 s. Decision: keep SQLite + one worker for the demo; criteria in
+  [docs/design/sqlite-concurrency.md](../../design/sqlite-concurrency.md).
+
+## Not done here
+- No browser e2e this round (frontend unchanged; API-level e2e on production instead).
+- Docker image size measured by estimate (no docker on the dev machine); the homelab build succeeded.
+=== docs/iterations/09-stop/acceptance.md
+# 09-stop — acceptance (2026-11-24)
+
+Scope: #48, user Stop of a running agent turn. Plan: [plan.md](plan.md); details: [STATE.md](STATE.md).
+
+- **Built (PR #54):** app-owned `run_id` (header + first SSE event), in-process run registry (single worker,
+  documented), `POST /api/conversations/{id}/runs/{run_id}/cancel` (owner-checked, idempotent, an old run never stops
+  a newer one), terminal `cancelled` event, `Message.status`, app.db schema v4. Stopped turns keep only guarded text and
+  finished cards, stored not presented (no nonce) — a stopped turn mints no booking authority (decision 1, rule R6).
+  Frontend Stop button, "Stopped" marker distinct from errors, authoritative reload, no stale updates after switching
+  conversations. Invariants R1–R8 in `docs/design/state_invariants.md`; contract v1.6.
+- **Race tests:** every boundary from the issue has a named test (`backend/tests/test_stop.py`, table in STATE);
+  B1–B7 model test extended with stopped-turn quotes.
+- **Independent review (Fable):** [review-stop.md](review-stop.md) — no P0/P1, 9 P2, all fixed; the two reproduced
+  by probe (Stop during the `server_busy` refund ended the stream without a terminal event; finished runs kept their
+  whole context in the registry) have named regression tests. Mutation checks: backend 9/9 and frontend 9/9 caught.
+  Two real bugs found on the way: a slow reload after switching conversations overwrote the new view; an interrupted
+  tool was recorded as "not run".
+- **Tests (merged as `9eaf474`, verified by the coordinator):** backend 902 passed, `tool/test_diff.sh` no new
+  failures, lint clean, vitest 103 passed, evals fake 31/31.
+- **Real model (deepseek-flash, high, N=1):** 31/31, 0 safety violations, $0.0219 before review fixes; 31/31, $0.0223
+  after.
+- **Screenshots:** 1440 and 390, light and dark, waiting for the first token / stopped reply / next message
+  (`docs/iterations/09-stop/`, local dev server).
+- **Released** `43a72de` (api + web), production API Stop check passed (docs/deploy.md). Observed: the two other
+  route tools of the same completion had already finished server-side before the Stop request arrived (tools take
+  milliseconds), so three cards were stored — all not bookable, as specified.
+- **Docs:** design.md §4.7, §4.10, §6, §7; DESIGN.md composer; README; deploy.md schema v4 rollback; release script now
+  backs up the WAL files too.
+
+Not done: browser check of the Stop button on production (covered by local screenshots + production API check).
+=== docs/iterations/10-otel/acceptance.md
+# 10-otel — acceptance (2026-11-24)
+
+Scope: #35 (and the last open part of #31). Plan: [plan.md](plan.md); details: [STATE.md](STATE.md).
+
+- **Built (PR #56):** `app/tracing.py`, off by default (the OTel SDK is not even imported). When on: one trace per
+  turn, rooted at `agent.turn`, with Pydantic AI's own `invoke_agent` / `chat` / `execute_tool` spans
+  (`include_content=False`) plus business spans `airline.quote_route` → `core.routing`, `reply_guard`, `run.stop`.
+  A booking click has its own trace: `airline.book` → `booking.recheck` → `core.routing`. OTLP/HTTP batch export.
+  Phoenix 22.0.1 sits behind compose profile `tracing`, bound to loopback, with its own telemetry off.
+  `locations.db` reads now have a 5 s deadline (#35 comment).
+- **Privacy:** spans carry codes, counts, durations and opaque ids only. The conversation id appears only as an HMAC
+  keyed with a server secret, and invented tool names become `unknown_tool`. A redacting layer sits in front of the
+  exporter. Scans of the Phoenix data found 0 hits for message text, city names, emails, nonces, cookies or keys
+  (`evals/privacy-scan-*.json`). Local endpoints bypass HTTP proxies.
+- **Independent review (Fable):** [review-otel.md](review-otel.md). No P0. P1: spans to a local endpoint went
+  through an HTTP proxy. 9 P2s, including `_trace_end` running before the run was retired. All fixed with tests.
+  Mutation testing killed 15 of 16 mutants; the survivor is equivalent on CPython, with evidence in STATE.
+- **Tests (merged `a82cc91`, verified by the coordinator):** backend 955 passed, `tool/test_diff.sh` no new
+  failures, lint clean, evals fake 31/31 (also with tracing on).
+- **Real model with tracing on (N=1):** 30/31, then 28/31 after the review fixes, both with 0 safety violations
+  ($0.0223 / $0.0228). All failures are the known trajectory pattern: the model calls `request_booking` when it was
+  not asked to (`quote_details`, `false_booked_prompt`), or passes a Chinese city name before retrying in English.
+  These show a confirmation card at most and never book. Tracked for the #47 benchmark and prompt work.
+- **Screenshots:** Phoenix trace of a quoted itinerary and of a stopped turn (`screenshots/`).
+- **Released** `73ba50e` with tracing off; production e2e passed (docs/deploy.md).
+- **Docs:** design §4.11, README "Tracing", `.env.example`.
+=== docs/iterations/11-followup/acceptance.md
+# 11-followup — acceptance (2026-11-24)
+
+Scope: #55. Plan: [plan.md](plan.md); details and old-code failure evidence: [STATE.md](STATE.md).
+
+- **Load race (P1):** one view generation guards every conversation-state write (init, select, New chat, booking
+  refresh, post-stream reload). 8 deterministic vitest cases with deferred GETs (B before A); 7 fail on the old code.
+  Also fixed: a chat created while the first list load was in flight was dropped.
+- **Busy quota (P1, decision 2):** the daily limit counts stored user messages. `conversation_busy` (lock timeout and
+  per-user cap) now refunds exactly its own reservation, at most once, like `server_busy`. 10 HTTP-level tests check
+  the `/api/me` counter, `message_usage` rows and stored messages; 7 fail on the old code. U1, design §4.5 / §4.6 /
+  §4.9 / §8.2 and contract v1.7 (wording only, no wire change) updated.
+- **Stop before the run ID (P2, decision 3):** without a cancel acknowledgement the UI says the outcome is unknown and
+  offers Reload; never "Stopped". Client-generated run IDs are documented as the stronger option, not built.
+- **Tests (merged `0789110`, verified by the coordinator):** backend 913 passed, vitest 114 passed, lint clean,
+  `tool/test_diff.sh` no new failures, evals fake 31/31. No real-model run (no agent-loop behaviour change beyond the
+  refund call).
+- **Screenshots:** `shots/` — unknown-outcome notice at 1440 and 390, quick switching between two conversations.
+- **Released** `0789110` (see docs/deploy.md).
