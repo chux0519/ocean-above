@@ -223,6 +223,52 @@ def before_response(exc: BaseException) -> bool:
     return False
 
 
+# ------------------------------------------------------------------ dialects ---------------
+class UnsupportedSetting(ValueError):
+    """The endpoint's dialect has no way to ask for this thinking level."""
+
+
+def _deepseek(effort: str, thinking_budget: int | None) -> dict[str, Any]:
+    """DeepSeek's `thinking: {type}` + `reasoning_effort` (docs "Thinking Mode", 2026-11-23)."""
+    if thinking_budget is not None:
+        raise UnsupportedSetting("the deepseek dialect has no thinking budget")
+    if effort == "none":
+        return {"thinking": {"type": "disabled"}}
+    # thinking mode ignores `temperature` (DeepSeek docs); it is sent anyway, harmlessly
+    return {"thinking": {"type": "enabled"}, "reasoning_effort": effort}
+
+
+def _bailian(effort: str, thinking_budget: int | None) -> dict[str, Any]:
+    """Alibaba Cloud Bailian (OpenAI-compatible mode): `enable_thinking` switches thinking, a level
+    goes in `reasoning_effort`, or a token cap in `thinking_budget` (the two together are a 400 for
+    Qwen; probed 2026-11-24, docs/iterations/12-bench/STATE.md). Qwen thinks unless told not to,
+    and its `max_tokens` does not bound the reasoning."""
+    if effort == "none":
+        return {"enable_thinking": False}
+    if thinking_budget is not None:
+        return {"enable_thinking": True, "thinking_budget": thinking_budget}
+    return {"enable_thinking": True, "reasoning_effort": effort}
+
+
+def _plain(effort: str, thinking_budget: int | None) -> dict[str, Any]:
+    raise UnsupportedSetting("the plain dialect sends no thinking fields; use reasoning effort 'omit'")
+
+
+# dialect -> the extra request body fields for a thinking level ("omit" sends none, any dialect)
+DIALECTS = {"deepseek": _deepseek, "bailian": _bailian, "plain": _plain}
+
+
+def thinking_fields(dialect: str, effort: str, thinking_budget: int | None = None) -> dict[str, Any]:
+    """The request fields for `effort` in `dialect`; UnsupportedSetting when it cannot be said."""
+    if dialect not in DIALECTS:
+        raise UnsupportedSetting(f"unknown dialect {dialect!r}")
+    if effort == "omit":
+        return {}
+    if effort not in EFFORTS:
+        raise ValueError(f"reasoning_effort must be one of {', '.join(EFFORTS)}")
+    return DIALECTS[dialect](effort, thinking_budget)
+
+
 # ------------------------------------------------------------------ the model ----------------
 class ChatModel:
     """One instance per event loop (it keeps an HTTP client); `await aclose()` at shutdown.
@@ -231,8 +277,10 @@ class ChatModel:
     def __init__(self, config: LLMConfig, *, transport: httpx2.AsyncBaseTransport | None = None,
                  timeout: httpx2.Timeout | None = None, temperature: float = 0,
                  max_tokens: int = MAX_TOKENS):
-        """The request dialect is DeepSeek's for every base URL: the one the hand-written client
-        spoke before ADR-001 (`max_tokens`, `reasoning_content` passed back as a field)."""
+        """The wire format is DeepSeek's for every base URL: the one the hand-written client spoke
+        before ADR-001 (`max_tokens`, `reasoning_content` passed back as a field). Only the thinking
+        fields depend on `config.dialect` (#47; production: deepseek)."""
+        thinking_fields(config.dialect, config.reasoning_effort, config.thinking_budget)  # fail at start
         self.config = config
         self.model = config.model  # the name, as llm_calls stores it
         self.reasoning_effort = config.reasoning_effort
@@ -254,13 +302,7 @@ class ChatModel:
         if reasoning_effort is not None and reasoning_effort not in EFFORTS:
             raise ValueError(f"reasoning_effort must be one of {', '.join(EFFORTS)}")
         effort = reasoning_effort or self.reasoning_effort
-        extra: dict[str, Any] = {}
-        if effort == "none":
-            extra["thinking"] = {"type": "disabled"}
-        elif effort != "omit":
-            # thinking mode ignores `temperature` (DeepSeek docs); it is sent anyway, harmlessly
-            extra["thinking"] = {"type": "enabled"}
-            extra["reasoning_effort"] = effort
+        extra = thinking_fields(self.config.dialect, effort, self.config.thinking_budget)
         settings: ModelSettings = {"temperature": self.temperature, "max_tokens": self.max_tokens,
                                    "max_retries": 0,  # the loop retries (and charges) itself
                                    "framing_announcement": "never"}  # no SDK text added to our prompt

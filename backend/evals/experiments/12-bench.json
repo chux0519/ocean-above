@@ -1,0 +1,21 @@
+{
+ "name": "12-bench",
+ "version": 1,
+ "description": "#47: the production model at DeepSeek vs the same model and Qwen on Alibaba Cloud Bailian (token plan). Effort high = the production default.",
+ "n": 3,
+ "interleave": true,
+ "dataset_version": "auto",
+ "prompt_version": "auto",
+ "pricing_version": "2026-11-24",
+ "configs": [
+  {"id": "deepseek-official", "provider": "deepseek", "model": "deepseek-flash",
+   "api_key_env": "DEEPSEEK_API_KEY", "reasoning_effort": "high", "temperature": 0, "max_tokens": 4096,
+   "concurrency": 4},
+  {"id": "deepseek-bailian", "provider": "bailian", "model": "deepseek-v4.1-flash-1017",
+   "api_key_env": "BAILIAN_API_KEY", "base_url_env": "BAILIAN_OPENAI_API_BASE",
+   "reasoning_effort": "high", "temperature": 0, "max_tokens": 4096, "concurrency": 4},
+  {"id": "qwen-bailian", "provider": "bailian", "model": "qwen3.8-flash",
+   "api_key_env": "BAILIAN_API_KEY", "base_url_env": "BAILIAN_OPENAI_API_BASE",
+   "reasoning_effort": "high", "temperature": 0, "max_tokens": 4096, "concurrency": 4}
+ ]
+}

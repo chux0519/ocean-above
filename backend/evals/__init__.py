@@ -10,4 +10,11 @@ and latency.
 
     cd backend && PYTHONPATH=. uv run python -m evals --mode fake
     cd backend && OCEAN_ENV_FILE=/path/to/.env PYTHONPATH=. uv run python -m evals --mode real --n 3 --effort high
+
+Benchmark (#47): several configurations (provider + model + dialect + thinking level, from a
+versioned spec in `experiments/`) on the identical cases, interleaved, with token and cost guards
+and a comparison matrix (`bench.py`; prices in `pricing.json`, unknown = unknown):
+
+    cd backend && OCEAN_ENV_FILE=/path/to/.env PYTHONPATH=. uv run python -m evals.bench --spec 12-bench.json --smoke
+    cd backend && OCEAN_ENV_FILE=/path/to/.env PYTHONPATH=. uv run python -m evals.bench --spec 12-bench.json --n 3 --out DIR
 """

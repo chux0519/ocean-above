@@ -28,6 +28,9 @@ deliverables.
 | Optional: what a real bot needs | root `DESIGN.md` §7 | to write after #47 |
 
 ## Decisions
+- **TL;DR first** (user, 2026-11-24): DESIGN.md opens with a one-screen TL;DR that answers the five take-home
+  questions with a few sourced numbers, and every major section starts with a one-line "In short:". The README opens
+  with a TL;DR of 5 lines or fewer. Readers should get the whole picture without reading the long parts.
 - **Names:** root `DESIGN.md` becomes the take-home design doc (English). The UI design system moves to
   `frontend/DESIGN.md`. AGENTS.md and the pfstack rules point at the new path. `docs/design/design.md` (Chinese
   working notes) stays as the detailed record and is linked from the root doc. ADR-001, the SQLite note and the

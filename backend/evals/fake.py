@@ -66,6 +66,14 @@ def last_quote_id(messages: list[dict]) -> str:
     return newest(messages, "quote_id")["quote_id"]
 
 
+def nth_quote_id(messages: list[dict], i: int) -> str:
+    """The i-th quote of the conversation (0 = the first), in the order of the tool results (a
+    shortened older result keeps its quote id; the scripts using this book nothing before)."""
+    ids = list(dict.fromkeys(r["quote_id"] for r in tool_results(messages)
+                             if "quote_id" in r and ("price_display" in r or r.get("shortened"))))
+    return ids[i]
+
+
 def quote_reply(messages):
     q = newest(messages, "price_display")
     via = f" via {', '.join(q['transfers'])}" if q["transfers"] else " direct"
