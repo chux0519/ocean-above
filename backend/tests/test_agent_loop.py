@@ -19,7 +19,7 @@ from app.agent.loop import LLM_UNAVAILABLE, MAX_USER_CHARS
 from app.agent.templates import CLICK_TO_BOOK, NO_ANSWER
 from app.airline import Airline, BookingError, NotFound
 
-from .agent_helpers import (Call, FakeLLM, Finish, Think, Wait, assert_stream, final_text, last_quote_id, names,
+from .agent_helpers import (first_data, Call, FakeLLM, Finish, Think, Wait, assert_stream, final_text, last_quote_id, names,
                             run_turn, tool_results)
 from .airline_helpers import FIXTURES, World, fixture_schemas
 
@@ -674,7 +674,7 @@ def test_a_turn_that_cannot_get_the_lock_reports_busy(world):
     events = asyncio.run(go())
     # contract: conversation_busy comes before user_message and nothing is stored
     assert names(events) == ["error"] and events[0].data["code"] == "conversation_busy"
-    assert set(events[0].data) == {"code", "message"}
+    assert set(first_data(events[0].data)) == {"code", "message"}
     assert [m["text"] for m in stored(world)] == ["one", "First."]  # "two" was not stored
 
 

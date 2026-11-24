@@ -24,7 +24,8 @@ Design context: `docs/design/design.md` §6.
 
 ## Q. Quotes
 - **Q1 No supersede.** Creating a quote never changes the status of another quote.
-- **Q2 Button state.** The button state a client sees (after `done` or reconnect) equals the server's quote state.
+- **Q2 Button state.** The button state a client sees (after `done` or reconnect) equals the server's quote state;
+  a card of a `cancelled` message is never bookable (R6).
 - **Q3 Terminal.** `booked`, `expired`, `stale` never change again.
 
 ## Process

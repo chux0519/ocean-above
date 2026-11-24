@@ -1,4 +1,4 @@
-"""All endpoints of docs/api/contract.md except the message stream (501 until T3 is merged)."""
+"""All endpoints of docs/api/contract.md."""
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +30,7 @@ from .limits import reserve_message, usage_view
 from .settings import SESSION_TTL_SECONDS, Settings
 
 PING_COUNT = 5
+RUN_ID_HEADER = "X-Run-Id"
 NEW_CONVERSATION_TITLE = "New conversation"
 GOOGLE_NAME_MAX = 80
 
@@ -139,6 +140,18 @@ def _set_cookie(response, settings: Settings, user_id: str, epoch: int) -> None:
                         secure=settings.cookie_secure, path="/")
 
 
+async def _empty_object(request: Request) -> None:
+    """The contract's request is `{}`; an empty body is accepted too, anything else must be an object."""
+    raw = await request.body()
+    if raw.strip():
+        try:
+            ok = isinstance(json.loads(raw), dict)
+        except ValueError:
+            ok = False
+        if not ok:
+            raise ApiError(400, "bad_request", "The request body is not valid.")
+
+
 def build_router() -> APIRouter:
     r = APIRouter(prefix="/api")
 
@@ -228,15 +241,7 @@ def build_router() -> APIRouter:
 
     @r.post("/conversations")
     async def new_conversation(request: Request, user: dict = Depends(current_user)) -> dict:
-        # The contract's request is `{}`; an empty body is accepted too, anything else must be an object.
-        raw = await request.body()
-        if raw.strip():
-            try:
-                ok = isinstance(json.loads(raw), dict)
-            except ValueError:
-                ok = False
-            if not ok:
-                raise ApiError(400, "bad_request", "The request body is not valid.")
+        await _empty_object(request)
         created = await asyncio.to_thread(request.app.state.store.create_conversation, user["id"])
         return {**created, "title": created["title"] or NEW_CONVERSATION_TITLE}
 
@@ -275,7 +280,27 @@ def build_router() -> APIRouter:
             if isinstance(e, NotFound):
                 raise ApiError(404, "not_found", "Conversation not found.") from None
             raise ApiError(400, "bad_request", str(e) or "The message is not valid.") from None
-        return StreamingResponse(encode_stream(events), media_type=SSE_MEDIA_TYPE, headers=SSE_HEADERS)
+        # the run id reaches the client with the headers, before any event: Stop works while the
+        # turn still waits for the conversation lock or a slot (contract v1.6)
+        return StreamingResponse(encode_stream(events), media_type=SSE_MEDIA_TYPE,
+                                 headers={**SSE_HEADERS, RUN_ID_HEADER: events.run_id})
+
+    @r.post("/conversations/{conversation_id}/runs/{run_id}/cancel")
+    async def cancel_run(conversation_id: str, run_id: str, request: Request,
+                         user: dict = Depends(current_user)) -> dict:
+        """Stop (#48): cancel the user's run. Idempotent; a finished run reports its final state; an
+        unknown run, or one of another conversation or user, is 404 and nothing changes (R1, R8).
+        Only this endpoint stops a run: a closed SSE stream does not."""
+        await _empty_object(request)
+        app = request.app
+        if await asyncio.to_thread(app.state.store.get_conversation, user["id"], conversation_id) is None:
+            raise ApiError(404, "not_found", "Conversation not found.")
+        agent: Agent | None = app.state.agent
+        status = None if agent is None or len(run_id) > SHORT_FIELD else \
+            agent.cancel_run(user["id"], conversation_id, run_id)
+        if status is None:
+            raise ApiError(404, "not_found", "Run not found.")
+        return {"run_id": run_id, "status": status}
 
     @r.post("/quotes/{quote_id}/book")
     async def book(quote_id: str, body: Nonce, request: Request, user: dict = Depends(current_user)) -> dict:

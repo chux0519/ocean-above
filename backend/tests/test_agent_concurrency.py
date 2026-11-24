@@ -22,7 +22,7 @@ from app.api import Settings
 from app.main import create_app
 from app.store import Store, StoreUnavailable
 
-from .agent_helpers import Call, FakeLLM, Wait, assert_stream, final_text, names
+from .agent_helpers import Call, FakeLLM, Wait, assert_stream, final_text, first_data, names
 from .airline_helpers import SECRET, World
 from .test_http_api import SECRET_KEY, parse_sse
 from .test_limits import as_user, send
@@ -206,7 +206,7 @@ def test_n_plus_one_turns_the_last_gets_server_busy_and_nothing_is_stored(world)
         return late, rest, agent
 
     late, rest, agent = asyncio.run(go())
-    assert names(late) == ["error"] and late[0].data == {"code": "server_busy", "message": SERVER_BUSY}
+    assert names(late) == ["error"] and first_data(late[0].data) == {"code": "server_busy", "message": SERVER_BUSY}
     assert refunds == [1]
     assert stored_texts(world, convs[n]) == []  # nothing stored, no title either
     assert world.store.get_conversation(world.alice, convs[n])["title"] == ""
@@ -445,7 +445,7 @@ def test_http_server_busy_gives_the_message_slot_back(world, no_real_llm):
         assert res.status_code == 200 and res.headers["content-type"].startswith("text/event-stream")
         events = parse_sse(res.text)
         assert [e[0] for e in events] == ["error"]
-        assert events[0][1] == {"code": "server_busy", "message": SERVER_BUSY}
+        assert first_data(events[0][1]) == {"code": "server_busy", "message": SERVER_BUSY}
         assert client.get("/api/me").json()["usage"]["messages_today"] == 0  # refunded
         assert stored_texts(world, world.conv) == []
         app.state.agent.slots.active = 0

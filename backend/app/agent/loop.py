@@ -19,7 +19,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 import time
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
@@ -59,6 +61,9 @@ INTERNAL = "Something went wrong. Your message was saved; please try again."
 NOT_STORED = "Something went wrong and your message was not saved. Please try again in a moment."
 USER_BUSY = ("Your other conversations are still working on earlier messages. "
              "Please wait for a reply there, then try again.")
+FINISHED_RUNS_KEPT = 1024  # finished runs the cancel endpoint still knows (repeated Stop, late Stop)
+CANCELLED_CALL = {"code": "cancelled", "message": "The user stopped the reply before this tool call finished."}
+TERMINAL = {"done": "completed", "cancelled": "cancelled", "error": "failed"}  # event -> final run state
 FLOOD_FACTOR = 4  # a completion with more than max_tool_calls_per_step * this many calls runs none
 SDK_TOOL_RETRIES = 1000  # the SDK's own per-tool retry cap; our budget ends a turn long before
 _RAW = "__raw__"  # arguments the SDK could not parse, handed to Toolbox.run as the raw string
@@ -97,6 +102,51 @@ class _NotStored(Exception):
 
 
 @dataclass
+class Run:
+    """One run of a chat turn in the in-process run registry (#48, invariants R1-R8).
+
+    `state`: queued (waiting for the conversation lock / a slot; nothing stored yet) -> running
+    (from the moment the user message is being stored) -> finishing (the steps ended; the reply
+    is being stored) -> completed | failed; or, through `Agent.cancel_run`, queued / running ->
+    cancelling -> cancelled. The final state follows the terminal event the run sent.
+
+    The registry lives in this process: it is correct only with one worker (uvicorn runs one,
+    design §4.9; the conversation locks have the same limit). With several workers or hosts a
+    Stop could reach a process that does not run the turn; that needs a shared coordinator
+    (e.g. a cancel flag in app.db or Redis that every step boundary polls, or sticky routing by
+    conversation)."""
+
+    id: str
+    user_id: str
+    conversation_id: str
+    state: str = "queued"
+    started: bool = False  # the run's task has begun (a Stop before that only sets the state)
+    task: asyncio.Task | None = None
+    turn: "_Turn | None" = None
+    stop_requested: float | None = None  # monotonic time of the accepted Stop
+    tokens_at_stop: int | None = None
+    terminal: str | None = None  # the terminal event sent (done / cancelled / error)
+    sent_first: bool = False  # the first event (it carries the run id) was sent
+
+
+class TurnStream:
+    """The events of one turn (an async iterator) and its `run_id` (the SSE header `X-Run-Id`)."""
+
+    def __init__(self, run_id: str, events: AsyncIterator["Event"]):
+        self.run_id = run_id
+        self._events = events
+
+    def __aiter__(self) -> "TurnStream":
+        return self
+
+    async def __anext__(self) -> "Event":
+        return await self._events.__anext__()
+
+    async def aclose(self) -> None:
+        await self._events.aclose()
+
+
+@dataclass
 class _Turn:
     """One turn's state. It is also the run's `deps`: the tools take the user and the
     conversation from here, never from the model's arguments."""
@@ -121,13 +171,15 @@ class _Turn:
     messages: list[dict] = field(default_factory=list)  # the context, OpenAI shape (see `_WireContext`)
     attempt: int = 0  # failed attempts of the current step's LLM call (reset when a call succeeds)
     steps_task: asyncio.Future | None = None
-    cancelled: bool = False  # `Agent.cancel` was called
+    cancelled: bool = False  # the user stopped the run (`Agent.cancel_run`)
+    in_flight: str | None = None  # the tool call whose worker thread is running
 
 
 def message_view(message: dict) -> dict:
     """Contract `Message` of a stored row without quote cards (user messages)."""
     return {"id": message["id"], "role": message["role"], "text": message["text"],
-            "cards": list(message["cards"]), "created_at": message["created_at"]}
+            "cards": list(message["cards"]), "created_at": message["created_at"],
+            "status": message.get("status", "completed")}
 
 
 class _RawArguments(AbstractCapability[Any]):
@@ -196,6 +248,8 @@ class Agent:
         self._tasks: set[asyncio.Task] = set()
         self._user_turns: dict[str, int] = {}  # user id -> running turns (event loop only)
         self._running: dict[str, _Turn] = {}  # conversation id -> its running turn
+        self._runs: dict[str, Run] = {}  # run id -> run, until it ended (event loop only)
+        self._finished: OrderedDict[str, Run] = OrderedDict()  # the last FINISHED_RUNS_KEPT runs
         capabilities: list[Any] = [_RawArguments(), _WireContext()]
         if tracer_provider is not None:
             capabilities.append(Instrumentation(InstrumentationSettings(
@@ -219,9 +273,11 @@ class Agent:
                     reasoning_effort: str | None = None,
                     on_not_stored: Callable[[], Any] | None = None,
                     on_server_busy: Callable[[], Any] | None = None,
-                    owner_checked: bool = False) -> AsyncIterator[Event]:
+                    owner_checked: bool = False) -> TurnStream:
         """Start a turn and return its events: `user_message`, then `status` / `card` / `delta` /
-        `replace` / `ping`, ending with exactly one `done` or `error`.
+        `replace` / `ping`, ending with exactly one `done`, `cancelled` (Stop, `cancel_run`) or
+        `error`. The first event other than `ping` carries the run's `run_id` (also
+        `TurnStream.run_id`).
 
         `reasoning_effort` overrides the LLM's thinking level for this turn (none / low / high /
         max; None = configured default). `on_not_stored`: a blocking callable run (in a worker
@@ -246,24 +302,68 @@ class Agent:
         if not owner_checked and self.store.get_conversation(user_id, conversation_id) is None:
             raise NotFound(conversation_id)
         queue: asyncio.Queue[Event | None] = asyncio.Queue()
-        task = asyncio.get_running_loop().create_task(
-            self._run(user_id, conversation_id, text, reasoning_effort, queue, on_not_stored or on_server_busy))
+        run = Run(f"r_{secrets.token_hex(8)}", user_id, conversation_id)
+        self._runs[run.id] = run
+        run.task = task = asyncio.get_running_loop().create_task(
+            self._run(run, text, reasoning_effort, queue, on_not_stored or on_server_busy))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-        return self._events(queue)
+        return TurnStream(run.id, self._events(queue))
+
+    def cancel_run(self, user_id: str, conversation_id: str, run_id: str) -> str | None:
+        """The user's Stop (#48): cancel the run `run_id` of the user's conversation. Returns the
+        run's state after the request (`cancelling` when this Stop was accepted; `cancelled` for a
+        repeated Stop; `finishing` / `completed` / `failed` when it came too late and changes
+        nothing), or None when no such run of this user and conversation is known (R1).
+
+        Queued (nothing stored yet): the run's task is cancelled; nothing is stored and the day's
+        message slot is given back (R5). Running: no further LLM request or tool call starts and
+        the model's HTTP stream is closed (R2); a worker thread that already started runs to its
+        end and is drained before the stopped reply is stored and the lock and slot are released
+        (R3). Only this method stops a run: a client that stops reading does not. Event loop only."""
+        run = self._runs.get(run_id) or self._finished.get(run_id)
+        if run is None or run.user_id != user_id or run.conversation_id != conversation_id:
+            return None
+        if run.state not in ("queued", "running"):
+            return run.state  # cancelling, finishing or ended: idempotent, nothing changes (R8)
+        turn = run.turn
+        if turn is not None and turn.steps_task is not None and turn.steps_task.done():
+            return "finishing"  # the steps ended in this instant; the reply is being stored (R4)
+        queued = run.state == "queued"
+        run.state = "cancelling"
+        run.stop_requested = time.monotonic()
+        log.info("agent.run.stop_requested run=%s conversation=%s queued=%s", run.id, conversation_id, queued)
+        if queued:
+            if run.started and run.task is not None:
+                run.task.cancel()  # waiting for the lock or a slot; `_run` settles it
+        elif turn is not None:
+            run.tokens_at_stop = turn.budget.tokens
+            turn.cancelled = True
+            if turn.steps_task is not None:
+                turn.steps_task.cancel()
+        # else: the user message is being stored or the context built; `_turn` sees the state
+        return "cancelling"
 
     def cancel(self, user_id: str, conversation_id: str) -> bool:
-        """Cancel the running turn of the user's conversation (the runtime side of #48's Stop).
-        The model's HTTP stream is closed and no further LLM request or tool call starts. Tool
-        threads that already started run to their end and are drained before the turn stores
-        its reply (the template, problem `cancelled`) and releases the conversation lock and its
-        slot. False when this user has no running turn in that conversation. Event loop only."""
-        turn = self._running.get(conversation_id)
-        if turn is None or turn.user_id != user_id or turn.steps_task is None or turn.steps_task.done():
-            return False
-        turn.cancelled = True
-        turn.steps_task.cancel()
-        return True
+        """Stop the user's running turn in `conversation_id` (any run id; tests and tools). True
+        when a Stop was accepted. See `cancel_run`."""
+        for run in list(self._runs.values()):
+            if run.user_id == user_id and run.conversation_id == conversation_id \
+                    and run.state in ("queued", "running"):
+                return self.cancel_run(user_id, conversation_id, run.id) == "cancelling"
+        return False
+
+    def run_state(self, run_id: str) -> str | None:
+        """The registry's state of a run (tests, diagnostics)."""
+        run = self._runs.get(run_id) or self._finished.get(run_id)
+        return None if run is None else run.state
+
+    def _retire(self, run: Run) -> None:
+        if self._runs.get(run.id) is run:
+            del self._runs[run.id]
+        self._finished[run.id] = run
+        while len(self._finished) > FINISHED_RUNS_KEPT:
+            self._finished.popitem(last=False)
 
     async def wait_idle(self) -> None:
         """Wait for every running turn (shutdown, tests)."""
@@ -282,9 +382,21 @@ class Agent:
             yield event
 
     # ------------------------------------------------------------------ one turn -----------
-    async def _run(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+    async def _run(self, run: Run, text: str, reasoning_effort: str | None,
                    queue: asyncio.Queue, on_not_stored: Callable[[], Any] | None = None) -> None:
+        user_id, conversation_id = run.user_id, run.conversation_id
+        run.started = True
+
         def emit(name: str, data: dict) -> None:
+            if run.terminal is not None:  # R4: nothing after the terminal event
+                log.error("chat turn: %s after %s dropped (run %s)", name, run.terminal, run.id)
+                return
+            if not run.sent_first:
+                data = {**data, "run_id": run.id}  # the first event carries the run id
+                run.sent_first = True
+            if name in TERMINAL:
+                run.terminal = name
+                run.state = TERMINAL[name]
             queue.put_nowait(Event(name, data))
 
         async def not_stored() -> None:
@@ -298,10 +410,20 @@ class Agent:
         # second message of a busy conversation waits without taking a slot. Every refusal comes
         # before anything is stored.
         try:
+            if run.state == "cancelling":  # stopped before the task began
+                raise asyncio.CancelledError()
             async with self._locks.hold_async(conversation_id, timeout=self.lock_timeout):
                 with self._user_turn(user_id):
                     async with self.slots.hold():
-                        await self._turn(user_id, conversation_id, text, reasoning_effort, emit)
+                        await self._turn(run, text, reasoning_effort, emit)
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if run.state != "cancelling" or run.turn is not None or (task is not None and task.uncancel() > 0):
+                raise  # shutdown, not a Stop
+            # Stop while queued (R5): nothing was stored; the day's message slot is given back
+            await not_stored()
+            emit("cancelled", {"run_id": run.id, "message": None})
+            self._log_stopped(run, None)
         except ConversationBusy:
             emit("error", {"code": "conversation_busy", "message": BUSY})
         except _UserBusy:
@@ -321,7 +443,18 @@ class Agent:
             log.exception("chat turn failed (conversation %s)", conversation_id)
             emit("error", {"code": "internal_error", "message": INTERNAL})
         finally:
+            if run.terminal is None:
+                run.state = "failed"  # shutdown: the task was cancelled
+            self._retire(run)
             queue.put_nowait(None)
+
+    def _log_stopped(self, run: Run, turn: _Turn | None, drain_ms: int | None = None) -> None:
+        """agent.run.cancelled: stop-to-end latency, tokens charged after the Stop, drain time
+        (log fields now; spans in #35)."""
+        latency = None if run.stop_requested is None else int((time.monotonic() - run.stop_requested) * 1000)
+        after = None if turn is None or run.tokens_at_stop is None else turn.budget.tokens - run.tokens_at_stop
+        log.info("agent.run.cancelled run=%s conversation=%s stored=%s stop_to_end_ms=%s tokens_after_stop=%s "
+                 "drain_ms=%s", run.id, run.conversation_id, turn is not None, latency, after, drain_ms)
 
     @contextmanager
     def _user_turn(self, user_id: str) -> Iterator[None]:
@@ -336,10 +469,13 @@ class Agent:
             if not self._user_turns[user_id]:
                 del self._user_turns[user_id]
 
-    async def _turn(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+    async def _turn(self, run: Run, text: str, reasoning_effort: str | None,
                     emit: Callable[[str, dict], None]) -> None:
+        user_id, conversation_id = run.user_id, run.conversation_id
         store = self.store
         conversation = await asyncio.to_thread(store.get_conversation, user_id, conversation_id)
+        # From here a Stop no longer cancels this task: the user message may be stored (R5)
+        run.state = "running"
         try:
             user_message = await asyncio.to_thread(store.add_message, user_id, conversation_id, "user", text)
         except Exception as exc:  # app.db timeout, the conversation gone: nothing of the turn exists
@@ -357,21 +493,33 @@ class Agent:
         turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
                      reasoning_effort)
         turn.messages = messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
+        run.turn = turn
+        if run.state == "cancelling":  # stopped while the message was stored: no step starts
+            turn.cancelled = True
+            run.tokens_at_stop = 0
 
         self._running[conversation_id] = turn
+        stopped = False
+        drain_ms = None
         try:
             try:
                 try:
-                    async with asyncio.timeout(self.turn_timeout):
-                        turn.steps_task = asyncio.ensure_future(self._steps(turn, messages))
-                        fallback = await turn.steps_task
+                    if not turn.cancelled:
+                        async with asyncio.timeout(self.turn_timeout):
+                            turn.steps_task = asyncio.ensure_future(self._steps(turn, messages))
+                            fallback = await turn.steps_task
+                        run.state = "finishing"
+                    else:
+                        stopped = True
                 finally:
+                    drain_started = time.monotonic()
                     await self._drain(turn)
+                    drain_ms = int((time.monotonic() - drain_started) * 1000)
             except asyncio.CancelledError:
                 task = asyncio.current_task()
                 if not turn.cancelled or (task is not None and task.cancelling()):
-                    raise  # shutdown, not `cancel()`
-                fallback = [{"kind": "cancelled", "value": ""}]
+                    raise  # shutdown, not a Stop
+                stopped = True
             except TimeoutError:
                 fallback = [{"kind": "turn_timeout", "value": str(self.turn_timeout)}]
             except LLMError as exc:
@@ -384,6 +532,14 @@ class Agent:
         finally:
             if self._running.get(conversation_id) is turn:
                 del self._running[conversation_id]
+        # an accepted Stop always ends `cancelled` (R4), also when the steps ended anyway in the
+        # same instant (or a library swallowed the cancellation)
+        stopped = stopped or turn.cancelled
+        if stopped:
+            await self._finish_stopped(run, turn)
+            self._log_stopped(run, turn, drain_ms)
+            return
+        run.state = "finishing"
         if fallback is not None and fallback[0]["kind"] in ("max_steps", "token_budget", "tool_budget"):
             log.warning("chat turn stopped by its budget (conversation %s): %s %s", conversation_id,
                         fallback[0]["kind"], turn.budget.snapshot())
@@ -421,6 +577,8 @@ class Agent:
                                       model_settings=settings, usage_limits=UsageLimits(request_limit=None)) as run:
             async for node in run:
                 if _Runtime.is_model_request_node(node):
+                    if turn.cancelled:  # R2: no LLM request after a Stop
+                        raise asyncio.CancelledError()
                     if turn.attempt == 0 and (stop := turn.budget.stop_before_step()) is not None:
                         return [stop]  # (a retry belongs to the step already counted)
                     try:
@@ -489,11 +647,17 @@ class Agent:
         turn waits for it (`_drain`) before it releases its lock."""
         call = next((c for c in turn.step_calls if c["id"] == call_id),
                     {"id": call_id, "name": name, "arguments": ""})
+        if turn.cancelled:  # R2: never start a tool after a Stop (also if the SDK caught the cancel)
+            raise asyncio.CancelledError()
         refused = turn.budget.admit_tool_call()
         if refused is None:
             turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
+            turn.in_flight = call_id
             outcome = await turn.threads.run(self._tools.run, turn.user_id, turn.conversation_id,
                                              call["name"], call["arguments"])
+            turn.in_flight = None
+            if turn.cancelled:  # the Stop came while the thread ran: its result is not used (R7)
+                raise asyncio.CancelledError()
         else:
             turn.exhausted = turn.exhausted or refused == "per_turn"
             payload = refusal(refused, self.budget)
@@ -554,6 +718,27 @@ class Agent:
         message = await asyncio.to_thread(
             self._post_assistant_message, turn.user_id, turn.conversation_id, text, turn.cards, fallback)
         turn.emit("done", {"message": message})
+
+    async def _finish_stopped(self, run: Run, turn: _Turn) -> None:
+        """Store a reply the user stopped (R5-R7), after its worker threads were drained: only the
+        text already released through the guard (no template, no click hint) and the cards of
+        tool calls that finished; none of its quote cards is presented (no nonce, R6). Tool calls
+        of the step that have no result - the one interrupted, the ones never started - are
+        stored as `cancelled`, so the next context lines up with the logged completion (R7)."""
+        for call in turn.step_calls:
+            if call["id"] not in turn.step_results:
+                started = call["id"] == turn.in_flight
+                if started:
+                    log.info("chat turn stopped during tool %s; its result is discarded (run %s)",
+                             call["name"], run.id)
+                turn.step_results[call["id"]] = Outcome(
+                    call["name"], str(call["arguments"])[:MAX_RAW_ARGUMENTS], "cancelled", dict(CANCELLED_CALL),
+                    error="cancelled: interrupted" if started else "cancelled: not run")
+        await self._log_tool_calls(turn, final=True)
+        message = await asyncio.to_thread(
+            self._post_assistant_message, turn.user_id, turn.conversation_id, turn.text.rstrip(), turn.cards,
+            [{"kind": "cancelled", "value": ""}], present=False, status="cancelled")
+        turn.emit("cancelled", {"run_id": run.id, "message": message})
 
     # ------------------------------------------------------------------ LLM step -----------
     def _release(self, turn: _Turn, piece: str, first_of_step: bool) -> None:
@@ -699,6 +884,10 @@ class Agent:
         record = completion.as_record()
         if _flooded(completion, self.budget):
             record["tool_calls_not_run"] = True  # build_context skips this completion
+        elif completion.tool_calls:
+            # the step's calls are known before the completion is logged: a Stop during the write
+            # still stores a (cancelled) row for each of them (R7)
+            turn.step_calls, turn.step_results, turn.step_logged = completion.tool_calls, {}, 0
         await asyncio.shield(log_call(record, completion.usage, output_chars=completion.output_chars))
         return completion
 

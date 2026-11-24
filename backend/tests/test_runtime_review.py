@@ -16,7 +16,7 @@ from app.agent.budget import AgentBudget, BudgetTracker, estimate_tokens, report
 from app.airline import BookingError
 from app.airline import service
 
-from .agent_helpers import Call, FakeLLM, Wait, assert_stream, names, run_turn
+from .agent_helpers import Call, FakeLLM, Wait, assert_stream, first_data, first_sse, names, run_turn
 from .airline_helpers import World
 
 
@@ -405,7 +405,7 @@ def test_p2_8_one_user_cannot_take_more_than_two_slots(world):
         return third, bob, rest, agent
 
     third, bob, rest, agent = asyncio.run(go())
-    assert names(third) == ["error"] and third[0].data == {"code": "conversation_busy", "message": USER_BUSY}
+    assert names(third) == ["error"] and first_data(third[0].data) == {"code": "conversation_busy", "message": USER_BUSY}
     assert world.store.list_messages(world.alice, convs[2]) == []  # nothing stored
     assert names(bob)[-1] == "done" and [names(r)[-1] for r in rest] == ["done", "done"]
     assert agent._user_turns == {} and agent.slots.active == 0
@@ -458,7 +458,7 @@ def test_p2_9_a_message_app_db_could_not_store_is_reported_as_not_saved_and_refu
 
         app.state.store.add_message = failing
         events = parse_sse(send(client, world.conv).text)
-        assert events == [("error", {"code": "internal_error", "message": NOT_STORED})]
+        assert first_sse(events) == [("error", {"code": "internal_error", "message": NOT_STORED})]
         assert client.get("/api/me").json()["usage"]["messages_today"] == 0  # refunded
         assert world.store.list_messages(world.alice, world.conv) == []
 
@@ -606,6 +606,6 @@ def test_gap_6_http_server_busy_under_real_concurrency(world, no_real_llm):
             time.sleep(0.01)
         busy = parse_sse(send(client, other).text)
         worker.join(5)
-        assert busy == [("error", {"code": "server_busy", "message": SERVER_BUSY})]
+        assert first_sse(busy) == [("error", {"code": "server_busy", "message": SERVER_BUSY})]
         assert parse_sse(first["res"].text)[-1][0] == "done"
         assert client.get("/api/me").json()["usage"]["messages_today"] == 1  # only the first counts

@@ -95,8 +95,9 @@ type Trace = { quote_id: string; formula: string; algorithm: string; network_fin
 ```
 
 A **stopped reply** (`status: "cancelled"`) keeps only text that had passed the checks and the cards of tool calls that
-finished before the Stop. Its quote / booking-request cards are never presented: `state.status` is `quoted` (or
-`expired` later), `bookable` false, `nonce` null. Draw them with the full route facts, **no Confirm button**, and the
+finished before the Stop. Its quote / booking-request cards are never presented by it: on that message every card has `bookable` false and
+`nonce` null; `state.status` is the quote's current status (`quoted`, later `expired`; a quote already shown with `done`
+in an earlier reply keeps its status and stays bookable on that earlier card only). Draw them with the full route facts, **no Confirm button**, and the
 note "Stopped before confirmation — ask again to book". Draw the message itself with a "Stopped" marker after its text
 (an empty text shows only the marker). A later turn's new quote is bookable as usual.
 

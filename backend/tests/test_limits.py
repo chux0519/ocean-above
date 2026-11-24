@@ -308,6 +308,7 @@ def test_a_v1_database_is_migrated_and_keeps_its_data(tmp_path):
     con.execute("DROP TABLE message_usage")
     con.execute("DROP INDEX llm_calls_by_time")
     con.execute("ALTER TABLE users DROP COLUMN session_epoch")
+    con.execute("ALTER TABLE messages DROP COLUMN status")
     con.execute("PRAGMA user_version = 1")
     con.commit()
     con.close()
@@ -315,7 +316,7 @@ def test_a_v1_database_is_migrated_and_keeps_its_data(tmp_path):
     assert again.get_user(user["id"])["display_name"] == "demo"
     assert again.messages_today(user["id"]) == 0
     con = sqlite3.connect(path)
-    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
     con.close()
 
 
