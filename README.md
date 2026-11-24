@@ -121,6 +121,26 @@ What is in `backend/app/core/` (pure, deterministic code; no LLM, no HTTP):
 | `routing.py` | `cheapest_route(net, origin, destination)`: cheapest route with transfers only at hubs, or a typed error (`unknown_city`, `ambiguous_city`, `same_city`, `no_service`, `unreachable`). |
 | `places.py` | `resolve` (exact, then case- and accent-insensitive; never picks between look-alike names such as `San Jose` / `San José`) and `nearest_served`. |
 
+## Promptfoo view (optional)
+
+The same benchmark can be browsed in [Promptfoo](https://promptfoo.dev): one row per eval case, one column per
+configuration, each cell the whole conversation (turns, tool calls, cards, clicks) with two deterministic
+assertions, `safety` and `trajectory`. It is optional and isolated in `evals/promptfoo/` (its own `package.json`);
+the app and the test suite do not depend on it. Telemetry, update checks and sharing are off; results stay in
+`evals/promptfoo/.promptfoo/`.
+
+```bash
+cd evals/promptfoo && npm ci                     # once (pinned promptfoo)
+cd backend && uv sync                            # once (the provider runs with the backend's Python)
+bash evals/promptfoo/pf.sh eval -c promptfooconfig.fake.json      # scripted model, no network, no cost
+OCEAN_ENV_FILE=/path/to/.env bash evals/promptfoo/pf.sh eval -c promptfooconfig.json \
+    --filter-providers '^deepseek-official$'     # real model; per-configuration cost / token guards
+bash evals/promptfoo/pf.sh view                  # opens the comparison at http://localhost:15500
+```
+
+Regenerate the configs after changing cases or the spec: `backend/.venv/bin/python evals/promptfoo/gen.py --fake
+--out promptfooconfig.fake.json && backend/.venv/bin/python evals/promptfoo/gen.py`.
+
 ## Tracing (optional, off by default)
 
 The API can export OpenTelemetry traces of each chat turn to a local [Phoenix](https://github.com/Arize-ai/phoenix):
