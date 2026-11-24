@@ -469,6 +469,33 @@ def test_a_disconnect_without_stop_lets_the_run_finish_and_store(world):
     assert reloaded[-1]["cards"][0]["state"]["bookable"] is True
 
 
+def test_55_headers_never_reached_the_client_the_run_finishes_and_a_late_stop_changes_nothing(world):
+    """#55 P2: the server accepted the message, but the client never got the response headers (the run id) and
+    closed the request after its Stop grace time, so no cancel was sent. Guaranteed: the run is not cancelled by
+    the disconnect; it completes, is stored and keeps its message slot (R1, U1); lock, slot and counts are free.
+    If the id arrives later after all, a Stop is too late and changes nothing (R4, R8). The client reports this
+    outcome as unknown (frontend tests/stop.test.tsx)."""
+    refunds = []
+    llm = FakeLLM(["The reply finished anyway."])
+
+    async def go():
+        agent = Agent(world.airline, llm)
+        events = agent.stream_turn(world.alice, world.conv, "Fly me to Lima",
+                                   on_not_stored=lambda: refunds.append(1))
+        await events.aclose()  # nobody ever reads: the headers / first event never reached the client
+        await agent.wait_idle()
+        released(agent, world)
+        late = agent.cancel_run(world.alice, world.conv, events.run_id)
+        return agent.run_state(events.run_id), late
+
+    state, late = asyncio.run(go())
+    assert state == "completed" and late == "completed"
+    reloaded = stored(world)
+    assert [m["role"] for m in reloaded] == ["user", "assistant"]
+    assert reloaded[-1]["status"] == "completed" and reloaded[-1]["text"] == "The reply finished anyway."
+    assert refunds == []  # stored, so the slot stays used
+
+
 # ============================================================ model-based ====================
 STOP_POINTS = ("before_start", "after_event", "after_sleep")
 SEEDS = range(40)
