@@ -24,7 +24,7 @@ concurrency limits stay our own code.
 | 2 | #48 backend run cancellation + Stop UI | 09-stop | #49 accepted | queued |
 | 3 | #35 OpenTelemetry + local Phoenix | 10-otel | #49, #48 accepted | queued |
 | 4 | #47 multi-model benchmark, optional Promptfoo | 11-bench | #49, #48 (traces from #35) | queued |
-| — | #41 SQLite limits + benchmark, PostgreSQL criteria | 08-runtime (parallel) | — | in progress |
+| — | #41 SQLite limits + benchmark, PostgreSQL criteria | 08-runtime (parallel) | — | done (PR #51, docs/design/sqlite-concurrency.md) |
 | — | #11 / #12 thinking level, BYOK, thinking bench | bonus | — | not scheduled |
 
 Each item starts only after the one before it is accepted.
