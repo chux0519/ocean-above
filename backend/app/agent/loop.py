@@ -427,9 +427,9 @@ class Agent:
         # One trace per turn (#35): `agent.turn` is the root; the SDK's run / chat / tool spans
         # and the airline's spans nest under it. Correlation: the run id (SSE `X-Run-Id`) and
         # the user message id (app.db llm_calls / tool_calls rows) are attributes.
-        with tracing.span("agent.turn", {"ocean.run_id": run.id, "session.id": tracing.digest(conversation_id),
-                                         "ocean.conversation_hash": tracing.digest(conversation_id),
-                                         "ocean.reasoning_effort": reasoning_effort}) as span:
+        with tracing.span("agent.turn", {"ocean.run_id": run.id, "ocean.reasoning_effort": reasoning_effort}) as span:
+            span.set_attributes_from(lambda: dict.fromkeys(("session.id", "ocean.conversation_hash"),
+                                                           tracing.digest(conversation_id)))
             await self._run_traced(run, text, reasoning_effort, queue, emit, not_stored, span)
 
     async def _run_traced(self, run: Run, text: str, reasoning_effort: str | None, queue: asyncio.Queue,
@@ -479,9 +479,13 @@ class Agent:
                 # R4 backstop (review P2-1): every stream ends with a terminal event, also when the
                 # task was cancelled by a shutdown or a path above ended without one
                 emit("error", {"code": "internal_error", "message": INTERNAL})
-            _trace_end(span, run)
+            turn = run.turn
+            # the run is retired and its stream ended before anything is traced, so no tracing
+            # error can keep the stream open or the run registered (review P2-2); lock and slots
+            # were already released by the `async with` blocks above
             self._retire(run)
             queue.put_nowait(None)
+            span.set_attributes_from(lambda: _trace_end(run, turn))
 
     def _log_stopped(self, run: Run, turn: _Turn | None, drain_ms: int | None = None) -> None:
         """agent.run.cancelled: stop-to-end latency, tokens charged after the Stop, drain time
@@ -490,10 +494,10 @@ class Agent:
         after = None if turn is None or run.tokens_at_stop is None else turn.budget.tokens - run.tokens_at_stop
         # `run.stop`: from the accepted Stop to the stopped reply stored (#35)
         start = None if run.stop_requested is None else tracing.monotonic_to_epoch_ns(run.stop_requested)
-        with tracing.span("run.stop", {"ocean.run_id": run.id, "ocean.stop.stored": turn is not None,
-                                       "ocean.stop.stop_to_end_ms": latency, "ocean.stop.drain_ms": drain_ms,
-                                       "ocean.stop.tokens_after_stop": after}, start_time_ns=start):
-            pass
+        with tracing.span("run.stop", start_time_ns=start) as span:
+            span.set_attributes({"ocean.run_id": run.id, "ocean.stop.stored": turn is not None,
+                                 "ocean.stop.stop_to_end_ms": latency, "ocean.stop.drain_ms": drain_ms,
+                                 "ocean.stop.tokens_after_stop": after})
         log.info("agent.run.cancelled run=%s conversation=%s stored=%s stop_to_end_ms=%s tokens_after_stop=%s "
                  "drain_ms=%s", run.id, run.conversation_id, turn is not None, latency, after, drain_ms)
 
@@ -620,7 +624,8 @@ class Agent:
         # session): the conversation hash, never the id; the wire is rebuilt by `_WireContext`
         async with self._runtime.iter(None, message_history=to_model_messages(messages), deps=turn,
                                       model_settings=settings, usage_limits=UsageLimits(request_limit=None),
-                                      conversation_id=tracing.digest(turn.conversation_id)) as run:
+                                      conversation_id=tracing.digest(turn.conversation_id)
+                                      if tracing.provider() is not None else None) as run:
             async for node in run:
                 if _Runtime.is_model_request_node(node):
                     if turn.cancelled:  # R2: no LLM request after a Stop
@@ -676,8 +681,9 @@ class Agent:
                 # the arguments the model sent are taken raw from the completion in `_tool_call`
                 span = tracing.current()  # the SDK's `execute_tool` span: our result code on it
                 outcome = await self._tool_call(ctx.deps, ctx.tool_call_id or "", name)
-                span.set_attributes({"ocean.tool.code": outcome.code, "ocean.tool.cards": len(outcome.cards),
-                                     "ocean.tool.refused": (outcome.error or "").startswith("budget")})
+                span.set_attributes_from(lambda: {
+                    "ocean.tool.code": outcome.code, "ocean.tool.cards": len(outcome.cards),
+                    "ocean.tool.refused": (outcome.error or "").startswith("budget")})
                 return outcome.for_llm()
             return run
 
@@ -802,9 +808,8 @@ class Agent:
             piece = "\n\n" + piece  # text of a later step starts a new paragraph
         with tracing.span("reply_guard", {"ocean.guard.chars": len(turn.text) + len(piece)}) as span:
             problems = turn.guard.check(turn.text + piece)
-            span.set_attribute("ocean.guard.result", "fail" if problems else "pass")
-            if problems:
-                span.set_attribute("ocean.guard.problems", sorted({p["kind"] for p in problems}))
+            span.set_attributes_from(lambda: {"ocean.guard.result": "fail" if problems else "pass",
+                                              "ocean.guard.problems": sorted({p["kind"] for p in problems}) or None})
         if problems:
             raise _GuardFailed(problems)
         turn.text += piece
@@ -980,14 +985,15 @@ def _flooded(completion: Completion, budget: AgentBudget) -> bool:
     return len(completion.tool_calls) > budget.max_tool_calls_per_step * FLOOD_FACTOR
 
 
-def _trace_end(span: Any, run: Run) -> None:
-    """The turn's outcome on its `agent.turn` span: completed / fallback (the template replaced
-    the reply) / cancelled / failed, plus the budget used (counts only)."""
-    turn = run.turn
+def _trace_end(run: Run, turn: _Turn | None) -> dict:
+    """The attributes of the turn's end on its `agent.turn` span: the outcome (completed /
+    fallback - the template replaced the reply - / cancelled / failed), plus the budget used
+    (counts only). Computed behind the tracing guard (`set_attributes_from`)."""
     if run.terminal == "done":
         outcome = "fallback" if turn is not None and turn.fallback_kind else "completed"
     else:
         outcome = "cancelled" if run.terminal == "cancelled" else "failed"
-    span.set_attributes({"ocean.outcome": outcome, "ocean.error_code": run.error_code})
+    attributes = {"ocean.outcome": outcome, "ocean.error_code": run.error_code}
     if turn is not None:
-        span.set_attributes({f"ocean.budget.{k}": v for k, v in turn.budget.snapshot().items()})
+        attributes.update({f"ocean.budget.{k}": v for k, v in turn.budget.snapshot().items()})
+    return attributes

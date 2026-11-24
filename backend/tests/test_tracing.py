@@ -480,8 +480,331 @@ def test_a_non_local_endpoint_logs_a_warning(caplog):
 
 
 # ============================================================ locations.db read deadline ========
-def test_a_locations_read_past_its_deadline_is_a_data_error_not_a_hang(world):
+def test_sql_on_locations_db_past_its_deadline_is_a_data_error(world):
     with pytest.raises(NetworkDataError, match="interrupted"):
         network._read_rows(world.db, deadline=-1.0)
     locations, links = network._read_rows(world.db)  # the normal deadline is plenty
     assert len(locations) > 0 and len(links) > 0
+
+
+# ============================================================ review fixes (review-otel.md) =====
+class _Recorder:
+    """A tiny TCP server that records the first request line of each connection. `reply`: answer
+    200 (an OTLP collector or a proxy); None: accept and never answer (a hung collector)."""
+
+    def __init__(self, reply: bool = True):
+        import socket
+        import threading
+
+        self.lines: list[str] = []
+        self.reply = reply
+        self._sock = socket.socket()
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(16)
+        self.port = self._sock.getsockname()[1]
+        self._held = []
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self._sock.accept()
+            except OSError:
+                return
+            data = conn.recv(65536)
+            self.lines.append(data.split(b"\r\n", 1)[0].decode(errors="replace"))
+            if self.reply:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                conn.close()
+            else:
+                self._held.append(conn)  # never answered
+
+    def close(self):
+        self._sock.close()
+        for conn in self._held:
+            conn.close()
+
+
+@pytest.mark.parametrize("variable", ["HTTP_PROXY", "ALL_PROXY", "HTTPS_PROXY", "http_proxy"])
+def test_p1_1_a_local_collector_is_reached_directly_whatever_proxy_the_environment_names(monkeypatch, variable):
+    collector, proxy = _Recorder(), _Recorder()
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy",
+                 "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(variable, f"http://127.0.0.1:{proxy.port}")
+    provider = tracing.build({"OTEL_EXPORTER_OTLP_ENDPOINT": f"http://localhost:{collector.port}"})
+    before = tracing.use(provider)
+    try:
+        with tracing.span("agent.turn", {"ocean.run_id": "r_probe"}):
+            pass
+        assert provider.force_flush(5000)
+    finally:
+        tracing.use(before)
+        provider.shutdown()
+        collector.close()
+        proxy.close()
+    assert proxy.lines == []
+    assert collector.lines == ["POST /v1/traces HTTP/1.1"]
+
+
+def test_p1_1_only_a_local_collector_ignores_the_environment_proxy(monkeypatch):
+    from opentelemetry.exporter.otlp.proto.http import trace_exporter
+
+    sessions = {}
+    real = trace_exporter.OTLPSpanExporter
+
+    def spy(*args, endpoint, session=None, **kwargs):
+        sessions[endpoint] = session
+        return real(*args, endpoint=endpoint, session=session, **kwargs)
+    monkeypatch.setattr(trace_exporter, "OTLPSpanExporter", spy)
+    for endpoint in ("https://collector.example-traces.com", "http://phoenix:6006"):
+        tracing.build({"OTEL_EXPORTER_OTLP_ENDPOINT": endpoint}).shutdown()
+    assert sessions["https://collector.example-traces.com/v1/traces"] is None  # requests' default: env proxies
+    assert sessions["http://phoenix:6006/v1/traces"].trust_env is False
+
+
+def test_p2_1_shutdown_returns_within_its_bound_when_the_collector_hangs():
+    """2000 spans queued (4 batches) and a collector that accepts but never answers: the SDK alone
+    waits one export timeout per batch (20 s); `tracing.shutdown` returns within its bound."""
+    hung = _Recorder(reply=False)
+    provider = tracing.build({"OTEL_EXPORTER_OTLP_ENDPOINT": f"http://127.0.0.1:{hung.port}"})
+    before = tracing.use(provider)
+    try:
+        for i in range(2000):
+            with tracing.span("core.routing", {"i": i}):
+                pass
+        started = time.monotonic()
+        finished = tracing.shutdown(timeout=1.0)
+        took = time.monotonic() - started
+    finally:
+        tracing.use(before)
+        hung.close()
+    assert finished is False and took < 2.0
+    assert tracing.provider() is None
+
+
+def test_p2_1_shutdown_with_a_healthy_collector_finishes_and_flushes():
+    collector = _Recorder()
+    provider = tracing.build({"OTEL_EXPORTER_OTLP_ENDPOINT": f"http://127.0.0.1:{collector.port}"})
+    tracing.use(provider)
+    try:
+        with tracing.span("agent.turn"):
+            pass
+        assert tracing.shutdown() is True
+    finally:
+        tracing.use(None)
+        collector.close()
+    assert collector.lines == ["POST /v1/traces HTTP/1.1"]
+
+
+def _turn_ends_in_time(agent, world, timeout=10.0):
+    async def go():
+        stream = agent.stream_turn(world.alice, world.conv, USER_TEXT)
+
+        async def consume():
+            return [e async for e in stream]
+        events = await asyncio.wait_for(consume(), timeout)  # a stream that never ends fails here
+        await asyncio.wait_for(agent.wait_idle(), timeout)
+        return events
+    return asyncio.run(go())
+
+
+def test_p2_2_a_failing_trace_end_keeps_the_terminal_event_retirement_lock_and_slots(world, traced, monkeypatch):
+    from app.agent import loop
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("trace end broke")
+    monkeypatch.setattr(loop, "_trace_end", broken)
+    agent = Agent(world.airline, FakeLLM(*QUOTE))
+    events = _turn_ends_in_time(agent, world)
+    assert names(events)[-1] == "done" and assert_stream(events)["cards"][0]["state"]["bookable"]
+    assert agent._runs == {} and agent._running == {} and agent._user_turns == {}
+    assert agent.slots.active == 0 and not world.airline.locks.locked(world.conv)
+    assert one(traced.spans(), "agent.turn").parent is None  # the span still ended
+
+
+def _flow(tmp_path, name, **agent_kwargs):
+    """Every path that carries our spans: a quote turn, a wrong-nonce click, a `book_async`
+    booking, a failed LLM turn, a guard fallback, a Stop. Returns what the user gets."""
+    from app.airline import BookingError
+
+    world = World(tmp_path / name, real=True)
+    agent = Agent(world.airline, FakeLLM(*QUOTE), **agent_kwargs)
+    first = _turn_ends_in_time(agent, world)
+    card = assert_stream(first)["cards"][0]
+    try:
+        world.airline.book(world.alice, card["id"], "n_wrong")
+        wrong = "no error"
+    except BookingError as exc:
+        wrong = exc.code
+    booked = asyncio.run(world.airline.book_async(world.alice, card["id"], card["state"]["nonce"]))
+    error = LLMError("upstream 503", retryable=True)
+    failed = _turn_ends_in_time(Agent(world.airline, FakeLLM(error, error, error), backoff=0, **agent_kwargs), world)
+    fallback = _turn_ends_in_time(Agent(world.airline, FakeLLM(QUOTE[0], ["It costs 123456 dollars."]),
+                                        **agent_kwargs), world)
+    gate = asyncio.Event()
+    stopper = Agent(world.airline, FakeLLM(["Let me check that. ", "Still", Wait(gate)]), **agent_kwargs)
+
+    async def stop():
+        stream = stopper.stream_turn(world.alice, world.conv, "and back?")
+        seen = []
+        async for e in stream:
+            seen.append(e.name)
+            if e.name == "delta":
+                stopper.cancel_run(world.alice, world.conv, stream.run_id)
+        await stopper.wait_idle()
+        return seen
+    stopped = asyncio.run(asyncio.wait_for(stop(), 10))
+    return {"first": names(first), "wrong": wrong, "ticket": booked["ticket"]["price_display"],
+            "tickets": world.ticket_count(), "failed": [(e.name, e.data.get("code")) for e in failed],
+            "fallback": names(fallback),
+            "fallback_text": assert_stream(fallback)["text"], "stopped": stopped,
+            "left": (agent._runs, stopper._runs, stopper.slots.active), "locked": world.airline.locks.locked(world.conv)}
+
+
+@pytest.mark.parametrize("methods", [
+    ("set_attribute", "set_attributes", "add_event", "end", "record_exception", "set_status", "is_recording"),
+    # spans still look recording, so `current()` hands them out and every call reaches them
+    ("set_attribute", "set_attributes", "add_event", "end", "record_exception", "set_status"),
+], ids=["all", "all-but-is_recording"])
+def test_p2_3_every_span_method_raising_changes_no_result(tmp_path, monkeypatch, methods):
+    """The reviewer's probe A as a test: every method of a real SDK span raises (set_attribute(s),
+    add_event, end, record_exception, set_status, and so __exit__). Our spans only: with
+    `tracer_provider=None` the SDK's own spans are off (their failures are the SDK's)."""
+    from opentelemetry.sdk import trace as sdk_trace
+
+    baseline = _flow(tmp_path, "off")
+    provider = tracing.build({}, exporter=InMemorySpanExporter())
+    before = tracing.use(provider)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("span method broke")
+    for method in methods:
+        monkeypatch.setattr(sdk_trace.Span, method, boom)
+    try:
+        broken = _flow(tmp_path, "on", tracer_provider=None)
+    finally:
+        monkeypatch.undo()
+        tracing.use(before)
+        provider.shutdown()
+    assert broken == baseline
+    assert baseline["failed"][-1] == ("error", "llm_unavailable")
+    assert baseline["wrong"] == "invalid_nonce" and baseline["tickets"] == 1 and baseline["stopped"][-1] == "cancelled"
+
+
+def test_p2_2_a_failing_attribute_computation_changes_no_booking_result(world, traced, monkeypatch):
+    """`_reason_kind` runs inside the booking transaction: if it raised, the stale verdict must
+    still be stored and returned as before."""
+    from app.airline import BookingError, service
+
+    def broken(problem):
+        raise RuntimeError("attribute computation broke")
+    monkeypatch.setattr(service, "_reason_kind", broken)
+    card = assert_stream(run_turn(Agent(world.airline, FakeLLM(*QUOTE)), world.alice, world.conv, USER_TEXT))["cards"][0]
+    world.edit_db(("UPDATE locations SET coordinate = '1,1' WHERE city_name = ?", ("Chengdu",)))
+    with pytest.raises(BookingError) as refused:
+        world.airline.book(world.alice, card["id"], card["state"]["nonce"])
+    assert refused.value.code == "stale" and world.status(card["id"]) == "stale"
+    recheck = by_name(traced.spans(), "booking.recheck")[-1]
+    assert "ocean.recheck.reason" not in recheck.attributes  # dropped, not raised
+
+
+def test_p2_3_a_cancellation_through_our_span_ends_it_and_restores_the_context(traced):
+    from opentelemetry import trace
+
+    async def same_task():
+        with tracing.span("agent.turn"):
+            outer_id = trace.get_current_span().get_span_context().span_id
+            with pytest.raises(asyncio.CancelledError):
+                with tracing.span("booking.recheck"):
+                    raise asyncio.CancelledError()  # a BaseException, not an Exception
+            assert trace.get_current_span().get_span_context().span_id == outer_id
+    asyncio.run(same_task())
+    spans = traced.spans()
+    assert one(spans, "booking.recheck").end_time <= one(spans, "agent.turn").end_time
+    traced.memory.clear()
+
+    async def go():
+        with tracing.span("agent.turn") as outer:
+            outer_id = trace.get_current_span().get_span_context().span_id
+
+            async def inner():
+                with tracing.span("run.stop"):
+                    await asyncio.sleep(10)
+            task = asyncio.ensure_future(inner())
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert trace.get_current_span().get_span_context().span_id == outer_id
+        assert not trace.get_current_span().is_recording()
+    asyncio.run(go())
+    stop = one(traced.spans(), "run.stop")  # exported at all: it was ended
+    assert stop.end_time is not None and stop.status.description is None
+    assert all(set(e.attributes) <= {"exception.type"} for e in stop.events)
+
+
+def test_p2_3_an_exception_through_our_own_span_is_exported_with_its_type_only(world, traced):
+    """NotFound(conversation_id) crosses `airline.quote_route`; the OTel SDK would write
+    "NotFound: c_..." into the status description and the exception event."""
+    from app.store import NotFound
+
+    with pytest.raises(NotFound):
+        world.airline.quote_route(world.bob, world.conv, "Shanghai", "Chengdu")
+    spans = traced.spans()
+    quote = one(spans, "airline.quote_route")
+    assert str(quote.status.status_code) == "StatusCode.ERROR" and quote.status.description is None
+    assert [dict(e.attributes) for e in quote.events] == [{"exception.type": "app.store.db.NotFound"}]
+    assert world.conv not in dump(spans) and world.bob not in dump(spans)
+
+
+def test_p2_3_the_http_click_records_its_status_through_book_async(world, traced, monkeypatch):
+    monkeypatch.setattr(tracing, "build", lambda *a, **k: traced.provider)
+    settings = Settings(app_db=world.dir / "app.db", dev_user="demo", dev_password="pw", session_secret=SECRET_KEY,
+                        nonce_secret=SECRET, ping_interval=0.01, tracing=True)
+    with TestClient(create_app(world.db, settings, clock=world.clock, llm=FakeLLM(*QUOTE))) as client:
+        client.cookies.set(session.COOKIE, session.issue(SECRET_KEY, world.alice, 3600))
+        res = client.post(f"/api/conversations/{world.conv}/messages", json={"text": USER_TEXT})
+        done = [json.loads(b.split("data: ", 1)[1]) for b in res.text.split("\n\n") if b.startswith("event: done")]
+        card = done[0]["message"]["cards"][0]
+        assert client.post(f"/api/quotes/{card['id']}/book", json={"nonce": "n_wrong"}).status_code == 409
+        assert client.post(f"/api/quotes/{card['id']}/book", json={"nonce": card["state"]["nonce"]}).status_code == 200
+    books = by_name(traced.memory.get_finished_spans(), "airline.book")
+    assert [b.attributes["ocean.book.status"] for b in books] == ["invalid_nonce", "booked"]
+
+
+def test_p2_7_a_cancelled_click_is_recorded_as_interrupted(world, traced):
+    card = assert_stream(run_turn(Agent(world.airline, FakeLLM(*QUOTE)), world.alice, world.conv, USER_TEXT))["cards"][0]
+
+    async def go():
+        async with world.airline.locks.hold_async(world.conv, timeout=1):  # a running turn
+            click = asyncio.ensure_future(world.airline.book_async(world.alice, card["id"], card["state"]["nonce"]))
+            await asyncio.sleep(0.05)
+            click.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await click
+    asyncio.run(go())
+    book = one(traced.spans(), "airline.book")
+    assert book.attributes["ocean.book.status"] == "interrupted"
+    assert world.ticket_count() == 0
+
+
+def test_p2_4_a_tool_name_the_model_invented_is_exported_as_unknown_tool(world, traced):
+    llm = FakeLLM([Call("exfiltrate_alice_private_example_com", x=1)], ["Here is your route."])
+    events = run_turn(Agent(world.airline, llm), world.alice, world.conv, USER_TEXT)
+    assert names(events)[-1] == "done"
+    text = dump(traced.spans())
+    assert "exfiltrate" not in text and "alice_private" not in text
+    assert tracing.UNKNOWN_TOOL in text
+
+
+def test_p2_5_the_conversation_hash_is_keyed():
+    import hashlib
+
+    value = "c_0123456789abcdef"
+    tracing.set_hash_key(b"k" * 32)
+    first = tracing.digest(value)
+    assert first == tracing.digest(value) and len(first) == 16
+    assert first != hashlib.sha256(value.encode()).hexdigest()[:16]  # not checkable without the key
+    tracing.set_hash_key(b"other-key" * 4)
+    assert tracing.digest(value) != first

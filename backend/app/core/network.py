@@ -191,8 +191,11 @@ def _refuse_wal(path: Path) -> None:
 
 
 def _read_rows(path: Path, deadline: float = READ_SECONDS) -> tuple[list[tuple], list[tuple]]:
-    """The raw rows. Bounded (#35 comment): the busy timeout bounds waiting for a lock, the
-    progress handler interrupts SQL that runs past `deadline` seconds (NetworkDataError)."""
+    """The raw rows. The progress handler interrupts SQL that runs past `deadline` seconds
+    (NetworkDataError, #35 comment); waiting for a lock is bounded by the busy timeout (5 s, as
+    before). Not bounded: a file system that hangs inside a read call (the handler only runs
+    between SQLite VM steps), and the hashing / stat calls around this function in
+    `load_network`, which repeats up to 3 times (review P2-6)."""
     uri = path.resolve().as_uri() + "?mode=ro"
     try:
         con = sqlite3.connect(uri, uri=True, timeout=READ_BUSY_SECONDS)

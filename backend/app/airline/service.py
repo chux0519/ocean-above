@@ -135,8 +135,8 @@ class Airline:
         Raises NotFound when the conversation is not the user's."""
         with tracing.span("airline.quote_route") as span:  # #35: code and counts only
             result = self._quote_route(user_id, conversation_id, origin, destination)
-            span.set_attributes({"ocean.result.code": result.code, "ocean.quote.legs":
-                                 len(result.data.get("legs") or ()) if result.ok else None})
+            span.set_attributes_from(lambda: {"ocean.result.code": result.code, "ocean.quote.legs":
+                                              len(result.data.get("legs") or ()) if result.ok else None})
             return result
 
     def _quote_route(self, user_id: str, conversation_id: str, origin: str, destination: str) -> Result:
@@ -449,9 +449,10 @@ class Airline:
         the database cannot be read or is not valid right now."""
         with tracing.span("booking.recheck") as span:  # #35: the result's category, never its text
             fingerprint, problem = self._recheck_quote(quote)
-            span.set_attributes({"ocean.recheck.result": "same" if problem is None else "changed",
-                                 "ocean.recheck.reason": None if problem is None else _reason_kind(problem),
-                                 "ocean.network.fingerprint": fingerprint})
+            span.set_attributes_from(lambda: {
+                "ocean.recheck.result": "same" if problem is None else "changed",
+                "ocean.recheck.reason": None if problem is None else _reason_kind(problem),
+                "ocean.network.fingerprint": fingerprint})
             return fingerprint, problem
 
     def _recheck_quote(self, quote: dict) -> tuple[str, None] | tuple[None, str]:
@@ -518,6 +519,11 @@ def _book_status(span: Any) -> Iterator[None]:
         yield
     except BookingError as exc:
         span.set_attribute("ocean.book.status", exc.code)
+        raise
+    except BaseException:
+        # the caller was cancelled (the transaction may still have committed) or a bug: the
+        # span still says it did not end normally (review P2-7)
+        span.set_attribute("ocean.book.status", "interrupted")
         raise
     span.set_attribute("ocean.book.status", "booked")
 

@@ -354,6 +354,7 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
     # Tracing (#35): only when OTEL_TRACING_ENABLED; otherwise nothing is built or exported
     app.state.tracer_provider = tracing.build() if settings.tracing else None
     if app.state.tracer_provider is not None:
+        tracing.set_hash_key(settings.session_secret)  # conversation hashes: keyed, stable with SESSION_SECRET
         tracing.use(app.state.tracer_provider)
     agent_kwargs = {"budget": settings.agent_budget, "concurrency": settings.turn_concurrency,
                     **(agent_kwargs or {})}

@@ -137,10 +137,8 @@ def cheapest_route(net: "Network", origin: str, destination: str) -> Route | Rou
     with tracing.span("core.routing", {"ocean.routing.algorithm": ALGORITHM_ID,
                                        "ocean.network.fingerprint": net.fingerprint.id}) as span:
         result = _cheapest_route(net, origin, destination, span)
-        if isinstance(result, RouteError):
-            span.set_attribute("ocean.routing.code", result.code)
-        else:
-            span.set_attributes({"ocean.routing.code": "ok", "ocean.routing.legs": len(result.legs)})
+        span.set_attributes_from(lambda: {"ocean.routing.code": result.code} if isinstance(result, RouteError)
+                                 else {"ocean.routing.code": "ok", "ocean.routing.legs": len(result.legs)})
         return result
 
 
@@ -174,7 +172,7 @@ def _cheapest_route(net: "Network", origin: str, destination: str, span) -> Rout
         return RouteError("no_service", tuple(issues), cities=(a, b), fingerprint=fp)
 
     candidates = candidate_paths(net, a, b)
-    span.set_attribute("ocean.routing.candidates", len(candidates))
+    span.set_attributes_from(lambda: {"ocean.routing.candidates": len(candidates)})
     if not candidates:
         return RouteError("unreachable", cities=(a, b), fingerprint=fp)
     best = min((price_path(net, path) for path in candidates), key=_rank)

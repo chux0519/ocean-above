@@ -48,6 +48,7 @@ services:
     logging: *logging
     environment:
       PHOENIX_WORKING_DIR: /mnt/data
+      PHOENIX_TELEMETRY_ENABLED: "false"  # no usage statistics from Phoenix itself (review P2-9)
     volumes:
       - phoenix:/mnt/data
     ports:
