@@ -9,8 +9,9 @@ usage), and the script sees the request as it would reach the provider:
 - `messages`, `tools`: the wire JSON of the request;
 - `reasoning_effort`: read back from the request's thinking fields ("none" / the level / None).
 Failures are played as the wire would show them: an `LLMError` with a `status` before any output is
-that HTTP status; any other failure before output is a connection error (with `received=n`, n
-characters of reasoning are streamed first); a failure after output cuts the stream (read error).
+that HTTP status; an `LLMError` without one is a connection error (with `received=n`, n characters
+of reasoning are streamed first, then the stream is cut); an `LLMError` after output cuts the stream
+(read error). Any other exception is raised as it is (a bug, not a provider failure).
 A script that ends without a `Completion` ends the stream without a finish reason.
 """
 from __future__ import annotations
@@ -53,9 +54,9 @@ class ScriptedLLM(ChatModel):
     def __init__(self, *, reasoning_effort: str = "high"):
         config = LLMConfig(api_key="sk-scripted-not-a-key", base_url="http://scripted.invalid/v1", model=self.model,
                            reasoning_effort=reasoning_effort)
-        # the DeepSeek dialect, as in production (reasoning_content passed back as a field)
-        super().__init__(config, transport=httpx2.MockTransport(self._handle), provider="deepseek")
+        super().__init__(config, transport=httpx2.MockTransport(self._handle))
         self.bodies: list[dict] = []  # every request body, as sent
+        self.streams: list[str] = []  # per streamed response: "open", then "done" or "closed early"
 
     def stream(self, messages: list[dict], tools: list[dict], *,
                reasoning_effort: str | None = None) -> AsyncIterator[Any]:
@@ -76,12 +77,25 @@ class ScriptedLLM(ChatModel):
             if exc.received:
                 return self._stream(None, gen, failure=exc)
             raise httpx2.ConnectError(str(exc), request=request) from None
-        except Exception as exc:  # anything else before output: no response at all
-            raise httpx2.ConnectError(f"{type(exc).__name__}: {exc}", request=request) from None
+        except Exception:  # anything else (a bug) is raised as it is
+            raise
         return self._stream(first, gen)
 
     def _stream(self, first: Any, gen: AsyncIterator[Any], failure: LLMError | None = None) -> httpx2.Response:
+        index = len(self.streams)
+        self.streams.append("open")
+
         async def body() -> AsyncIterator[bytes]:
+            try:
+                async for data in lines():
+                    yield data
+                self.streams[index] = "done"
+            finally:
+                if self.streams[index] == "open":  # the client closed the response before its end
+                    self.streams[index] = "closed early"
+                await gen.aclose()
+
+        async def lines() -> AsyncIterator[bytes]:
             yield _chunk({"role": "assistant", "content": ""})
             if failure is not None:
                 yield _chunk({"reasoning_content": "x" * int(failure.received or 0)})
@@ -97,8 +111,8 @@ class ScriptedLLM(ChatModel):
                     item = await anext(gen)
                 except StopAsyncIteration:
                     break
-                except Exception as exc:  # a failure after output: the stream is cut
-                    raise httpx2.ReadError(f"{type(exc).__name__}: {exc}") from None
+                except LLMError as exc:  # a failure after output: the stream is cut
+                    raise httpx2.ReadError(str(exc)) from None
             yield b"data: [DONE]\n\n"
 
         return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body())

@@ -180,7 +180,7 @@ def test_reasoning_effort_reaches_every_llm_call(tmp_path):
     (tmp_path / "b").mkdir()
     llm2 = scripted(case)
     asyncio.run(play(case, 0, llm2, tmp_path / "b", effort=None))
-    assert set(llm2.efforts) == {None}
+    assert set(llm2.efforts) == {"high"}  # the configured default, spelled out on the request
 
 
 def test_cost_estimate_is_an_upper_bound_of_a_few_cents_per_run():

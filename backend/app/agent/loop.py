@@ -38,7 +38,7 @@ from .concurrency import ServerBusy, Threads, TurnConcurrency, TurnSlots
 from .config import EFFORTS
 from .context import build_context
 from .guard import CityIndex, ReplyGuard, SentenceBuffer
-from .model import ChatModel, Completion, LLMError, llm_error, to_model_messages
+from .model import ChatModel, Completion, LLMError, ThinkSplitter, llm_error, to_model_messages
 from .prompt import system_prompt
 from .templates import CLICK_TO_BOOK, fallback_reply
 from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, MAX_RAW_ARGUMENTS, Outcome, Toolbox
@@ -575,6 +575,8 @@ class Agent:
                    "reasoning_effort": self.llm.effort(turn.reasoning_effort)}
         started = time.monotonic()
         buffer = SentenceBuffer()
+        think = ThinkSplitter()  # an inline <think> block (servers without reasoning_content)
+        thought = ""
         released = False
         content = blank = ""
         received: int | None = None  # output characters, once any output arrived
@@ -596,6 +598,17 @@ class Agent:
         def got(n: int) -> None:
             nonlocal received
             received = (received or 0) + n
+
+        def show(text: str) -> None:
+            """Visible text: released sentence by sentence through the guard."""
+            nonlocal content, blank, released
+            content += text
+            for sentence in buffer.push(text):
+                if sentence.strip():
+                    self._release(turn, blank + sentence, not released)
+                    blank, released = "", True
+                else:
+                    blank += sentence  # white space is never sent on its own
 
         try:
             # the per-call time limit; leaving the block (a guard failure, the limit, a
@@ -625,15 +638,15 @@ class Agent:
                         if not text:
                             continue
                         got(len(text))
-                        content += text
-                        for sentence in buffer.push(text):
-                            if sentence.strip():
-                                self._release(turn, blank + sentence, not released)
-                                blank, released = "", True
-                            else:
-                                blank += sentence  # white space is never sent on its own
+                        text, inline = think.feed(text)
+                        thought += inline
+                        show(text)
                     response = stream.response
+                text, inline = think.finish()
+                thought += inline
+                show(text)
                 completion = Completion.from_response(response, content)
+                completion.reasoning += thought
                 if completion.finish_reason is None:  # the stream ended early (no finish reason)
                     raise LLMError("LLM stream ended without a finish_reason", retryable=True,
                                    received=completion.output_chars, usage=completion.usage)

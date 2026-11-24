@@ -709,7 +709,8 @@ def test_reasoning_is_stored_passed_back_and_never_shown_or_guarded(world):
     turn(agent, world, "what are my tickets?")
     history = llm.requests[2]
     assert [m["role"] for m in history] == ["system", "user", "assistant", "tool", "assistant", "user"]
-    assert history[2]["reasoning_content"] == think_1 and history[2]["content"] == ""
+    # a tool-call-only message has no text: null on the wire since ADR-001 (was "")
+    assert history[2]["reasoning_content"] == think_1 and not history[2]["content"]
     assert history[4] == {"role": "assistant", "content": message["text"], "reasoning_content": think_2}
     assert "reasoning_content" not in history[3] and "reasoning_content" not in history[1]
 
@@ -737,13 +738,16 @@ def test_parallel_tool_calls_keep_their_grouping_in_the_history(world):
                                             "assistant", "user"]
     assert len(history[2]["tool_calls"]) == 2 and history[2]["reasoning_content"] == "two lookups"
     assert [m["tool_call_id"] for m in history[3:5]] == [c["id"] for c in history[2]["tool_calls"]]
-    assert "reasoning_content" not in history[5]
+    # no reasoning of its own: the DeepSeek dialect sends an empty one on tool-call messages
+    assert not history[5].get("reasoning_content")
 
 
 def test_reasoning_effort_can_be_set_per_request(world):
     agent, llm = make(world, ["Where to?"], ["Where to?"], [QUOTE], ["On the card."])
     run_turn(agent, world.alice, world.conv, "hi")
-    assert llm.efforts == [None]  # None = the client's configured default (LLM_REASONING_EFFORT)
+    # None = the client's configured default (LLM_REASONING_EFFORT, "high"); since ADR-001 the fake
+    # reads the effort off the request, where the default is spelled out
+    assert llm.efforts == ["high"]
 
     async def go(effort):
         events = [e async for e in agent.stream_turn(world.alice, world.conv, "hi", reasoning_effort=effort)]
@@ -752,9 +756,9 @@ def test_reasoning_effort_can_be_set_per_request(world):
 
     asyncio.run(go("none"))
     asyncio.run(go("max"))
-    assert llm.efforts == [None, "none", "max", "max"]  # every LLM call of the turn
+    assert llm.efforts == ["high", "none", "max", "max"]  # every LLM call of the turn
     logged = world.store.list_llm_calls(world.alice, world.conv)
-    assert [c["request"]["reasoning_effort"] for c in logged] == [None, "none", "max", "max"]
+    assert [c["request"]["reasoning_effort"] for c in logged] == ["high", "none", "max", "max"]
 
     async def bad():
         agent.stream_turn(world.alice, world.conv, "hi", reasoning_effort="extreme")

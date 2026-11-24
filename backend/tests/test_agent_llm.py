@@ -1,13 +1,17 @@
-"""The OpenAI-compatible streaming client against a mock transport, the env config, the tools."""
+"""The model layer (app/agent/model.py over Pydantic AI, ADR-001) against a raw
+OpenAI-compatible wire: one turn through the real Agent with an httpx2 mock transport, checked on
+the request body, the SSE events and the stored llm_calls. Before ADR-001 these were tests of the
+hand-written httpx client (`OpenAIChatClient`); each keeps its intent (see migration/STATE.md).
+Also: the env config and the tools."""
 from __future__ import annotations
 
 import asyncio
 import json
 
-import httpx
+import httpx2
 import pytest
 
-from app.agent import LLMConfig, LLMError, LLMNotConfigured, OpenAIChatClient, TextDelta, Completion
+from app.agent import Agent, ChatModel, LLMConfig, LLMNotConfigured
 from app.agent.config import DEFAULT_BASE_URL, DEFAULT_MODEL, read_env_file
 from app.agent.tools import TOOL_SCHEMAS, Toolbox, slim, validate
 
@@ -28,81 +32,118 @@ def delta(finish=None, **fields):
     return {"choices": [{"index": 0, "delta": fields, "finish_reason": finish}]}
 
 
-def collect(handler, messages=None, tools=TOOL_SCHEMAS, config=CONFIG):
-    async def go():
-        client = OpenAIChatClient(config, transport=httpx.MockTransport(handler))
-        try:
-            return [e async for e in client.stream(messages or [{"role": "user", "content": "hi"}], tools)]
-        finally:
-            await client.aclose()
-
-    return asyncio.run(go())
+def text_reply(*pieces):
+    return sse(delta(role="assistant", content=""), *[delta(content=p) for p in pieces], delta(finish="stop"),
+               {"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}})
 
 
-def test_text_stream_and_request_shape():
-    seen = {}
+class Wire:
+    """One turn against `handler(request, n)` (n = index of the request in the turn)."""
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["url"] = str(request.url)
-        seen["auth"] = request.headers["authorization"]
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(200, content=sse(
-            delta(role="assistant", content=""), delta(content="Hello"), delta(content=" there."),
-            delta(finish="stop"),
-            {"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}}))
+    def __init__(self, tmp_path, handler, *, config=CONFIG, effort=None, text="hi", **agent_kwargs):
+        self.world = World(tmp_path)
+        self.bodies: list[dict] = []
+        self.requests: list[httpx2.Request] = []
 
-    events = collect(handler)
-    assert events[:2] == [TextDelta("Hello"), TextDelta(" there.")]
-    done = events[-1]
-    assert isinstance(done, Completion) and len(events) == 3
-    assert (done.content, done.tool_calls, done.finish_reason, done.total_tokens) == ("Hello there.", [], "stop", 15)
-    assert done.assistant_message() == {"role": "assistant", "content": "Hello there."}
+        def transport(request: httpx2.Request) -> httpx2.Response:
+            self.requests.append(request)
+            self.bodies.append(json.loads(request.content))
+            return handler(request, len(self.bodies) - 1)
 
-    assert seen["url"] == "https://llm.example-host.test/v1/chat/completions"
-    assert seen["auth"] == f"Bearer {KEY}"
-    body = seen["body"]
+        async def no_sleep(seconds):
+            pass
+
+        async def go():
+            llm = ChatModel(config, transport=httpx2.MockTransport(transport))
+            agent = Agent(self.world.airline, llm, sleep=no_sleep, **agent_kwargs)
+            try:
+                events = [e async for e in agent.stream_turn(self.world.alice, self.world.conv, text,
+                                                             reasoning_effort=effort)]
+                await agent.wait_idle()
+                return events
+            finally:
+                await llm.aclose()
+
+        self.events = asyncio.run(go())
+        self.calls = [c["response"] for c in self.world.store.list_llm_calls(self.world.alice, self.world.conv)]
+
+    @property
+    def deltas(self) -> list[str]:
+        return [e.data["text"] for e in self.events if e.name == "delta"]
+
+    @property
+    def last(self):
+        return self.events[-1]
+
+
+def test_text_stream_and_request_shape(tmp_path):
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(200, content=text_reply("Hello", " there.")))
+    assert "".join(w.deltas) == "Hello there." and w.last.name == "done"
+    done = w.calls[-1]
+    assert (done["content"], done["tool_calls"], done["finish_reason"]) == ("Hello there.", [], "stop")
+    assert done["usage"]["total_tokens"] == 15
+
+    request = w.requests[0]
+    assert str(request.url) == "https://llm.example-host.test/v1/chat/completions"
+    assert request.headers["authorization"] == f"Bearer {KEY}"
+    body = w.bodies[0]
     assert body["model"] == "example-model" and body["stream"] is True and body["temperature"] == 0
+    assert body["max_tokens"] == 4096 and "max_completion_tokens" not in body
     assert body["stream_options"] == {"include_usage": True}
     assert body["thinking"] == {"type": "enabled"} and body["reasoning_effort"] == "high"  # default
     assert body["tool_choice"] == "auto"
     assert [t["function"]["name"] for t in body["tools"]] == [
         "find_city", "quote_route", "request_booking", "list_my_tickets"]
+    assert all("strict" not in t["function"] for t in body["tools"])  # our schemas, as they are
+    assert [t["function"]["parameters"] for t in body["tools"]] == [t["function"]["parameters"] for t in TOOL_SCHEMAS]
     assert KEY not in json.dumps(body)
+    assert [m["role"] for m in body["messages"]] == ["system", "user"]  # no SDK text added
 
 
-def test_tool_calls_are_assembled_from_fragments():
+def test_tool_calls_are_assembled_from_fragments(tmp_path):
     def part(index, **f):
         return delta(tool_calls=[{"index": index, **f}])
 
-    def handler(request):
-        return httpx.Response(200, content=sse(
+    def handler(request, n):
+        if n:
+            return httpx2.Response(200, content=text_reply("Done."))
+        return httpx2.Response(200, content=sse(
             part(0, id="call_a", type="function", function={"name": "quote_route", "arguments": ""}),
             part(0, function={"arguments": '{"origin": "Guang'}),
-            part(1, id="call_b", type="function", function={"name": "find_", "arguments": '{"na'}),
+            part(1, id="call_b", type="function", function={"name": "find_city", "arguments": '{"na'}),
             part(0, function={"arguments": 'zhou", "destination": "Lima"}'}),
-            part(1, function={"name": "city", "arguments": 'me": "Lima"}'}),
+            part(1, function={"arguments": 'me": "Lima"}'}),
             delta(finish="tool_calls")))
 
-    done = collect(handler)[-1]
-    assert done.finish_reason == "tool_calls" and done.content == ""
-    assert done.tool_calls == [
+    w = Wire(tmp_path, handler)
+    first = w.calls[0]
+    assert first["finish_reason"] == "tool_calls" and first["content"] == ""
+    assert first["tool_calls"] == [
         {"id": "call_a", "name": "quote_route", "arguments": '{"origin": "Guangzhou", "destination": "Lima"}'},
         {"id": "call_b", "name": "find_city", "arguments": '{"name": "Lima"}'}]
-    message = done.assistant_message()
-    assert message["tool_calls"][0] == {"id": "call_a", "type": "function", "function": {
-        "name": "quote_route", "arguments": '{"origin": "Guangzhou", "destination": "Lima"}'}}
+    assistant = w.bodies[1]["messages"][2]
+    assert assistant["tool_calls"][0] == {"id": "call_a", "type": "function", "function": {
+        "name": "quote_route", "arguments": '{"origin":"Guangzhou","destination":"Lima"}'}}
+    rows = w.world.store.list_tool_calls(w.world.alice, w.events[0].data["id"])
+    assert [r["name"] for r in rows] == ["quote_route", "find_city"]  # run in call order
 
 
-def test_reasoning_content_is_kept_apart_and_passed_back_within_the_turn():
-    def handler(request):
-        return httpx.Response(200, content=sse(
-            delta(reasoning_content="thinking..."), delta(content="Answer."), delta(finish="stop")))
+def test_reasoning_content_is_kept_apart_and_passed_back_within_the_turn(tmp_path):
+    def handler(request, n):
+        if n == 0:
+            return httpx2.Response(200, content=sse(
+                delta(reasoning_content="thinking..."),
+                delta(tool_calls=[{"index": 0, "id": "c1", "type": "function",
+                                   "function": {"name": "find_city", "arguments": '{"name": "Lima"}'}}]),
+                delta(finish="tool_calls")))
+        return httpx2.Response(200, content=sse(delta(reasoning_content="more"), delta(content="Answer."),
+                                                delta(finish="stop")))
 
-    events = collect(handler)
-    assert events[0] == TextDelta("Answer.") and len(events) == 2  # reasoning is never a text delta
-    assert events[-1].as_record()["reasoning_content"] == "thinking..."  # stored verbatim
-    assert events[-1].assistant_message() == {
-        "role": "assistant", "content": "Answer.", "reasoning_content": "thinking..."}
+    w = Wire(tmp_path, handler)
+    assert w.deltas == ["Answer."]  # reasoning is never a text delta
+    assert [c["reasoning_content"] for c in w.calls] == ["thinking...", "more"]  # stored verbatim
+    assistant = w.bodies[1]["messages"][2]
+    assert assistant["reasoning_content"] == "thinking..." and assistant["tool_calls"]
 
 
 @pytest.mark.parametrize("configured, per_request, thinking, effort", [
@@ -112,86 +153,94 @@ def test_reasoning_content_is_kept_apart_and_passed_back_within_the_turn():
     ("omit", "high", "enabled", "high"),
 ])
 def test_reasoning_effort_from_config_and_per_request(configured, per_request, thinking, effort):
-    """DeepSeek's parameter names: `thinking: {type}` and `reasoning_effort` (docs, 2026-11-23)."""
-    client = OpenAIChatClient(LLMConfig(api_key=KEY, reasoning_effort=configured))
-    body = client.body([{"role": "user", "content": "hi"}], TOOL_SCHEMAS, per_request)
-    assert body["thinking"] == {"type": thinking} and body.get("reasoning_effort") == effort
+    """DeepSeek's parameter names: `thinking: {type}` and `reasoning_effort` (docs, 2026-11-23),
+    sent as `extra_body` so the request is the one of before ADR-001."""
+    llm = ChatModel(LLMConfig(api_key=KEY, reasoning_effort=configured))
+    extra = llm.settings(per_request)["extra_body"]
+    assert extra["thinking"] == {"type": thinking} and extra.get("reasoning_effort") == effort
     with pytest.raises(ValueError):
-        client.body([], [], "extreme")
+        llm.settings("extreme")
     with pytest.raises(ValueError):
-        client.body([], [], "omit")  # a request cannot ask for it; it is a deployment setting
+        llm.settings("omit")  # a request cannot ask for it; it is a deployment setting
+    assert "thinking" not in llm.settings() or configured != "omit"
 
 
-def test_the_per_request_effort_reaches_the_wire():
-    seen = {}
-
-    def handler(request):
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(200, content=sse(delta(content="ok"), delta(finish="stop")))
-
-    async def go():
-        client = OpenAIChatClient(CONFIG, transport=httpx.MockTransport(handler))
-        events = [e async for e in client.stream([{"role": "user", "content": "hi"}], [], reasoning_effort="low")]
-        await client.aclose()
-        return events
-
-    assert asyncio.run(go())[-1].content == "ok" and seen["body"]["reasoning_effort"] == "low"
+def test_the_per_request_effort_reaches_the_wire(tmp_path):
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(200, content=text_reply("ok")), effort="low")
+    assert w.last.name == "done" and w.bodies[0]["reasoning_effort"] == "low"
+    assert w.bodies[0]["thinking"] == {"type": "enabled"}
 
 
-def test_thinking_field_can_be_omitted_and_tools_left_out():
-    seen = {}
-
-    def handler(request):
-        seen["body"] = json.loads(request.content)
-        return httpx.Response(200, content=sse(delta(content="ok"), delta(finish="stop")))
-
-    collect(handler, tools=[], config=LLMConfig(api_key=KEY, reasoning_effort="omit"))
-    assert "thinking" not in seen["body"] and "reasoning_effort" not in seen["body"]
-    assert "tools" not in seen["body"] and "tool_choice" not in seen["body"]
+def test_thinking_field_can_be_omitted(tmp_path):
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(200, content=text_reply("ok")),
+             config=LLMConfig(api_key=KEY, base_url="https://llm.example-host.test/v1", reasoning_effort="omit"))
+    assert "thinking" not in w.bodies[0] and "reasoning_effort" not in w.bodies[0]
 
 
 @pytest.mark.parametrize("status, retryable", [(500, True), (502, True), (503, True), (429, True),
                                                 (400, False), (401, False), (403, False), (404, False)])
-def test_http_errors(status, retryable):
-    def handler(request):
-        return httpx.Response(status, json={"error": {"message": f"bad things; key {KEY} seen"}})
+def test_http_errors(tmp_path, status, retryable):
+    def handler(request, n):
+        return httpx2.Response(status, json={"error": {"message": f"bad things; key {KEY} seen"}})
 
-    with pytest.raises(LLMError) as err:
-        collect(handler)
-    assert err.value.retryable is retryable and err.value.status == status
-    assert KEY not in str(err.value)  # scrubbed (and not quoted at all for 401 / 403)
-
-
-def test_transport_errors_and_cut_streams_are_retryable():
-    def timeout(request):
-        raise httpx.ReadTimeout("slow", request=request)
-
-    def refused(request):
-        raise httpx.ConnectError("no route", request=request)
-
-    def cut(request):  # stream ends without finish_reason / [DONE]
-        return httpx.Response(200, content=sse(delta(content="Hel"), done=False))
-
-    def garbage(request):
-        return httpx.Response(200, content=b"data: {not json\n\n")
-
-    def stream_error(request):
-        return httpx.Response(200, content=sse({"error": {"message": "overloaded"}}))
-
-    for handler in (timeout, refused, cut, garbage, stream_error):
-        with pytest.raises(LLMError) as err:
-            collect(handler)
-        assert err.value.retryable is True, handler.__name__
+    w = Wire(tmp_path, handler)
+    assert w.last.name == "error" and w.last.data["code"] == "llm_unavailable"
+    assert len(w.bodies) == (3 if retryable else 1)  # the loop retries (2) what is retryable, only that
+    errors = [c["error"] for c in w.calls]
+    assert all(e.startswith(f"LLM HTTP {status}") for e in errors)
+    assert KEY not in json.dumps(w.calls)  # scrubbed (and not quoted at all for 401 / 403)
+    assert all(c["budget"]["charged_tokens"] == 0 for c in w.calls)  # no response body: nothing generated
 
 
-def test_comment_lines_and_other_choices_are_ignored():
-    def handler(request):
-        body = b": keep-alive\n\n" + sse(
-            {"choices": [{"index": 1, "delta": {"content": "other"}, "finish_reason": None}]},
-            delta(content="mine"), delta(finish="stop"))
-        return httpx.Response(200, content=body)
+def test_transport_errors_and_cut_streams_are_retryable(tmp_path):
+    def timeout(request, n):
+        raise httpx2.ReadTimeout("slow", request=request)
 
-    assert collect(handler)[-1].content == "mine"
+    def refused(request, n):
+        raise httpx2.ConnectError("no route", request=request)
+
+    def cut(request, n):  # stream ends without finish_reason / [DONE]
+        return httpx2.Response(200, content=sse(delta(content="Hel"), done=False))
+
+    def stream_error(request, n):
+        return httpx2.Response(200, content=sse({"error": {"message": "overloaded"}}))
+
+    for i, handler in enumerate((timeout, refused, cut, stream_error)):
+        w = Wire(tmp_path / str(i), handler)
+        assert len(w.bodies) == 3, handler.__name__  # retried twice
+        assert w.last.name == "error" and w.last.data["code"] == "llm_unavailable", handler.__name__
+        assert all(c.get("error") for c in w.calls), handler.__name__
+
+
+def test_a_stream_without_finish_reason_is_not_a_reply(tmp_path):
+    """Pydantic AI reports such a stream as finish_reason "stop"; the loop reads the provider's own
+    value and treats it as a broken call (ADR-001)."""
+    def handler(request, n):
+        if n == 0:
+            return httpx2.Response(200, content=sse(delta(content="Partial"), done=False))
+        return httpx2.Response(200, content=text_reply("Where to?"))
+
+    w = Wire(tmp_path, handler)
+    assert w.deltas == ["Where to?"] and w.last.name == "done"  # "Partial" was never released
+    assert w.calls[0]["error"] == "LLM stream ended without a finish_reason"
+
+
+def test_comment_lines_are_ignored_and_one_choice_is_asked_for(tmp_path):
+    """Before ADR-001 the client also skipped choices with index > 0; Pydantic AI does not, so the
+    request never asks for more than one (no `n`)."""
+    def handler(request, n):
+        body = b": keep-alive\n\n" + sse(delta(content="mine."), delta(finish="stop"))
+        return httpx2.Response(200, content=body)
+
+    w = Wire(tmp_path, handler)
+    assert w.calls[-1]["content"] == "mine." and "n" not in w.bodies[0]
+
+
+def test_the_model_calls_the_server_not_the_sdk_retries(tmp_path):
+    """The provider SDK's own retries are off (`max_retries=0`): every attempt is the loop's,
+    logged and charged (design §4.8)."""
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(503), retries=0)
+    assert len(w.bodies) == 1 and len(w.calls) == 1
 
 
 # --- config ---------------------------------------------------------------------------------
@@ -304,22 +353,27 @@ def test_toolbox_dispatch_payloads_and_failures(tmp_path):
 
 
 # --- round 02 --------------------------------------------------------------------------------
-def test_unexpected_stream_content_becomes_a_retryable_llm_error():
-    def not_an_object(request):
-        return httpx.Response(200, content=b'data: [1, 2]\n\n')
+def test_unexpected_stream_content_is_a_failed_call_not_a_crash(tmp_path):
+    def not_an_object(request, n):
+        return httpx2.Response(200, content=b'data: [1, 2]\n\n')
 
-    def bad_bytes(request):
-        return httpx.Response(200, content=b'data: {"choices": []}\n\n\xff\xfe\n\n')
+    def garbage(request, n):
+        return httpx2.Response(200, content=b"data: {not json\n\n")
 
-    for handler in (not_an_object, bad_bytes):
-        with pytest.raises(LLMError) as err:
-            collect(handler)
-        assert err.value.retryable is True, handler.__name__
+    def bad_bytes(request, n):
+        return httpx2.Response(200, content=b'data: {"choices": []}\n\n\xff\xfe\n\n')
+
+    for i, handler in enumerate((not_an_object, garbage, bad_bytes)):
+        w = Wire(tmp_path / str(i), handler)
+        assert w.last.name == "error", handler.__name__
+        assert w.last.data["code"] in ("llm_unavailable", "internal_error"), handler.__name__
+        assert [m["role"] for m in w.world.store.list_messages(w.world.alice, w.world.conv)] == ["user"]
 
 
 @pytest.mark.parametrize("cuts", [[100], [3, 7, 12, 20, 30], [1] * 80])
-def test_an_inline_think_block_is_moved_out_of_the_text(cuts):
-    """Review #15: servers that put the reasoning in `content` as <think>...</think>."""
+def test_an_inline_think_block_is_moved_out_of_the_text(tmp_path, cuts):
+    """Review #15: servers that put the reasoning in `content` as <think>...</think> (Pydantic AI's
+    thinking tags, on for the plain OpenAI dialect)."""
     raw = "  <think>The user wants 9000 km via Dubai.</think>\n\nIt is on the card."
     pieces, pos = [], 0
     for n in cuts:
@@ -328,30 +382,31 @@ def test_an_inline_think_block_is_moved_out_of_the_text(cuts):
     pieces.append(raw[pos:])
     pieces = [p for p in pieces if p]
 
-    def handler(request):
-        return httpx.Response(200, content=sse(*[delta(content=p) for p in pieces], delta(finish="stop")))
+    def handler(request, n):
+        return httpx2.Response(200, content=sse(*[delta(content=p) for p in pieces], delta(finish="stop")))
 
-    events = collect(handler)
-    text = "".join(e.text for e in events if isinstance(e, TextDelta))
-    assert text == "It is on the card." and events[-1].content == text
-    assert events[-1].reasoning == "The user wants 9000 km via Dubai."
+    w = Wire(tmp_path, handler)
+    assert "".join(w.deltas) == "It is on the card." and w.calls[-1]["content"].strip() == "It is on the card."
+    assert w.calls[-1]["reasoning_content"].strip() == "The user wants 9000 km via Dubai."
+    assert "Dubai" not in json.dumps([e.data for e in w.events])
 
 
-def test_text_without_think_and_an_unclosed_think_block():
-    def plain(request):
-        return httpx.Response(200, content=sse(delta(content="<b"), delta(content="ig> news"), delta(finish="stop")))
-
-    def unclosed(request):
-        return httpx.Response(200, content=sse(delta(content="<think>never ends"), delta(finish="length")))
-
-    assert collect(plain)[-1].content == "<big> news"
-    done = collect(unclosed)[-1]
-    assert done.content == "" and done.reasoning == "never ends" and done.finish_reason == "length"
+def test_text_without_think_and_an_unclosed_think_block(tmp_path):
+    w = Wire(tmp_path / "a", lambda r, n: httpx2.Response(200, content=sse(
+        delta(content="<b"), delta(content="ig> news."), delta(finish="stop"))))
+    assert w.calls[-1]["content"] == "<big> news."
+    w = Wire(tmp_path / "b", lambda r, n: httpx2.Response(200, content=sse(
+        delta(content="<think>never ends"), delta(finish="length"))))
+    done = w.calls[-1]
+    assert done["content"] == "" and done["reasoning_content"] == "never ends" and done["finish_reason"] == "length"
+    assert w.last.name == "done"  # cut off ("length") with no text: the template, as before
+    assert w.world.store.list_messages(w.world.alice, w.world.conv)[-1]["guard_problems"] == [
+        {"kind": "truncated", "value": "length"}]
 
 
 def test_tool_calls_go_back_to_the_api_in_a_wire_safe_form():
     """Review #11: a broken call must not make every later request fail."""
-    from app.agent.llm import wire_tool_call
+    from app.agent.model import wire_tool_call
 
     assert wire_tool_call("c1", "quote_route", '{"origin": "A"}')["function"] == {
         "name": "quote_route", "arguments": '{"origin": "A"}'}

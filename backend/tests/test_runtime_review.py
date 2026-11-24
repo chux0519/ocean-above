@@ -218,27 +218,35 @@ def test_p1_2_one_failed_attempt_does_not_turn_a_long_conversation_into_the_temp
     assert estimate_tokens(failed["request"]["messages"], 4096) > 17_000
 
 
-def test_p1_2_the_client_reports_what_a_failed_call_received():
-    from .test_agent_llm import collect, delta, sse
-    import httpx
+def test_p1_2_the_client_reports_what_a_failed_call_received(tmp_path):
+    """What a failed call is charged follows from what it received (since ADR-001 checked on the
+    stored llm_calls of a wire-level turn, test_agent_llm.Wire, instead of on the old client)."""
+    import httpx2
 
-    def status(request):
-        return httpx.Response(503, json={"error": {"message": "overloaded"}})
+    from .test_agent_llm import Wire, delta, sse
 
-    def refused(request):
-        raise httpx.ConnectError("no route", request=request)
+    def status(request, n):
+        return httpx2.Response(503, json={"error": {"message": "overloaded"}})
 
-    def cut(request):  # 7 characters of reasoning, 3 of text, 9 of a tool call, then the stream ends
-        return httpx.Response(200, content=sse(
+    def refused(request, n):
+        raise httpx2.ConnectError("no route", request=request)
+
+    def cut(request, n):  # 7 characters of reasoning, 3 of text, 9 of a tool call, then the stream ends
+        return httpx2.Response(200, content=sse(
             delta(reasoning_content="Think. "), delta(content="Hel"),
-            delta(tool_calls=[{"index": 0, "id": "c1", "function": {"name": "find", "arguments": "{\"a\":"}}]),
+            delta(tool_calls=[{"index": 0, "id": "c1", "type": "function", "function": {"name": "find", "arguments": "{\"a\":"}}]),
             {"choices": [], "usage": {"total_tokens": 0}}, done=False))
 
     for handler, received in ((status, None), (refused, None), (cut, 19)):
-        with pytest.raises(LLMError) as err:
-            collect(handler)
-        assert err.value.received == received, handler.__name__
-    assert err.value.usage == {"total_tokens": 0}  # sent, but not a usable report (P2-1)
+        w = Wire(tmp_path / handler.__name__, handler, retries=0)
+        logged = w.world.store.list_llm_calls(w.world.alice, w.world.conv)
+        assert len(logged) == 1, handler.__name__
+        budget = logged[0]["response"]["budget"]
+        if received is None:  # no response body: the provider generated nothing
+            assert budget == {"charged_tokens": 0, "estimated": False, "turn_tokens": 0}, handler.__name__
+        else:  # charged from the 19 characters received; a total of 0 is not a usable report (P2-1)
+            assert budget["estimated"] is True
+            assert budget["charged_tokens"] == estimate_tokens(logged[0]["request"]["messages"], 4096, received)
 
 
 # ============================================================ P2-1 zero usage ===============
@@ -263,7 +271,9 @@ def test_p2_1_a_reported_total_of_zero_is_not_free(world):
 def test_p2_2_no_retry_starts_once_the_token_cap_is_reached(world):
     """One reported call uses the cap; its follow-up step fails mid-stream and is not retried."""
     cut = ["Hel", LLMError("LLM transport error: ReadError", retryable=True)]
-    llm = UsageLLM([Call("find_city", name="A")], cut, ["never sent"], usage={"total_tokens": 900})
+    # a full usage block: Pydantic AI reads prompt + completion tokens (a total alone is dropped)
+    llm = UsageLLM([Call("find_city", name="A")], cut, ["never sent"],
+                   usage={"prompt_tokens": 850, "completion_tokens": 50, "total_tokens": 900})
     agent = Agent(world.airline, llm, sleep=_no_sleep, budget=AgentBudget(max_total_tokens_per_turn=1000))
     events = run_turn(agent, world.alice, world.conv, "where is A")
     assert_stream(events)

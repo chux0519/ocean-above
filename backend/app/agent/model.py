@@ -116,6 +116,50 @@ def wire_tool_call(call_id: str, name: str, arguments: Any) -> dict:
             "function": {"name": name, "arguments": arguments if ok else "{}"}}
 
 
+class ThinkSplitter:
+    """Moves a `<think>...</think>` block at the start of `content` (servers that inline the
+    reasoning instead of using `reasoning_content`) out of the visible text."""
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self) -> None:
+        self.state = "start"  # start -> think -> text
+        self.buf = ""
+
+    def feed(self, text: str) -> tuple[str, str]:
+        """(visible text, reasoning text) for this chunk."""
+        if self.state == "text":
+            return text, ""
+        if self.state == "lead":  # white space right after </think> is dropped
+            text = text.lstrip()
+            if text:
+                self.state = "text"
+            return text, ""
+        self.buf += text
+        if self.state == "start":
+            head = self.buf.lstrip()
+            if self.OPEN.startswith(head):  # may still become "<think>"
+                return "", ""
+            if not head.startswith(self.OPEN):
+                self.state, out, self.buf = "text", self.buf, ""
+                return out, ""
+            self.state, self.buf = "think", head[len(self.OPEN):]
+        end = self.buf.find(self.CLOSE)
+        if end < 0:  # keep a possible partial "</think>" at the end
+            keep = max((k for k in range(1, len(self.CLOSE)) if self.buf.endswith(self.CLOSE[:k])), default=0)
+            reasoning, self.buf = self.buf[:len(self.buf) - keep], self.buf[len(self.buf) - keep:]
+            return "", reasoning
+        reasoning, rest = self.buf[:end], self.buf[end + len(self.CLOSE):].lstrip()
+        self.state, self.buf = ("text" if rest else "lead"), ""
+        return rest, reasoning
+
+    def finish(self) -> tuple[str, str]:
+        rest, self.buf = self.buf, ""
+        if self.state == "think":
+            return "", rest
+        return rest, ""
+
+
 # ------------------------------------------------------------------ errors -------------------
 class LLMError(Exception):
     """A failed LLM call. `received` says what it may have cost (06 review P1-2): None when no
@@ -162,8 +206,9 @@ class ChatModel:
     def __init__(self, config: LLMConfig, *, transport: httpx2.AsyncBaseTransport | None = None,
                  timeout: httpx2.Timeout | None = None, temperature: float = 0,
                  max_tokens: int = MAX_TOKENS, provider: str | None = None):
-        """`provider`: "deepseek" or "openai" (the request dialect); None: DeepSeek when the model
-        or the base URL says so, else plain OpenAI."""
+        """`provider`: the request dialect, "deepseek" (default, for every base URL: the dialect the
+        hand-written client spoke before ADR-001 - `max_tokens`, `reasoning_content` passed back as a
+        field) or "openai" (`max_completion_tokens`, reasoning passed back inline)."""
         self.config = config
         self.model = config.model  # the name, as llm_calls stores it
         self.reasoning_effort = config.reasoning_effort
@@ -172,10 +217,9 @@ class ChatModel:
         # trust_env: proxies from the environment, as before
         self._http = httpx2.AsyncClient(transport=transport, timeout=timeout or DEFAULT_TIMEOUT)
         provider_kwargs = {"api_key": config.api_key, "base_url": config.base_url, "http_client": self._http}
-        # DeepSeek's provider knows its wire quirks (reasoning_content passed back with tool calls,
-        # `max_tokens` instead of `max_completion_tokens`); any other server gets the plain OpenAI one
-        deepseek = provider == "deepseek" if provider else (
-            config.model.startswith("deepseek") or "deepseek" in config.base_url)
+        if provider not in (None, "deepseek", "openai"):
+            raise ValueError(f"unknown provider dialect {provider!r}")
+        deepseek = provider != "openai"
         provider = DeepSeekProvider(**provider_kwargs) if deepseek else OpenAIProvider(**provider_kwargs)
         # our context has mid-conversation system messages ([booking event], [earlier turns
         # omitted]); they go on the wire as system messages, as before, not as <system> blocks
