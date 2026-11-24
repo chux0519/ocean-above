@@ -365,7 +365,9 @@ def test_toolbox_dispatch_payloads_and_failures(tmp_path):
 
 
 # --- round 02 --------------------------------------------------------------------------------
-def test_unexpected_stream_content_is_a_failed_call_not_a_crash(tmp_path):
+def test_unexpected_stream_content_becomes_a_retryable_failed_call(tmp_path):
+    """Every malformed stream is a failed LLM call: retried, each attempt logged and charged (review
+    P2-2 / P2-8 of PR #53; an SDK parser error such as the one on a JSON array chunk included)."""
     def not_an_object(request, n):
         return httpx2.Response(200, content=b'data: [1, 2]\n\n')
 
@@ -377,15 +379,33 @@ def test_unexpected_stream_content_is_a_failed_call_not_a_crash(tmp_path):
 
     for i, handler in enumerate((not_an_object, garbage, bad_bytes)):
         w = Wire(tmp_path / str(i), handler)
-        assert w.last.name == "error", handler.__name__
-        assert w.last.data["code"] in ("llm_unavailable", "internal_error"), handler.__name__
+        assert w.last.name == "error" and w.last.data["code"] == "llm_unavailable", handler.__name__
+        assert len(w.bodies) == 3 and len(w.calls) == 3, handler.__name__
+        assert all(c["error"].startswith("LLM ") for c in w.calls), handler.__name__
         assert [m["role"] for m in w.world.store.list_messages(w.world.alice, w.world.conv)] == ["user"]
+
+
+def test_a_200_response_that_is_not_a_stream_is_charged(tmp_path):
+    """Review P2-2: a body was read (a gateway's HTML, a non-streamed JSON reply): it may have
+    cost tokens, so it is charged by estimate, not as "no response"."""
+    for i, body in enumerate((b"<html>gateway</html>", b'{"choices": [{"message": {"content": "hi"}}]}')):
+        w = Wire(tmp_path / str(i), lambda r, n, b=body: httpx2.Response(200, content=b), retries=0)
+        assert w.calls[0]["budget"]["estimated"] is True and w.calls[0]["budget"]["charged_tokens"] > 0
+
+
+def test_outbound_headers_are_the_ones_of_before(tmp_path):
+    """Review P2-6: no SDK fingerprint headers (OS, architecture, Python / package versions)."""
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(200, content=text_reply("ok")))
+    headers = {k.lower(): v for k, v in w.requests[0].headers.items()}
+    assert not [k for k in headers if k.startswith("x-stainless")]
+    assert headers["user-agent"] == "ocean-above"
+    assert headers["authorization"] == f"Bearer {KEY}" and headers["content-type"] == "application/json"
 
 
 @pytest.mark.parametrize("cuts", [[100], [3, 7, 12, 20, 30], [1] * 80])
 def test_an_inline_think_block_is_moved_out_of_the_text(tmp_path, cuts):
-    """Review #15: servers that put the reasoning in `content` as <think>...</think> (Pydantic AI's
-    thinking tags, on for the plain OpenAI dialect)."""
+    """Review #15: servers that put the reasoning in `content` as <think>...</think> (the loop's
+    ThinkSplitter; the SDK only splits a tag that arrives as its own chunk)."""
     raw = "  <think>The user wants 9000 km via Dubai.</think>\n\nIt is on the card."
     pieces, pos = [], 0
     for n in cuts:

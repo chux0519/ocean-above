@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
 
 from pydantic_ai import Agent as _Runtime
-from pydantic_ai import InstrumentationSettings, RunContext, Tool
+from pydantic_ai import InstrumentationSettings, RunContext, Tool, UsageLimits
 from pydantic_ai.capabilities import AbstractCapability, Instrumentation
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
 from pydantic_ai.messages import (FunctionToolResultEvent, PartDeltaEvent, PartStartEvent,
@@ -38,7 +38,7 @@ from .concurrency import ServerBusy, Threads, TurnConcurrency, TurnSlots
 from .config import EFFORTS
 from .context import build_context
 from .guard import CityIndex, ReplyGuard, SentenceBuffer
-from .model import ChatModel, Completion, LLMError, ThinkSplitter, llm_error, to_model_messages
+from .model import ChatModel, Completion, LLMError, ThinkSplitter, before_response, llm_error, to_model_messages
 from .prompt import system_prompt
 from .templates import CLICK_TO_BOOK, fallback_reply
 from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, MAX_RAW_ARGUMENTS, Outcome, Toolbox
@@ -119,6 +119,7 @@ class _Turn:
     step_logged: int = 0
     exhausted: bool = False  # a call was refused because the turn's calls were used up
     messages: list[dict] = field(default_factory=list)  # the context, OpenAI shape (see `_WireContext`)
+    attempt: int = 0  # failed attempts of the current step's LLM call (reset when a call succeeds)
     steps_task: asyncio.Future | None = None
     cancelled: bool = False  # `Agent.cancel` was called
 
@@ -201,7 +202,9 @@ class Agent:
                 tracer_provider=tracer_provider, include_content=False)))
         self._runtime: _Runtime[_Turn, str] = _Runtime(
             llm.chat, deps_type=_Turn, tools=self._sdk_tools(), capabilities=capabilities,
-            retries=SDK_TOOL_RETRIES, name="ocean-above")
+            # tool calls that come with text are run (no early end on text); the loop returns
+            # after a step without tool calls, so the SDK's End node is never reached
+            retries=SDK_TOOL_RETRIES, end_strategy="graceful", name="ocean-above")
 
     @property
     def max_steps(self) -> int:
@@ -405,26 +408,25 @@ class Agent:
         never executed: it gets a `tool_budget_exceeded` result (stored like any tool call, so
         every tool call of the completion has its result and the stored history stays well-formed).
         Once the turn's calls are used up and a call was refused, the turn ends with the template."""
-        attempt = 0
         while True:
             try:
-                return await self._run_steps(turn, messages, attempt)
-            except _RetryStep:
-                attempt += 1
+                return await self._run_steps(turn, messages)
+            except _RetryStep:  # the step's retry count is on the turn (`turn.attempt`)
+                pass
 
-    async def _run_steps(self, turn: _Turn, messages: list[dict], attempt: int) -> list[dict] | None:
+    async def _run_steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
         settings = self.llm.settings(turn.reasoning_effort)
+        # no SDK request limit: the steps budget (max 20 by env bounds) is the only one
         async with self._runtime.iter(None, message_history=to_model_messages(messages), deps=turn,
-                                      model_settings=settings) as run:
+                                      model_settings=settings, usage_limits=UsageLimits(request_limit=None)) as run:
             async for node in run:
                 if _Runtime.is_model_request_node(node):
-                    if attempt == 0 and (stop := turn.budget.stop_before_step()) is not None:
-                        return [stop]
+                    if turn.attempt == 0 and (stop := turn.budget.stop_before_step()) is not None:
+                        return [stop]  # (a retry belongs to the step already counted)
                     try:
-                        completion = await self._llm_step(turn, messages, run, node, attempt)
+                        completion = await self._llm_step(turn, messages, run, node)
                     except _Stopped as stopped:  # guard failure, or no retry left within the token cap
                         return stopped.problems
-                    attempt = 0
                     if not completion.tool_calls:
                         if completion.finish_reason != "stop":  # "length", "content_filter", ...
                             return [{"kind": "truncated", "value": str(completion.finish_reason)}]
@@ -456,9 +458,8 @@ class Agent:
                         messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
                     if turn.exhausted:
                         return [{"kind": "tool_budget", "value": str(self.budget.max_tool_calls_per_turn)}]
-                elif _Runtime.is_end_node(node):  # not reached: a step without tool calls returns above
-                    return None
-        return None  # pragma: no cover
+        # a step without tool calls returns above, before the run could reach its End node
+        raise AssertionError("the run ended without a step that returned")
 
     # ------------------------------------------------------------------ tools --------------
     def _sdk_tools(self) -> list[Tool]:
@@ -466,14 +467,16 @@ class Agent:
         errors). Sequential: one call at a time, in the order the model made them, so the budget
         admits them in order and the cards keep that order. `strict` off: the request carries the
         schemas exactly as before."""
+        def body(name: str) -> Callable[..., Awaitable[str]]:
+            async def run(ctx: RunContext[_Turn], **_args: Any) -> str:
+                # the arguments the model sent are taken raw from the completion in `_tool_call`
+                return (await self._tool_call(ctx.deps, ctx.tool_call_id or "", name)).for_llm()
+            return run
+
         tools = []
         for schema in TOOL_SCHEMAS:
             name = schema["function"]["name"]
-
-            async def run(ctx: RunContext[_Turn], _name: str = name, **_args: Any) -> str:
-                return (await self._tool_call(ctx.deps, ctx.tool_call_id or "", _name)).for_llm()
-
-            tool = Tool.from_schema(run, name=name, description=schema["function"]["description"],
+            tool = Tool.from_schema(body(name), name=name, description=schema["function"]["description"],
                                     json_schema=schema["function"]["parameters"], takes_ctx=True, sequential=True)
             tool.strict = False
             tools.append(tool)
@@ -566,10 +569,12 @@ class Agent:
         turn.text += piece
         turn.emit("delta", {"text": piece})
 
-    async def _llm_step(self, turn: _Turn, messages: list[dict], run: Any, node: Any, attempt: int) -> Completion:
+    async def _llm_step(self, turn: _Turn, messages: list[dict], run: Any, node: Any) -> Completion:
         """One LLM call (one attempt). Text is released as it streams. A failed call is logged
         and charged; it is retried (`_RetryStep`, after the backoff) only while none of its text
-        has been released, retries are left and the turn still has tokens."""
+        has been released, retries are left for this step (`turn.attempt`, reset when a call
+        succeeds) and the turn still has tokens."""
+        attempt = turn.attempt
         request = {"turn": turn.user_message["id"], "messages": list(messages),
                    "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
                    "reasoning_effort": self.llm.effort(turn.reasoning_effort)}
@@ -596,6 +601,8 @@ class Agent:
                 model=getattr(self.llm, "model", None))
 
         def got(n: int) -> None:
+            # output seen so far, for a call that fails part-way; a complete call is charged from
+            # its final response instead (`Completion.output_chars`, the same count)
             nonlocal received
             received = (received or 0) + n
 
@@ -612,7 +619,7 @@ class Agent:
 
         try:
             # the per-call time limit; leaving the block (a guard failure, the limit, a
-            # cancellation) closes the model's HTTP stream right away
+            # cancellation) closes the model's HTTP stream (on a real connection: at once)
             async with asyncio.timeout(self.llm_timeout):
                 async with node.stream(run.ctx) as stream:
                     async for event in stream:
@@ -642,6 +649,7 @@ class Agent:
                         thought += inline
                         show(text)
                     response = stream.response
+                _unique_call_ids(response)
                 text, inline = think.finish()
                 thought += inline
                 show(text)
@@ -663,10 +671,17 @@ class Agent:
             # recorded and charged (06 review P2-4); `_drain` waits for the record to be written
             log_call({"content": content, "aborted": "cancelled" if turn.cancelled else "turn_timeout"})
             raise
-        except (LLMError, TimeoutError, ModelAPIError, UnexpectedModelBehavior) as exc:
+        except Exception as exc:  # every other failure of the call is a failed, logged, charged call (review P2-2)
             if isinstance(exc, TimeoutError):  # this call's own time limit: output unknown
                 error, usage, received = LLMError("LLM call timed out", retryable=True), None, None
             else:
+                if not isinstance(exc, (LLMError, ModelAPIError, UnexpectedModelBehavior)):
+                    # not a known provider failure (an SDK parser error on an odd chunk, or a bug
+                    # here): retried like a broken stream, with the original kept in the log
+                    log.warning("LLM call failed with %s (conversation %s)", type(exc).__name__,
+                                turn.conversation_id, exc_info=exc)
+                if received is None and not before_response(exc):
+                    received = 0  # a response body was read, with no output in it (e.g. not SSE)
                 error = llm_error(exc, received=received, scrub=self.llm.config.api_key)
                 usage = error.usage
                 received = error.received if error.received is not None else (len(content) or None)
@@ -678,7 +693,9 @@ class Agent:
             if (stop := turn.budget.out_of_tokens()) is not None:
                 raise _Stopped([stop]) from None  # no retry past the token cap (P2-2)
             await self._sleep(self.backoff * 2 ** attempt)
+            turn.attempt = attempt + 1
             raise _RetryStep() from None
+        turn.attempt = 0
         record = completion.as_record()
         if _flooded(completion, self.budget):
             record["tool_calls_not_run"] = True  # build_context skips this completion
@@ -692,6 +709,22 @@ class Agent:
         if self._index is None or self._index[0] != net.fingerprint.id:
             self._index = (net.fingerprint.id, CityIndex(net.cities))
         return self._index[1]
+
+
+def _unique_call_ids(response: Any) -> None:
+    """Some OpenAI-compatible servers repeat a tool_call_id within one completion (`call_0` twice);
+    the SDK refuses such a response. Repeats get a suffix (`call_0~2`), in place, so the step runs
+    as it did before ADR-001 (review P2-1). The ids are ours to choose: they only pair a call with
+    its result."""
+    seen: set[str] = set()
+    for part in response.parts:
+        if isinstance(part, ToolCallPart) and part.tool_call_id:
+            call_id, n = part.tool_call_id, 1
+            while call_id in seen:
+                n += 1
+                call_id = f"{part.tool_call_id}~{n}"
+            part.tool_call_id = call_id
+            seen.add(call_id)
 
 
 def _flooded(completion: Completion, budget: AgentBudget) -> bool:

@@ -355,6 +355,23 @@ def test_retryable_errors_are_retried_with_backoff(world):
     assert [c["response"].get("attempt") for c in logged[:2]] == [1, 2]
 
 
+def test_every_step_has_its_own_retries(world):
+    """Review P1-1 of PR #53: the retry count belongs to the step. Step 1 fails once, step 2
+    fails twice; both recover, with attempts and backoff counted per step."""
+    agent, llm = make(world, *flaky(1), [Call("find_city", name="A")], *flaky(2), ["Done."])
+    events, message = turn(agent, world, "A?")
+    assert names(events)[-1] == "done" and message["text"] == "Done."
+    assert agent.sleeps == [0.5, 0.5, 1.0] and len(llm.requests) == 5
+    logged = world.store.list_llm_calls(world.alice, world.conv)
+    assert [c["response"].get("attempt") for c in logged] == [1, None, 1, 2, None]
+
+
+def test_retries_used_by_one_step_do_not_shrink_the_next(world):
+    agent, llm = make(world, *flaky(2), [Call("find_city", name="A")], *flaky(2), ["Done."])
+    events, message = turn(agent, world, "A?")
+    assert message["text"] == "Done." and agent.sleeps == [0.5, 1.0, 0.5, 1.0]
+
+
 def test_llm_unavailable_after_the_retries_keeps_the_user_message(world):
     agent, llm = make(world, *flaky(3))
     events = run_turn(agent, world.alice, world.conv, ASK)
@@ -842,20 +859,43 @@ def test_a_truncated_reply_is_replaced_by_the_template(world, reason):
 
 
 def test_a_plain_exception_mid_stream_after_output_falls_back_and_keeps_the_card(world):
-    """Review #10: not an LLMError (a parser bug, a store error) after a card and a sentence."""
+    """Review #10: not an LLMError after a card and a sentence. Since ADR-001 (review P2-2 of
+    PR #53) any exception while reading the model's stream is a failed LLM call: logged, charged,
+    not retried once text was released, so the template - and the card stays."""
     agent, _ = make(world, [QUOTE], ["It is on the card. ", AttributeError("'list' object has no attribute 'get'")])
     events, message = turn(agent, world)
     assert names(events) == ["user_message", "status", "card", "delta", "replace", "done"]
     assert message["cards"][0]["state"]["bookable"] is True
-    assert stored(world)[-1]["guard_problems"] == [{"kind": "internal_error", "value": "AttributeError"}]
+    problems = stored(world)[-1]["guard_problems"]
+    assert problems[0]["kind"] == "llm_error" and "AttributeError" in problems[0]["value"]
     assert world.status(message["cards"][0]["id"]) == "presented"
+    logged = world.store.list_llm_calls(world.alice, world.conv)
+    assert "AttributeError" in logged[-1]["response"]["error"] and logged[-1]["response"]["budget"]["estimated"]
 
 
-def test_a_plain_exception_before_any_output_is_an_internal_error(world):
-    agent, _ = make(world, [AttributeError("boom")])
+def test_a_plain_exception_before_any_output_is_a_failed_call(world):
+    """Before any output it is retried like a broken stream (each attempt logged); after the
+    retries the user message stays and the stream ends with llm_unavailable."""
+    agent, llm = make(world, [AttributeError("boom")], [AttributeError("boom")], [AttributeError("boom")])
     events = run_turn(agent, world.alice, world.conv, "hi")
-    assert names(events) == ["user_message", "error"] and events[-1].data["code"] == "internal_error"
+    assert names(events) == ["user_message", "error"] and events[-1].data["code"] == "llm_unavailable"
     assert [m["role"] for m in stored(world)] == ["user"]
+    assert len(llm.bodies) == 3 and agent.sleeps == [0.5, 1.0]
+    assert len(world.store.list_llm_calls(world.alice, world.conv)) == 3
+
+
+def test_a_bug_outside_the_model_call_is_an_internal_error(world, monkeypatch):
+    """Review #10's intent for code that is not the model call: a store error while recording a
+    tool call is a bug path (internal_error after output -> template), never a retry."""
+    def broken(*args, **kwargs):
+        raise RuntimeError("store is broken")
+
+    monkeypatch.setattr(world.store, "add_tool_call", broken)
+    agent, llm = make(world, [QUOTE], ["unused"])
+    events, message = turn(agent, world)
+    assert names(events)[-2:] == ["replace", "done"]
+    assert stored(world)[-1]["guard_problems"] == [{"kind": "internal_error", "value": "RuntimeError"}]
+    assert len(llm.bodies) == 1
 
 
 def test_a_broken_tool_call_does_not_poison_later_requests(world):

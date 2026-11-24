@@ -1,8 +1,7 @@
 """The LLM of the agent (ADR-001): a Pydantic AI `OpenAIChatModel` for an OpenAI-compatible chat
 completions API (DeepSeek by default), plus the small pieces of our own the loop needs around it.
 
-Pydantic AI owns the HTTP stream, chunk parsing, tool-call assembly and inline `<think>` blocks.
-Ours, here:
+Pydantic AI owns the HTTP stream, chunk parsing and tool-call assembly. Ours, here:
 - `ChatModel`: the model and the request settings of today's wire format (temperature, max_tokens,
   DeepSeek's `thinking` + `reasoning_effort` via `extra_body`, no SDK-side retries: the loop retries,
   logs and charges every attempt itself, design §4.8);
@@ -10,7 +9,10 @@ Ours, here:
 - `LLMError` and `llm_error()`: SDK and transport failures mapped to "retryable or not" and "how much
   output was received", the two things the loop's retry and charge rules need;
 - `to_model_messages()`: the OpenAI-style context the loop keeps (built from app.db by context.py)
-  as Pydantic AI `message_history`.
+  as Pydantic AI `message_history`;
+- `ThinkSplitter`: an inline `<think>` block in the text (the SDK only splits a tag that arrives as
+  its own chunk);
+- outbound headers as before: no SDK fingerprint headers.
 The API key only ever goes into the client's Authorization header.
 """
 from __future__ import annotations
@@ -30,7 +32,6 @@ from pydantic_ai.messages import (ModelMessage, ModelRequest, ModelResponse, Sys
 from pydantic_ai.models.openai import OpenAIChatModel  # noqa: E402
 from pydantic_ai.profiles import ModelProfile, merge_profile  # noqa: E402
 from pydantic_ai.providers.deepseek import DeepSeekProvider  # noqa: E402
-from pydantic_ai.providers.openai import OpenAIProvider  # noqa: E402
 from pydantic_ai.settings import ModelSettings  # noqa: E402
 
 from .budget import AgentBudget  # noqa: E402
@@ -38,6 +39,7 @@ from .config import EFFORTS, LLMConfig  # noqa: E402
 
 MAX_TOKENS = AgentBudget().max_output_tokens_per_call  # includes the reasoning tokens of thinking mode
 DEFAULT_TIMEOUT = httpx2.Timeout(connect=10, read=60, write=30, pool=10)
+USER_AGENT = "ocean-above"
 
 
 # ------------------------------------------------------------------ one LLM call -------------
@@ -201,9 +203,24 @@ def llm_error(exc: BaseException, *, received: int | None, scrub: str = "") -> L
                         retryable=status in (408, 409, 429) or status >= 500)
     if isinstance(exc, ModelAPIError):  # connection errors, timeouts, cut streams
         return LLMError(f"LLM transport error: {type(exc).__name__}", retryable=True, received=received)
-    if isinstance(exc, UnexpectedModelBehavior):  # a chunk or response of an unexpected shape
-        return LLMError(f"LLM stream could not be read: {type(exc).__name__}", retryable=True, received=received)
+    # UnexpectedModelBehavior (a chunk or response of an unexpected shape) and anything else the
+    # SDK raised while reading the stream
     return LLMError(f"LLM stream could not be read: {type(exc).__name__}", retryable=True, received=received)
+
+
+_NO_RESPONSE = (httpx2.ConnectError, httpx2.ConnectTimeout, httpx2.ProxyError, httpx2.PoolTimeout)
+
+
+def before_response(exc: BaseException) -> bool:
+    """The call failed before any response body was read: an HTTP error status, or the
+    connection could not be made (06 review P1-2: such a call generated nothing)."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, ModelHTTPError) or isinstance(exc, _NO_RESPONSE):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 # ------------------------------------------------------------------ the model ----------------
@@ -213,22 +230,19 @@ class ChatModel:
 
     def __init__(self, config: LLMConfig, *, transport: httpx2.AsyncBaseTransport | None = None,
                  timeout: httpx2.Timeout | None = None, temperature: float = 0,
-                 max_tokens: int = MAX_TOKENS, provider: str | None = None):
-        """`provider`: the request dialect, "deepseek" (default, for every base URL: the dialect the
-        hand-written client spoke before ADR-001 - `max_tokens`, `reasoning_content` passed back as a
-        field) or "openai" (`max_completion_tokens`, reasoning passed back inline)."""
+                 max_tokens: int = MAX_TOKENS):
+        """The request dialect is DeepSeek's for every base URL: the one the hand-written client
+        spoke before ADR-001 (`max_tokens`, `reasoning_content` passed back as a field)."""
         self.config = config
         self.model = config.model  # the name, as llm_calls stores it
         self.reasoning_effort = config.reasoning_effort
         self.temperature = temperature
         self.max_tokens = max_tokens
         # trust_env: proxies from the environment, as before
-        self._http = httpx2.AsyncClient(transport=transport, timeout=timeout or DEFAULT_TIMEOUT)
+        self._http = httpx2.AsyncClient(transport=transport, timeout=timeout or DEFAULT_TIMEOUT,
+                                        event_hooks={"request": [_plain_headers]})
         provider_kwargs = {"api_key": config.api_key, "base_url": config.base_url, "http_client": self._http}
-        if provider not in (None, "deepseek", "openai"):
-            raise ValueError(f"unknown provider dialect {provider!r}")
-        deepseek = provider != "openai"
-        provider = DeepSeekProvider(**provider_kwargs) if deepseek else OpenAIProvider(**provider_kwargs)
+        provider = DeepSeekProvider(**provider_kwargs)
         # our context has mid-conversation system messages ([booking event], [earlier turns
         # omitted]); they go on the wire as system messages, as before, not as <system> blocks
         # inside user turns with an announcement prepended (the SDK's default for this dialect)
@@ -259,6 +273,14 @@ class ChatModel:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+async def _plain_headers(request: httpx2.Request) -> None:
+    """The headers the hand-written client sent (review P2-6 of PR #53): no SDK fingerprint
+    (`x-stainless-*`: OS, architecture, Python and package versions), a neutral user agent."""
+    for name in [n for n in request.headers if n.lower().startswith("x-stainless")]:
+        del request.headers[name]
+    request.headers["user-agent"] = USER_AGENT
 
 
 # ------------------------------------------------------------------ history ------------------

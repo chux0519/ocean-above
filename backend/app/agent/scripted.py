@@ -11,8 +11,15 @@ usage), and the script sees the request as it would reach the provider:
 Failures are played as the wire would show them: an `LLMError` with a `status` before any output is
 that HTTP status; an `LLMError` without one is a connection error (with `received=n`, n characters
 of reasoning are streamed first, then the stream is cut); an `LLMError` after output cuts the stream
-(read error). Any other exception is raised as it is (a bug, not a provider failure).
+(read error). Any other exception is raised as it is, inside the client (the loop treats it
+as a failed call, like an SDK parser error).
+
+`streams` records each streamed response: "open" while it is read, "done" once `[DONE]` was sent,
+"closed early" when the client closed it before that (at the moment it closed it).
 A script that ends without a `Completion` ends the stream without a finish reason.
+
+Test support only: it ships with the app (evals and bench import it) but the server never builds
+one; `routes.install` makes a `ChatModel` from the environment unless a test passes an LLM in.
 """
 from __future__ import annotations
 
@@ -31,6 +38,9 @@ __all__ = ["Completion", "LLMError", "ScriptedLLM", "TextDelta"]
 @dataclass(frozen=True)
 class TextDelta:
     text: str
+
+
+DONE = b"data: [DONE]\n\n"
 
 
 def _chunk(delta: dict, finish: str | None = None, usage: dict | None = None) -> bytes:
@@ -77,22 +87,25 @@ class ScriptedLLM(ChatModel):
             if exc.received:
                 return self._stream(None, gen, failure=exc)
             raise httpx2.ConnectError(str(exc), request=request) from None
-        except Exception:  # anything else (a bug) is raised as it is
-            raise
         return self._stream(first, gen)
 
     def _stream(self, first: Any, gen: AsyncIterator[Any], failure: LLMError | None = None) -> httpx2.Response:
         index = len(self.streams)
         self.streams.append("open")
+        streams = self.streams
 
-        async def body() -> AsyncIterator[bytes]:
-            try:
+        class Body(httpx2.AsyncByteStream):
+            """Closed by the client: `aclose` is called when it stops reading the response."""
+
+            async def __aiter__(self) -> AsyncIterator[bytes]:
                 async for data in lines():
+                    if data == DONE:
+                        streams[index] = "done"
                     yield data
-                self.streams[index] = "done"
-            finally:
-                if self.streams[index] == "open":  # the client closed the response before its end
-                    self.streams[index] = "closed early"
+
+            async def aclose(self) -> None:
+                if streams[index] == "open":
+                    streams[index] = "closed early"
                 await gen.aclose()
 
         async def lines() -> AsyncIterator[bytes]:
@@ -113,9 +126,9 @@ class ScriptedLLM(ChatModel):
                     break
                 except LLMError as exc:  # a failure after output: the stream is cut
                     raise httpx2.ReadError(str(exc)) from None
-            yield b"data: [DONE]\n\n"
+            yield DONE
 
-        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body())
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=Body())
 
 
 def _completion(c: Completion) -> list[bytes]:
