@@ -1,8 +1,7 @@
-# Draft: app.db on SQLite — concurrency limits, benchmark, migration criteria (#41)
+# app.db on SQLite — concurrency limits, benchmark, migration criteria (#41)
 
-To be merged into `docs/design/design.md` as a new section (after §4.9, or in §11) by the
-coordinator. English, as requested for the final design doc. Measured numbers: see
-[results/](results/) — they hold for that machine and that run only.
+Linked from `docs/design/design.md` §11. English, as requested for the final design doc. Measured numbers: see
+[results/](../iterations/08-runtime/sqlite/results/) — they hold for that machine and that run only.
 
 ## X.1 What is serialized, and what is not
 

@@ -616,7 +616,7 @@ flowchart LR
 - 无航班日期、时刻、座位、乘客信息、支付、退改签（take-home 未要求；写进「真实上线还需要什么」）。
 - 出票需要一次点击：自然语言「订吧」只会弹出确认卡。这是为了让「未经确认不出票」由代码保证，而不是由 LLM 判断。
 - ReplyGuard 拦不住用文字写出的数；可能误伤用户提到的其他数字 → 白名单 + 模板回退，回退率在评测里统计。
-- 单进程、单 worker、SQLite；并发量有限，demo 足够。
+- 单进程、单 worker、SQLite；并发量有限，demo 足够。WAL 单写者、按会话的进程内锁、`_recheck` 在写事务内、基准实测和迁 PostgreSQL 的判断条件见 [sqlite-concurrency.md](sqlite-concurrency.md)（#41，实测：完整性 0 失败，单 worker 的 CPU 先饱和，约 200 req/s）。
 - 航班时刻、座位、库存：接口位置预留在 `airline/`，现在不实现、不编造。
 - Bonus（必交物之后）：thinking level 作为用户高级选项（默认 high）；BYOK（用户自带 key，只在浏览器保存、按请求发送，
   服务端不存不记）；默认 key 由网关层限流；用评测框架 bench DeepSeek flash 各 thinking level 的通过率与成本，

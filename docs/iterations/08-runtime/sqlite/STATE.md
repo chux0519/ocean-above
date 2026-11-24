@@ -6,7 +6,7 @@ booking logic or transaction boundaries; B1–B7 unchanged.
 ## Done
 | Deliverable | Where |
 |---|---|
-| Design section draft (English): WAL / single writer, per-conversation lock (in-process), single worker, `_recheck` inside the write transaction (+ candidate optimisation and TOCTOU analysis, **not implemented**), SQLite lock wait vs `conversation_busy` vs `server_busy`, why it is a conscious trade-off, benchmark, measured results, decision table (thresholds marked as example SLOs) | `design-section.md` |
+| Design section draft (English): WAL / single writer, per-conversation lock (in-process), single worker, `_recheck` inside the write transaction (+ candidate optimisation and TOCTOU analysis, **not implemented**), SQLite lock wait vs `conversation_busy` vs `server_busy`, why it is a conscious trade-off, benchmark, measured results, decision table (thresholds marked as example SLOs) | `docs/design/sqlite-concurrency.md` (merged) |
 | Timing hook: `app.store.db.set_timing_hook` / `OpTiming` — BEGIN wait, hold to COMMIT/ROLLBACK, total, outcome (commit / ok / rollback / busy / timeout / error). Off by default (no clock read at all when off) | `backend/app/store/db.py` |
 | Hook tests: off by default; the same scenario (commit, rollback, SQL error, lock-wait timeout, operation deadline) gives identical results with the hook on and off; spans and outcomes; wait measures a real lock; a raising hook changes nothing; no clock reads when off | `backend/tests/test_store_timing.py` |
 | Benchmark harness, no new dependencies (httpx + asyncio, uvicorn subprocess, fake LLM, isolated app.db + locations.db copy per level, fixed seed, integrity checks) | `backend/bench/` |
@@ -25,7 +25,7 @@ booking logic or transaction boundaries; B1–B7 unchanged.
 $0 — no real model was called (fake LLM only; budget was $0.15).
 
 ## For the coordinator
-- Merge `design-section.md` into `docs/design/design.md` (new section after §4.9 or in §11); §11's line
+- Merge `docs/design/sqlite-concurrency.md` (merged) into `docs/design/design.md` (new section after §4.9 or in §11); §11's line
   "单进程、单 worker、SQLite；并发量有限，demo 足够" can link to it.
 - Issue #41 says `timeout=30`; the code uses `BUSY_TIMEOUT = 10` s (since 06 P0b). The draft uses 10 s.
 - Files outside the plan's ownership list (tests only): `backend/tests/test_store_timing.py`, `backend/tests/test_bench.py`.
