@@ -5,6 +5,7 @@
 > - **Demo:** https://ocean-above.potafree.net — sign in with Google or an invite code (reviewers get theirs privately).
 > - **Run locally:** `cp .env.example .env` (add an LLM key), `mkdir -p locations && cp locations.db locations/`, `docker compose up -d --build` → http://localhost:3000 ([details](#run-locally)).
 > - **Design doc:** [DESIGN.md](DESIGN.md) (its TL;DR fits on one screen). Raw agent sessions: [`prompt history/`](prompt%20history/).
+> - **One-page poster:** [docs/infographic/poster.png](docs/infographic/poster.png) ([HTML](docs/infographic/poster.html), [PDF](docs/infographic/poster.pdf)).
 
 Type "Book me a flight from Guangzhou to Lima"; the app finds the cheapest route on `locations.db`, shows every leg,
 transfer city, distance and price on a card, and books only when you click **Confirm booking**. The take-home brief is

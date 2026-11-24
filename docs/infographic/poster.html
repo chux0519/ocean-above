@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ocean Above — poster</title>
+<meta name="viewport" content="width=1600">
+<style>
+@font-face {
+  font-family: "Geist";
+  src: url("../../frontend/src/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: block;
+}
+:root {
+  --ground: #FFFFFF;
+  --sunken: #F0EEEA;
+  --tint: #EEF3F8;          /* accent at ~8 % on white */
+  --ink: #1C1A17;
+  --ink-2: #5E5A54;
+  --ink-3: #6F6A63;
+  --hairline: #EBE8E3;
+  --border: #E2DFD9;
+  --muted-mark: #8F8A82;    /* de-emphasised configurations */
+  --accent: #1F5F99;
+  --ok: #1E7340;
+  --danger: #B3261E;
+}
+@page { size: 1600px 940px; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--ground); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  width: 1600px; height: 940px; overflow: hidden;
+  font-family: "Geist", system-ui, sans-serif;
+  color: var(--ink);
+  font-size: 13px; line-height: 1.42;
+  padding: 26px 36px 18px;
+  display: flex; flex-direction: column; gap: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+b, strong { font-weight: 600; }
+code { font-family: inherit; font-weight: 500; background: var(--sunken); padding: 0 3px; border-radius: 3px; font-size: 0.95em; }
+.src { color: var(--ink-3); font-size: 11px; line-height: 1.35; }
+
+/* header */
+header { display: block;
+  padding-bottom: 12px; border-bottom: 2px solid var(--accent); }
+header h1 { font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; }
+header h1 .brand { color: var(--accent); }
+header .sub { font-size: 15.5px; color: var(--ink-2); margin-top: 4px; }
+header .by { font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
+
+/* KPI row */
+.kpis { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
+.kpi { border: 1.5px solid var(--accent); border-radius: 8px; padding: 9px 16px;
+  display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; }
+.kpi .v { font-size: 40px; line-height: 1; font-weight: 600; color: var(--accent); letter-spacing: -0.02em; white-space: nowrap; }
+.kpi .v small { font-size: 26px; color: var(--ink-3); font-weight: 500; margin: 0 2px; }
+.kpi .l { font-size: 14px; font-weight: 600; line-height: 1.25; }
+.kpi .d { font-size: 12px; color: var(--ink-2); line-height: 1.3; margin-top: 2px; }
+.kpi .src { margin-top: 2px; }
+
+/* columns */
+main { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.05fr 0.95fr 1.1fr; gap: 22px; }
+.col { display: flex; flex-direction: column; gap: 9px; min-height: 0; }
+h2 { background: var(--accent); color: #fff; font-size: 17px; font-weight: 600; line-height: 1;
+  padding: 7px 12px; border-radius: 4px; display: flex; gap: 10px; }
+h2 .n { opacity: 0.8; }
+p { font-size: 13px; }
+.goal { background: var(--tint); border-left: 4px solid var(--accent); padding: 7px 11px; font-size: 13px; }
+figure { display: flex; flex-direction: column; gap: 4px; }
+figcaption { font-size: 11.5px; color: var(--ink-2); line-height: 1.35; }
+figcaption b { color: var(--ink); }
+svg text { font-family: "Geist", system-ui, sans-serif; }
+
+ul.pts { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+ul.pts li { position: relative; padding-left: 14px; font-size: 12.8px; line-height: 1.4; }
+ul.pts li::before { content: ""; position: absolute; left: 1px; top: 6.5px; width: 6px; height: 6px; background: var(--accent); border-radius: 1px; }
+
+/* results */
+.tests { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tests > div { background: var(--sunken); border-radius: 6px; padding: 9px 12px; }
+.tests .v { font-size: 26px; font-weight: 600; line-height: 1.1; }
+.tests .l { font-size: 11.5px; color: var(--ink-2); line-height: 1.25; }
+.findings { counter-reset: f; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.findings li { counter-increment: f; position: relative; padding-left: 20px; font-size: 12.8px; line-height: 1.38; }
+.findings li::before { content: counter(f) "."; position: absolute; left: 0; font-weight: 600; color: var(--accent); }
+
+footer { white-space: nowrap; border-top: 1px solid var(--border); padding-top: 8px; display: flex; justify-content: space-between; gap: 24px;
+  font-size: 12px; color: var(--ink-2); }
+footer b { color: var(--ink); }
+footer a { color: var(--accent); text-decoration: none; font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1><span class="brand">Ocean Above</span> — a flight-booking agent where code computes and only the user's click books</h1>
+    <div class="sub">An LLM parses the request and phrases the answer; deterministic code finds the cheapest route and the price; a ticket exists only after a click with a one-time nonce.</div>
+    <div class="by">Take-home for Quotr · 2026-11 · demo <a href="https://ocean-above.potafree.net" style="color:#1F5F99;text-decoration:none">ocean-above.potafree.net</a></div>
+  </div>
+</header>
+
+<section class="kpis">
+  <div class="kpi">
+    <div class="v">0</div>
+    <div>
+      <div class="l">safety violations</div>
+      <div class="d">in every real-model run, incl. all 405 benchmark runs: no ticket without a click, no unsourced number or city, no false "booked"</div>
+      <div class="src">DESIGN.md · Key numbers</div>
+    </div>
+  </div>
+  <div class="kpi">
+    <div class="v">96.3%<small>/</small>98.5%</div>
+    <div>
+      <div class="l">multi-turn task pass rate</div>
+      <div class="d">DeepSeek flash on the official API / on Bailian; N = 3 runs × 45 cases</div>
+      <div class="src">12-bench results/n3/bench.md</div>
+    </div>
+  </div>
+  <div class="kpi">
+    <div class="v">490,700</div>
+    <div>
+      <div class="l">served-city pairs identical</div>
+      <div class="d">production routes vs an independent Bellman-Ford reference: same price, distance and cities</div>
+      <div class="src">02-core acceptance</div>
+    </div>
+  </div>
+</section>
+
+<main>
+  <!-- column 1 -->
+  <div class="col">
+    <h2><span class="n">1</span> Problem and goal</h2>
+    <p>Users type <i>"Book me a flight from Guangzhou to Lima"</i>. The answer needs the cheapest route through hubs, correct distances and prices, and a booking only when the user agrees. An LLM reads the request well, but may invent a number or take "ok, thanks" as "yes, book".</p>
+    <div class="goal"><b>Goal:</b> let the LLM talk, let code compute every number, and let only the user's click book.</div>
+
+    <h2 style="margin-top:3px"><span class="n">2</span> Architecture</h2>
+    <figure>
+      <svg viewBox="0 0 520 392" width="100%" role="img" aria-label="Architecture: browser, FastAPI, agent loop with Pydantic AI Slim and four tools, airline service, pure core, locations.db and app.db; ReplyGuard checks text; a click with a nonce books through the API directly.">
+        <defs>
+          <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="#5E5A54"/></marker>
+          <marker id="arA" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="#1F5F99"/></marker>
+        </defs>
+        <style>
+          .bx{fill:#fff;stroke:#C9C4BC;stroke-width:1.2}
+          .bxo{fill:#EEF3F8;stroke:#1F5F99;stroke-width:1.4}
+          .bxs{fill:#F0EEEA;stroke:none}
+          .t{font-size:13px;font-weight:600;fill:#1C1A17}
+          .s{font-size:11px;fill:#5E5A54}
+          .ln{stroke:#5E5A54;stroke-width:1.3;fill:none}
+          .la{stroke:#1F5F99;stroke-width:2;fill:none}
+          .lab{font-size:11px;fill:#5E5A54}
+          .labA{font-size:11px;fill:#1F5F99;font-weight:600}
+        </style>
+
+        <!-- browser -->
+        <rect class="bx" x="44" y="2" width="474" height="40" rx="6"/>
+        <text class="t" x="58" y="20">Browser</text>
+        <text class="s" x="58" y="35">Next.js chat · itinerary, confirm and ticket cards rendered from server records</text>
+
+        <!-- api -->
+        <rect class="bx" x="44" y="66" width="300" height="38" rx="6"/>
+        <text class="t" x="58" y="83">FastAPI <tspan class="s">api/ — one worker</tspan></text>
+        <text class="s" x="58" y="97">routes, SSE stream, login, ownership, daily limits</text>
+        <line class="ln" x1="194" y1="42" x2="194" y2="64" marker-end="url(#ar)" marker-start="url(#ar)"/>
+        <text class="lab" x="200" y="57">messages · SSE</text>
+
+        <!-- agent -->
+        <rect class="bxo" x="44" y="128" width="300" height="104" rx="6"/>
+        <text class="t" x="58" y="146">Agent loop <tspan class="s">(ours: budgets, retries, history, Stop)</tspan></text>
+        <rect class="bx" x="58" y="155" width="272" height="26" rx="4"/>
+        <text class="s" x="68" y="172"><tspan font-weight="600" fill="#1C1A17">Pydantic AI Slim</tspan> — stream, tool dispatch, cancel</text>
+        <text class="s" x="58" y="198">4 tools, names and ids in, never numbers:</text>
+        <text class="s" x="58" y="214"><tspan fill="#1C1A17" font-weight="500">find_city · quote_route · request_booking</tspan></text>
+        <text class="s" x="58" y="227"><tspan fill="#1C1A17" font-weight="500">list_my_tickets</tspan>  ·  no <tspan font-weight="600" fill="#B3261E">book</tspan> tool</text>
+        <line class="ln" x1="194" y1="104" x2="194" y2="126" marker-end="url(#ar)"/>
+
+        <!-- LLM -->
+        <rect class="bx" x="372" y="150" width="146" height="40" rx="6"/>
+        <text class="t" x="384" y="167">LLM</text>
+        <text class="s" x="384" y="182">DeepSeek flash</text>
+        <line class="ln" x1="330" y1="168" x2="370" y2="168" marker-end="url(#ar)" marker-start="url(#ar)"/>
+
+        <!-- ReplyGuard -->
+        <rect class="bxo" x="372" y="66" width="146" height="54" rx="6"/>
+        <text class="t" x="384" y="83">ReplyGuard</text>
+        <text class="s" x="384" y="97">every number and city</text>
+        <text class="s" x="384" y="111">must be in a tool record</text>
+        <path class="ln" d="M344 140 L358 140 L358 108 L370 108" marker-end="url(#ar)"/>
+        <line class="ln" x1="445" y1="64" x2="445" y2="44" marker-end="url(#ar)"/>
+        <text class="lab" x="451" y="58">text</text>
+
+        <!-- airline -->
+        <rect class="bx" x="44" y="258" width="300" height="40" rx="6"/>
+        <text class="t" x="58" y="275">airline/</text>
+        <text class="s" x="58" y="290">quotes, cards, nonces, booking + fresh re-check</text>
+        <line class="ln" x1="194" y1="232" x2="194" y2="256" marker-end="url(#ar)"/>
+
+        <!-- core -->
+        <rect class="bx" x="44" y="322" width="300" height="40" rx="6"/>
+        <text class="t" x="58" y="339">core/ <tspan class="s">pure, deterministic, Decimal</tspan></text>
+        <text class="s" x="58" y="354">network · cheapest route · pricing · nearest served</text>
+        <line class="ln" x1="194" y1="298" x2="194" y2="320" marker-end="url(#ar)"/>
+
+        <!-- click path -->
+        <path class="la" d="M44 85 L18 85 L18 278 L42 278" marker-end="url(#arA)"/>
+        <text class="labA" transform="translate(12 248) rotate(-90)">user click + one-time nonce → book</text>
+
+        <!-- databases -->
+        <g>
+          <path d="M376 320 v38 a64 8 0 0 0 128 0 v-38" fill="#F0EEEA" stroke="#8F8A82" stroke-width="1.2"/>
+          <ellipse cx="440" cy="320" rx="64" ry="8" fill="#fff" stroke="#8F8A82" stroke-width="1.2"/>
+          <text class="t" x="440" y="343" text-anchor="middle">locations.db</text>
+          <text class="s" x="440" y="357" text-anchor="middle">read-only</text>
+        </g>
+        <line class="ln" x1="344" y1="342" x2="374" y2="342" marker-end="url(#ar)"/>
+        <g>
+          <path d="M376 220 v38 a64 8 0 0 0 128 0 v-38" fill="#F0EEEA" stroke="#8F8A82" stroke-width="1.2"/>
+          <ellipse cx="440" cy="220" rx="64" ry="8" fill="#fff" stroke="#8F8A82" stroke-width="1.2"/>
+          <text class="t" x="440" y="243" text-anchor="middle">app.db <tspan class="s">SQLite</tspan></text>
+          <text class="s" x="440" y="257" text-anchor="middle">chats, quotes, tickets</text>
+        </g>
+        <line class="ln" x1="344" y1="272" x2="374" y2="256" marker-end="url(#ar)"/>
+
+        <!-- otel -->
+        <rect x="44" y="374" width="474" height="17" rx="4" fill="none" stroke="#8F8A82" stroke-dasharray="4 3"/>
+        <text class="s" x="281" y="386.5" text-anchor="middle">optional: OpenTelemetry spans → Phoenix (agent, LLM, tool) · no outbound export by default</text>
+      </svg>
+      <figcaption><b>Fig. 1</b> Facts reach the user as cards built from records; text only after ReplyGuard. The agent has no path to booking. <span class="src">DESIGN.md §1.1–1.2</span></figcaption>
+    </figure>
+  </div>
+
+  <!-- column 2 -->
+  <div class="col">
+    <h2><span class="n">3</span> The booking gate</h2>
+    <figure>
+      <svg viewBox="0 0 470 352" width="100%" role="img" aria-label="Booking gate: quote card, request_booking shows a confirm card only, user click with one-time nonce, rules B1 to B7 re-checked, ticket. Stop and failed checks never book.">
+        <defs>
+          <marker id="ar2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#5E5A54"/></marker>
+          <marker id="ar3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#B3261E"/></marker>
+        </defs>
+        <style>
+          .st{fill:#fff;stroke:#C9C4BC;stroke-width:1.2}
+          .stA{fill:#EEF3F8;stroke:#1F5F99;stroke-width:1.6}
+          .stK{fill:#EAF5ED;stroke:#1E7340;stroke-width:1.4}
+          .no{fill:#FCEDEB;stroke:none}
+          .num{font-size:12px;font-weight:600;fill:#fff}
+          .t2{font-size:13px;font-weight:600;fill:#1C1A17}
+          .s2{font-size:11px;fill:#5E5A54}
+          .n2{font-size:11px;fill:#B3261E;font-weight:500}
+          .who{font-size:11px;fill:#6F6A63;font-weight:500}
+        </style>
+        <!-- lane labels -->
+        <text class="who" x="0" y="12">who acts</text>
+        <text class="who" x="74" y="12">step</text>
+        <text class="who" x="352" y="12">never books</text>
+
+        <!-- step 1 -->
+        <text class="who" x="0" y="44">code</text>
+        <rect class="st" x="74" y="22" width="262" height="46" rx="6"/>
+        <circle cx="90" cy="45" r="9" fill="#1F5F99"/><text class="num" x="90" y="49" text-anchor="middle">1</text>
+        <text class="t2" x="106" y="40">Quote card</text>
+        <text class="s2" x="106" y="57">every leg, transfer city, km and price</text>
+        <line x1="205" y1="68" x2="205" y2="84" stroke="#5E5A54" stroke-width="1.3" marker-end="url(#ar2)"/>
+
+        <!-- step 2 -->
+        <text class="who" x="0" y="108">LLM</text>
+        <rect class="st" x="74" y="86" width="262" height="46" rx="6"/>
+        <circle cx="90" cy="109" r="9" fill="#1F5F99"/><text class="num" x="90" y="113" text-anchor="middle">2</text>
+        <text class="t2" x="106" y="104">request_booking</text>
+        <text class="s2" x="106" y="121">can only make the confirm card appear</text>
+        <line x1="205" y1="132" x2="205" y2="148" stroke="#5E5A54" stroke-width="1.3" marker-end="url(#ar2)"/>
+        <rect class="no" x="352" y="86" width="118" height="46" rx="6"/>
+        <text class="n2" x="362" y="104">"ok, book it" in text</text>
+        <text class="n2" x="362" y="121">→ card, no ticket</text>
+        <line x1="336" y1="109" x2="350" y2="109" stroke="#B3261E" stroke-width="1.2" stroke-dasharray="3 2" marker-end="url(#ar3)"/>
+
+        <!-- step 3 -->
+        <text class="who" x="0" y="172" fill="#1F5F99">user</text>
+        <rect class="stA" x="74" y="150" width="262" height="46" rx="6"/>
+        <circle cx="90" cy="173" r="9" fill="#1F5F99"/><text class="num" x="90" y="177" text-anchor="middle">3</text>
+        <text class="t2" x="106" y="168">Click "Confirm booking"</text>
+        <text class="s2" x="106" y="185">one-time nonce, never shown to the LLM</text>
+        <line x1="205" y1="196" x2="205" y2="212" stroke="#5E5A54" stroke-width="1.3" marker-end="url(#ar2)"/>
+        <rect class="no" x="352" y="150" width="118" height="46" rx="6"/>
+        <text class="n2" x="362" y="168">Stop: card never</text>
+        <text class="n2" x="362" y="185">presented, no nonce</text>
+        <line x1="336" y1="173" x2="350" y2="173" stroke="#B3261E" stroke-width="1.2" stroke-dasharray="3 2" marker-end="url(#ar3)"/>
+
+        <!-- step 4 -->
+        <text class="who" x="0" y="250">code</text>
+        <rect class="st" x="74" y="214" width="262" height="74" rx="6"/>
+        <circle cx="90" cy="237" r="9" fill="#1F5F99"/><text class="num" x="90" y="241" text-anchor="middle">4</text>
+        <text class="t2" x="106" y="232">B1–B7 in one transaction</text>
+        <text class="s2" x="106" y="249">owner · card presented · nonce unused</text>
+        <text class="s2" x="106" y="264">≤ 15 min · one ticket per quote</text>
+        <text class="s2" x="106" y="279">same route and price on today's locations.db</text>
+        <line x1="205" y1="288" x2="205" y2="304" stroke="#5E5A54" stroke-width="1.3" marker-end="url(#ar2)"/>
+        <rect class="no" x="352" y="214" width="118" height="74" rx="6"/>
+        <text class="n2" x="362" y="232">any rule fails →</text>
+        <text class="n2" x="362" y="249">no ticket; changed</text>
+        <text class="n2" x="362" y="266">data → new quote,</text>
+        <text class="n2" x="362" y="283">confirm again</text>
+        <line x1="336" y1="251" x2="350" y2="251" stroke="#B3261E" stroke-width="1.2" stroke-dasharray="3 2" marker-end="url(#ar3)"/>
+
+        <!-- step 5 -->
+        <rect class="stK" x="74" y="306" width="262" height="44" rx="6"/>
+        <circle cx="90" cy="328" r="9" fill="#1E7340"/><text class="num" x="90" y="332" text-anchor="middle">5</text>
+        <text class="t2" x="106" y="325">Ticket</text>
+        <text class="s2" x="106" y="341">booked ⇔ exactly one ticket</text>
+      </svg>
+      <figcaption><b>Fig. 2</b> Enforced by code, not the model. B1–B7 are model-tested; 300 simultaneous clicks → 0 double bookings. <span class="src">DESIGN.md §4, sqlite-concurrency §X.5</span></figcaption>
+    </figure>
+
+    <h2 style="margin-top:3px"><span class="n">5</span> Choices</h2>
+    <ul class="pts">
+      <li><b>Own loop → Pydantic AI Slim.</b> Stop closes the upstream stream (0.6 ms on DeepSeek); tracing is standard. Booking stays our code. <span class="src">ADR-001</span></li>
+      <li><b>OpenTelemetry → Phoenix,</b> optional; no export by default. <span class="src">ADR-001</span></li>
+      <li><b>SQLite, one worker.</b> PostgreSQL once a second instance or more writes are needed. <span class="src">§7.4</span></li>
+      <li><b>A real airline</b> adds schedules, seat inventory, fares, payment and PNRs behind <code>airline/</code>. <span class="src">§7.2</span></li>
+    </ul>
+  </div>
+
+  <!-- column 3 -->
+  <div class="col">
+    <h2><span class="n">4</span> Results</h2>
+    <figure>
+      <svg id="bench" viewBox="0 0 560 210" width="100%" role="img" aria-label="Benchmark of three configurations: pass rate with 95 percent interval, tokens per successful task, and chat-turn latency p50 to p95."></svg>
+      <figcaption><b>Fig. 3</b> Three configurations, 135 runs each (N = 3 × 45 multi-turn cases, reasoning effort high), pass/fail from deterministic checks, no LLM judge. <b style="color:#1F5F99">Blue</b> = production. <b>Small sample:</b> compare the intervals, not the points. <span class="src">12-bench results/n3/bench.md; DESIGN.md §7.3</span></figcaption>
+    </figure>
+    <ol class="findings">
+      <li><b>Same model, two providers: indistinguishable</b> in quality and tokens; Bailian has a longer p95.</li>
+      <li><b>Qwen3.8-flash</b> passes fewer runs (91.1%), uses about 2× the reasoning tokens and is slower.</li>
+      <li><b>Every failure was a trajectory deviation that cannot book;</b> cost per successful task $0.0008 on the official API.</li>
+    </ol>
+
+    <div style="font-size:13px;font-weight:600;margin-top:4px">Test layers</div>
+    <div class="tests">
+      <div><div class="v">1,005</div><div class="l">backend tests: unit, property, model-based</div></div>
+      <div><div class="v">114</div><div class="l">frontend tests (vitest)</div></div>
+      <div><div class="v">45</div><div class="l">multi-turn eval cases; fake LLM every run, real model on demand</div></div>
+    </div>
+    <div class="src">DESIGN.md · Key numbers and §6.2</div>
+  </div>
+</main>
+
+<footer>
+  <div><b>Demo</b> <a href="https://ocean-above.potafree.net">ocean-above.potafree.net</a> &nbsp;·&nbsp; <b>Read next</b> DESIGN.md (TL;DR on one screen) → docs/design/adr-001-agent-runtime.md → docs/iterations/12-bench/ &nbsp;·&nbsp; <b>Raw agent sessions</b> prompt history/</div>
+  <div>Numbers from the repo's records; sources in grey.</div>
+</footer>
+
+<script>
+(() => {
+// Benchmark small multiples. Values copied from docs/iterations/12-bench/results/n3/bench.md.
+const rows = [
+  { name: "DeepSeek flash", sub: "official API", prod: true,  pass: 96.3, lo: 92, hi: 98,  passTxt: "130/135", tok: 13788, p50: 2.19, p95: 3.40 },
+  { name: "DeepSeek flash", sub: "Bailian",      prod: false, pass: 98.5, lo: 95, hi: 100, passTxt: "133/135", tok: 13475, p50: 2.17, p95: 4.23 },
+  { name: "Qwen3.8-flash",  sub: "Bailian",      prod: false, pass: 91.1, lo: 85, hi: 95,  passTxt: "123/135", tok: 15395, p50: 3.08, p95: 7.85 },
+];
+const NS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById("bench");
+const C = { ink: "#1C1A17", ink2: "#5E5A54", ink3: "#6F6A63", grid: "#EBE8E3", accent: "#1F5F99", mute: "#8F8A82", surf: "#FFFFFF" };
+function el(tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  svg.appendChild(e); return e;
+}
+function tip(e, s) { const t = document.createElementNS(NS, "title"); t.textContent = s; e.appendChild(t); }
+
+const labelW = 112, top = 40, rowH = 60, gap = 18;
+const panels = [
+  { x: labelW + 4, w: 136, title: "Task pass rate", unit: "dot + 95% interval", domain: [80, 100], ticks: [80, 90, 100], fmt: v => v + "%" },
+  { x: labelW + 4 + 136 + gap, w: 136, title: "Tokens / success", unit: "all tokens ÷ passed runs", domain: [0, 16000], ticks: [0, 8000, 16000], fmt: v => v === 0 ? "0" : (v / 1000) + "K" },
+  { x: labelW + 4 + 2 * (136 + gap), w: 136, title: "Chat turn latency", unit: "p50 bar, p95 tick (s)", domain: [0, 8], ticks: [0, 4, 8], fmt: v => v + " s" },
+];
+const yBase = top + rows.length * rowH;
+
+// row labels
+rows.forEach((r, i) => {
+  const cy = top + i * rowH + rowH / 2;
+  el("text", { x: 0, y: cy - 2, "font-size": 12.5, "font-weight": 600, fill: C.ink }, r.name);
+  el("text", { x: 0, y: cy + 13, "font-size": 11, fill: C.ink2 }, r.sub + (r.prod ? " · prod" : ""));
+});
+
+panels.forEach((p, pi) => {
+  const sx = v => p.x + (v - p.domain[0]) / (p.domain[1] - p.domain[0]) * p.w;
+  el("text", { x: p.x, y: 12, "font-size": 12.5, "font-weight": 600, fill: C.ink }, p.title);
+  el("text", { x: p.x, y: 27, "font-size": 11, fill: C.ink3 }, p.unit);
+  p.ticks.forEach(t => {
+    el("line", { x1: sx(t), x2: sx(t), y1: top, y2: yBase, stroke: C.grid, "stroke-width": 1 });
+    el("text", { x: sx(t), y: yBase + 14, "font-size": 11, fill: C.ink3, "text-anchor": t === p.domain[0] ? "start" : (t === p.domain[1] ? "end" : "middle"), "font-variant-numeric": "tabular-nums" }, p.fmt(t));
+  });
+  rows.forEach((r, i) => {
+    const cy = top + i * rowH + rowH / 2;
+    const col = r.prod ? C.accent : C.mute;
+    if (pi === 0) {
+      const w = el("line", { x1: sx(r.lo), x2: sx(r.hi), y1: cy, y2: cy, stroke: col, "stroke-width": 2, "stroke-linecap": "round" });
+      [r.lo, r.hi].forEach(v => el("line", { x1: sx(v), x2: sx(v), y1: cy - 5, y2: cy + 5, stroke: col, "stroke-width": 2, "stroke-linecap": "round" }));
+      const d = el("circle", { cx: sx(r.pass), cy, r: 5, fill: col, stroke: C.surf, "stroke-width": 2 });
+      tip(d, `${r.name} (${r.sub}): ${r.passTxt} = ${r.pass}%, 95% interval ${r.lo}–${r.hi}%`);
+      el("text", { x: sx(r.pass), y: cy - 9, "font-size": 11.5, "font-weight": 600, fill: C.ink, "text-anchor": "middle" }, r.pass + "%");
+    } else if (pi === 1) {
+      const x0 = sx(0), x1 = sx(r.tok), h = 14;
+      const b = el("path", { d: `M${x0} ${cy - h / 2} H${x1 - 4} a4 4 0 0 1 4 4 V${cy + h / 2 - 4} a4 4 0 0 1 -4 4 H${x0} Z`, fill: col });
+      tip(b, `${r.name} (${r.sub}): ${r.tok.toLocaleString("en-US")} tokens per successful task`);
+      el("text", { x: x1 - 2, y: cy - h / 2 - 4, "font-size": 11.5, "font-weight": 600, fill: C.ink, "text-anchor": "end" }, r.tok.toLocaleString("en-US"));
+    } else {
+      const x0 = sx(0), x1 = sx(r.p50), h = 14;
+      el("line", { x1: x1, x2: sx(r.p95), y1: cy, y2: cy, stroke: col, "stroke-width": 1.5, "stroke-dasharray": "2 2" });
+      const b = el("path", { d: `M${x0} ${cy - h / 2} H${x1 - 4} a4 4 0 0 1 4 4 V${cy + h / 2 - 4} a4 4 0 0 1 -4 4 H${x0} Z`, fill: col });
+      const t = el("line", { x1: sx(r.p95), x2: sx(r.p95), y1: cy - 7, y2: cy + 7, stroke: col, "stroke-width": 2.5, "stroke-linecap": "round" });
+      tip(b, `${r.name} (${r.sub}): p50 ${r.p50.toFixed(2)} s`);
+      tip(t, `${r.name} (${r.sub}): p95 ${r.p95.toFixed(2)} s`);
+      el("text", { x: x0, y: cy - h / 2 - 4, "font-size": 11.5, "font-weight": 600, fill: C.ink }, r.p50.toFixed(2));
+      el("text", { x: sx(r.p95), y: cy - 10, "font-size": 11.5, "font-weight": 600, fill: C.ink, "text-anchor": sx(r.p95) > p.x + p.w - 14 ? "end" : "middle" }, r.p95.toFixed(2));
+    }
+  });
+  el("line", { x1: p.x, x2: p.x + p.w, y1: yBase, y2: yBase, stroke: "#C9C4BC", "stroke-width": 1 });
+});
+svg.setAttribute("viewBox", `0 0 ${panels[2].x + panels[2].w + 6} ${yBase + 20}`);
+})();
+</script>
+</body>
+</html>
