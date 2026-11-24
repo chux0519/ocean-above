@@ -1,0 +1,5065 @@
+{
+ "started": "2026-11-24T01:23:59+00:00",
+ "command": "python -m bench",
+ "args": {
+  "quick": false,
+  "levels": [
+   1,
+   5,
+   10,
+   25,
+   50,
+   100
+  ],
+  "warmup": 2.0,
+  "reps": 3,
+  "interval": 5.0,
+  "bursts": 3,
+  "users": 100,
+  "quotes_per_user": 6,
+  "history_turns": 5,
+  "llm_delay": 0.6,
+  "llm_levels": [
+   10,
+   50,
+   100
+  ],
+  "micro_threads": [
+   1,
+   4,
+   16,
+   64
+  ],
+  "micro_seconds": 3.0,
+  "overhead_ops": 2000,
+  "work": null,
+  "out": null,
+  "seed": 41
+ },
+ "machine": {
+  "cpu": "Apple M4",
+  "cpu_count": 10,
+  "memory_gb": 16.0,
+  "os": "Darwin 27.2.0 (arm64)",
+  "python": "3.12.8",
+  "sqlite": "3.47.1",
+  "filesystem": "apfs",
+  "container": false
+ },
+ "mixed": [
+  {
+   "clients": 1,
+   "llm_delay_s": 0.0,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 825,
+     "p50": 0.172,
+     "p95": 0.214,
+     "p99": 0.238,
+     "max": 0.269,
+     "mean": 0.174
+    },
+    "write_hold_ms": {
+     "n": 825,
+     "p50": 0.534,
+     "p95": 2.435,
+     "p99": 3.223,
+     "max": 3.599,
+     "mean": 0.735
+    },
+    "write_total_ms": {
+     "n": 825,
+     "p50": 1.067,
+     "p95": 2.929,
+     "p99": 3.677,
+     "max": 4.085,
+     "mean": 1.249
+    },
+    "non_booking_write_wait_ms": {
+     "n": 763,
+     "p50": 0.172,
+     "p95": 0.215,
+     "p99": 0.237,
+     "max": 0.269,
+     "mean": 0.174
+    },
+    "read_total_ms": {
+     "n": 12781,
+     "p50": 0.442,
+     "p95": 0.622,
+     "p99": 8.169,
+     "max": 86.459,
+     "mean": 0.919
+    },
+    "outcomes": {
+     "commit": 825,
+     "read_ok": 12781
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 53.7,
+    "by_site": {
+     "_book_transaction": {
+      "n": 62,
+      "wait_ms": {
+       "n": 62,
+       "p50": 0.171,
+       "p95": 0.207,
+       "p99": 0.228,
+       "max": 0.239,
+       "mean": 0.175
+      },
+      "hold_ms": {
+       "n": 62,
+       "p50": 0.67,
+       "p95": 0.786,
+       "p99": 0.865,
+       "max": 0.878,
+       "mean": 0.682
+      }
+     },
+     "add_llm_call": {
+      "n": 218,
+      "wait_ms": {
+       "n": 218,
+       "p50": 0.173,
+       "p95": 0.221,
+       "p99": 0.242,
+       "max": 0.269,
+       "mean": 0.177
+      },
+      "hold_ms": {
+       "n": 218,
+       "p50": 0.74,
+       "p95": 0.894,
+       "p99": 1.062,
+       "max": 1.674,
+       "mean": 0.755
+      }
+     },
+     "add_message": {
+      "n": 109,
+      "wait_ms": {
+       "n": 109,
+       "p50": 0.183,
+       "p95": 0.219,
+       "p99": 0.224,
+       "max": 0.231,
+       "mean": 0.185
+      },
+      "hold_ms": {
+       "n": 109,
+       "p50": 0.337,
+       "p95": 0.377,
+       "p99": 0.525,
+       "max": 0.564,
+       "mean": 0.343
+      }
+     },
+     "add_tool_call": {
+      "n": 109,
+      "wait_ms": {
+       "n": 109,
+       "p50": 0.147,
+       "p95": 0.181,
+       "p99": 0.203,
+       "max": 0.239,
+       "mean": 0.151
+      },
+      "hold_ms": {
+       "n": 109,
+       "p50": 0.313,
+       "p95": 0.351,
+       "p99": 0.368,
+       "max": 0.38,
+       "mean": 0.314
+      }
+     },
+     "post_assistant_message": {
+      "n": 109,
+      "wait_ms": {
+       "n": 109,
+       "p50": 0.173,
+       "p95": 0.219,
+       "p99": 0.241,
+       "max": 0.247,
+       "mean": 0.177
+      },
+      "hold_ms": {
+       "n": 109,
+       "p50": 0.505,
+       "p95": 0.583,
+       "p99": 0.691,
+       "max": 0.715,
+       "mean": 0.512
+      }
+     },
+     "quote_route": {
+      "n": 109,
+      "wait_ms": {
+       "n": 109,
+       "p50": 0.172,
+       "p95": 0.207,
+       "p99": 0.229,
+       "max": 0.234,
+       "mean": 0.174
+      },
+      "hold_ms": {
+       "n": 109,
+       "p50": 0.389,
+       "p95": 0.444,
+       "p99": 0.468,
+       "max": 0.471,
+       "mean": 0.392
+      }
+     },
+     "reserve_message": {
+      "n": 109,
+      "wait_ms": {
+       "n": 109,
+       "p50": 0.171,
+       "p95": 0.213,
+       "p99": 0.231,
+       "max": 0.239,
+       "mean": 0.175
+      },
+      "hold_ms": {
+       "n": 109,
+       "p50": 2.125,
+       "p95": 3.303,
+       "p99": 3.485,
+       "max": 3.599,
+       "mean": 2.103
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 62,
+     "p50": 0.148,
+     "p95": 0.201,
+     "p99": 0.212,
+     "max": 0.216,
+     "mean": 0.154
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 16664,
+      "p50": 0.019,
+      "p95": 0.033,
+      "p99": 0.058,
+      "max": 0.264,
+      "mean": 0.021
+     },
+     "strict": {
+      "n": 62,
+      "p50": 0.07,
+      "p95": 0.079,
+      "p99": 0.086,
+      "max": 0.089,
+      "mean": 0.07
+     }
+    }
+   },
+   "client": {
+    "requests": 482,
+    "by_endpoint": {
+     "book": {
+      "n": 62,
+      "p50": 3.173,
+      "p95": 3.523,
+      "p99": 3.877,
+      "max": 3.998,
+      "mean": 3.199,
+      "codes": {
+       "ok": 62
+      }
+     },
+     "chat": {
+      "n": 109,
+      "p50": 123.592,
+      "p95": 183.368,
+      "p99": 190.643,
+      "max": 194.116,
+      "mean": 123.941,
+      "codes": {
+       "ok": 109
+      }
+     },
+     "conversations": {
+      "n": 67,
+      "p50": 1.817,
+      "p95": 2.101,
+      "p99": 2.261,
+      "max": 2.321,
+      "mean": 1.875,
+      "codes": {
+       "ok": 67
+      }
+     },
+     "history": {
+      "n": 154,
+      "p50": 8.431,
+      "p95": 10.735,
+      "p99": 13.189,
+      "max": 17.917,
+      "mean": 8.201,
+      "codes": {
+       "ok": 154
+      }
+     },
+     "tickets": {
+      "n": 90,
+      "p50": 2.49,
+      "p95": 4.021,
+      "p99": 11.203,
+      "max": 11.382,
+      "mean": 2.914,
+      "codes": {
+       "ok": 90
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 482
+    },
+    "throughput_rps": 31.4
+   },
+   "reps": [
+    {
+     "seconds": 5.072,
+     "throughput_rps": 41.2,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.127,
+     "throughput_rps": 27.1,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.171,
+     "throughput_rps": 25.9,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 31.4,
+    "min": 25.9,
+    "max": 41.2
+   },
+   "resources": {
+    "cpu_percent_mean": 95.4,
+    "cpu_percent_max": 97.6,
+    "rss_mb_max": 180.5
+   },
+   "counters": {},
+   "burst": {
+    "client": {
+     "requests": 3,
+     "by_endpoint": {
+      "book": {
+       "n": 3,
+       "p50": 3.094,
+       "p95": 3.464,
+       "p99": 3.497,
+       "max": 3.505,
+       "mean": 3.166,
+       "codes": {
+        "ok": 3
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 3
+     }
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 3,
+      "p50": 0.162,
+      "p95": 0.187,
+      "p99": 0.189,
+      "max": 0.189,
+      "mean": 0.17
+     },
+     "write_hold_ms": {
+      "n": 3,
+      "p50": 0.656,
+      "p95": 0.682,
+      "p99": 0.684,
+      "max": 0.685,
+      "mean": 0.643
+     },
+     "write_total_ms": {
+      "n": 3,
+      "p50": 1.152,
+      "p95": 1.285,
+      "p99": 1.296,
+      "max": 1.299,
+      "mean": 1.171
+     },
+     "non_booking_write_wait_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "read_total_ms": {
+      "n": 6,
+      "p50": 0.474,
+      "p95": 0.575,
+      "p99": 0.591,
+      "max": 0.595,
+      "mean": 0.491
+     },
+     "outcomes": {
+      "commit": 3,
+      "read_ok": 6
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 286.0,
+     "by_site": {
+      "_book_transaction": {
+       "n": 3,
+       "wait_ms": {
+        "n": 3,
+        "p50": 0.162,
+        "p95": 0.187,
+        "p99": 0.189,
+        "max": 0.189,
+        "mean": 0.17
+       },
+       "hold_ms": {
+        "n": 3,
+        "p50": 0.656,
+        "p95": 0.682,
+        "p99": 0.684,
+        "max": 0.685,
+        "mean": 0.643
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 3,
+      "p50": 0.124,
+      "p95": 0.141,
+      "p99": 0.143,
+      "max": 0.143,
+      "mean": 0.128
+     },
+     "rebuild_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "rebuild_in_recheck": 0,
+     "locations_current_ms": {
+      "normal": {
+       "n": 3,
+       "p50": 0.043,
+       "p95": 0.046,
+       "p99": 0.047,
+       "max": 0.047,
+       "mean": 0.04
+      },
+      "strict": {
+       "n": 3,
+       "p50": 0.064,
+       "p95": 0.072,
+       "p99": 0.072,
+       "max": 0.072,
+       "mean": 0.067
+      }
+     }
+    }
+   },
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 88
+   }
+  },
+  {
+   "clients": 5,
+   "llm_delay_s": 0.0,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 2102,
+     "p50": 0.084,
+     "p95": 12.07,
+     "p99": 63.123,
+     "max": 221.395,
+     "mean": 3.016
+    },
+    "write_hold_ms": {
+     "n": 2102,
+     "p50": 1.103,
+     "p95": 15.802,
+     "p99": 34.318,
+     "max": 50.971,
+     "mean": 3.139
+    },
+    "write_total_ms": {
+     "n": 2102,
+     "p50": 1.875,
+     "p95": 32.471,
+     "p99": 66.416,
+     "max": 223.198,
+     "mean": 6.786
+    },
+    "non_booking_write_wait_ms": {
+     "n": 1974,
+     "p50": 0.081,
+     "p95": 12.006,
+     "p99": 50.637,
+     "max": 221.395,
+     "mean": 2.847
+    },
+    "read_total_ms": {
+     "n": 20187,
+     "p50": 0.838,
+     "p95": 13.475,
+     "p99": 36.594,
+     "max": 180.446,
+     "mean": 2.645
+    },
+    "outcomes": {
+     "commit": 2102,
+     "read_ok": 20187
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 135.7,
+    "by_site": {
+     "_book_transaction": {
+      "n": 128,
+      "wait_ms": {
+       "n": 128,
+       "p50": 0.181,
+       "p95": 26.579,
+       "p99": 86.242,
+       "max": 98.646,
+       "mean": 5.635
+      },
+      "hold_ms": {
+       "n": 128,
+       "p50": 1.85,
+       "p95": 27.477,
+       "p99": 34.041,
+       "max": 38.039,
+       "mean": 5.24
+      }
+     },
+     "add_llm_call": {
+      "n": 564,
+      "wait_ms": {
+       "n": 564,
+       "p50": 0.103,
+       "p95": 11.366,
+       "p99": 67.742,
+       "max": 221.395,
+       "mean": 2.84
+      },
+      "hold_ms": {
+       "n": 564,
+       "p50": 1.113,
+       "p95": 2.021,
+       "p99": 18.292,
+       "max": 26.545,
+       "mean": 1.731
+      }
+     },
+     "add_message": {
+      "n": 282,
+      "wait_ms": {
+       "n": 282,
+       "p50": 0.076,
+       "p95": 24.237,
+       "p99": 77.06,
+       "max": 144.161,
+       "mean": 4.886
+      },
+      "hold_ms": {
+       "n": 282,
+       "p50": 0.699,
+       "p95": 6.611,
+       "p99": 18.763,
+       "max": 30.5,
+       "mean": 1.49
+      }
+     },
+     "add_tool_call": {
+      "n": 282,
+      "wait_ms": {
+       "n": 282,
+       "p50": 0.068,
+       "p95": 9.131,
+       "p99": 32.887,
+       "max": 106.249,
+       "mean": 1.769
+      },
+      "hold_ms": {
+       "n": 282,
+       "p50": 0.736,
+       "p95": 3.662,
+       "p99": 20.818,
+       "max": 39.842,
+       "mean": 1.548
+      }
+     },
+     "post_assistant_message": {
+      "n": 282,
+      "wait_ms": {
+       "n": 282,
+       "p50": 0.049,
+       "p95": 8.075,
+       "p99": 29.242,
+       "max": 92.173,
+       "mean": 1.63
+      },
+      "hold_ms": {
+       "n": 282,
+       "p50": 1.323,
+       "p95": 15.508,
+       "p99": 32.452,
+       "max": 50.971,
+       "mean": 2.831
+      }
+     },
+     "quote_route": {
+      "n": 282,
+      "wait_ms": {
+       "n": 282,
+       "p50": 0.086,
+       "p95": 5.933,
+       "p99": 26.804,
+       "max": 45.629,
+       "mean": 1.463
+      },
+      "hold_ms": {
+       "n": 282,
+       "p50": 0.853,
+       "p95": 1.503,
+       "p99": 9.605,
+       "max": 49.594,
+       "mean": 1.3
+      }
+     },
+     "reserve_message": {
+      "n": 282,
+      "wait_ms": {
+       "n": 282,
+       "p50": 0.111,
+       "p95": 25.259,
+       "p99": 66.122,
+       "max": 171.432,
+       "mean": 4.498
+      },
+      "hold_ms": {
+       "n": 282,
+       "p50": 6.257,
+       "p95": 34.703,
+       "p99": 43.373,
+       "max": 46.704,
+       "mean": 10.392
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 128,
+     "p50": 0.278,
+     "p95": 2.822,
+     "p99": 13.234,
+     "max": 21.004,
+     "mean": 0.909
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 25803,
+      "p50": 0.077,
+      "p95": 0.37,
+      "p99": 4.719,
+      "max": 37.537,
+      "mean": 0.238
+     },
+     "strict": {
+      "n": 128,
+      "p50": 0.179,
+      "p95": 2.752,
+      "p99": 13.156,
+      "max": 20.926,
+      "mean": 0.812
+     }
+    }
+   },
+   "client": {
+    "requests": 1315,
+    "by_endpoint": {
+     "book": {
+      "n": 128,
+      "p50": 8.945,
+      "p95": 50.006,
+      "p99": 92.616,
+      "max": 115.267,
+      "mean": 18.381,
+      "codes": {
+       "ok": 128
+      }
+     },
+     "chat": {
+      "n": 282,
+      "p50": 182.855,
+      "p95": 328.475,
+      "p99": 439.186,
+      "max": 550.224,
+      "mean": 193.823,
+      "codes": {
+       "ok": 282
+      }
+     },
+     "conversations": {
+      "n": 194,
+      "p50": 3.166,
+      "p95": 25.772,
+      "p99": 36.287,
+      "max": 44.284,
+      "mean": 6.003,
+      "codes": {
+       "ok": 194
+      }
+     },
+     "history": {
+      "n": 431,
+      "p50": 27.901,
+      "p95": 90.192,
+      "p99": 121.34,
+      "max": 184.776,
+      "mean": 36.82,
+      "codes": {
+       "ok": 431
+      }
+     },
+     "tickets": {
+      "n": 280,
+      "p50": 4.051,
+      "p95": 25.131,
+      "p99": 47.084,
+      "max": 97.296,
+      "mean": 7.35,
+      "codes": {
+       "ok": 280
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 1315
+    },
+    "throughput_rps": 84.9
+   },
+   "reps": [
+    {
+     "seconds": 5.113,
+     "throughput_rps": 117.0,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.12,
+     "throughput_rps": 74.0,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.254,
+     "throughput_rps": 64.3,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 85.1,
+    "min": 64.3,
+    "max": 117.0
+   },
+   "resources": {
+    "cpu_percent_mean": 189.7,
+    "cpu_percent_max": 201.5,
+    "rss_mb_max": 151.4
+   },
+   "counters": {},
+   "burst": {
+    "client": {
+     "requests": 15,
+     "by_endpoint": {
+      "book": {
+       "n": 15,
+       "p50": 7.043,
+       "p95": 18.429,
+       "p99": 18.753,
+       "max": 18.833,
+       "mean": 9.975,
+       "codes": {
+        "ok": 15
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 15
+     }
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 15,
+      "p50": 1.543,
+      "p95": 11.803,
+      "p99": 12.084,
+      "max": 12.154,
+      "mean": 4.179
+     },
+     "write_hold_ms": {
+      "n": 15,
+      "p50": 0.692,
+      "p95": 1.767,
+      "p99": 1.81,
+      "max": 1.821,
+      "mean": 0.881
+     },
+     "write_total_ms": {
+      "n": 15,
+      "p50": 2.556,
+      "p95": 13.364,
+      "p99": 13.706,
+      "max": 13.791,
+      "mean": 5.371
+     },
+     "non_booking_write_wait_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "read_total_ms": {
+      "n": 30,
+      "p50": 0.853,
+      "p95": 2.094,
+      "p99": 2.256,
+      "max": 2.286,
+      "mean": 0.992
+     },
+     "outcomes": {
+      "commit": 15,
+      "read_ok": 30
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 272.3,
+     "by_site": {
+      "_book_transaction": {
+       "n": 15,
+       "wait_ms": {
+        "n": 15,
+        "p50": 1.543,
+        "p95": 11.803,
+        "p99": 12.084,
+        "max": 12.154,
+        "mean": 4.179
+       },
+       "hold_ms": {
+        "n": 15,
+        "p50": 0.692,
+        "p95": 1.767,
+        "p99": 1.81,
+        "max": 1.821,
+        "mean": 0.881
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 15,
+      "p50": 0.168,
+      "p95": 0.276,
+      "p99": 0.37,
+      "max": 0.393,
+      "mean": 0.183
+     },
+     "rebuild_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "rebuild_in_recheck": 0,
+     "locations_current_ms": {
+      "normal": {
+       "n": 15,
+       "p50": 0.084,
+       "p95": 0.279,
+       "p99": 0.425,
+       "max": 0.462,
+       "mean": 0.116
+      },
+      "strict": {
+       "n": 15,
+       "p50": 0.074,
+       "p95": 0.183,
+       "p99": 0.283,
+       "max": 0.308,
+       "mean": 0.094
+      }
+     }
+    }
+   },
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 200
+   }
+  },
+  {
+   "clients": 10,
+   "llm_delay_s": 0.0,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 2687,
+     "p50": 1.283,
+     "p95": 65.395,
+     "p99": 263.52,
+     "max": 1208.648,
+     "mean": 13.922
+    },
+    "write_hold_ms": {
+     "n": 2687,
+     "p50": 1.65,
+     "p95": 13.311,
+     "p99": 25.563,
+     "max": 40.786,
+     "mean": 3.483
+    },
+    "write_total_ms": {
+     "n": 2687,
+     "p50": 4.496,
+     "p95": 68.926,
+     "p99": 265.101,
+     "max": 1214.274,
+     "mean": 18.288
+    },
+    "non_booking_write_wait_ms": {
+     "n": 2492,
+     "p50": 1.251,
+     "p95": 61.889,
+     "p99": 267.789,
+     "max": 792.015,
+     "mean": 13.404
+    },
+    "read_total_ms": {
+     "n": 18715,
+     "p50": 1.587,
+     "p95": 16.518,
+     "p99": 83.987,
+     "max": 241.613,
+     "mean": 4.883
+    },
+    "outcomes": {
+     "commit": 2687,
+     "read_ok": 18715
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 173.7,
+    "by_site": {
+     "_book_transaction": {
+      "n": 195,
+      "wait_ms": {
+       "n": 195,
+       "p50": 1.544,
+       "p95": 94.897,
+       "p99": 152.783,
+       "max": 1208.648,
+       "mean": 20.547
+      },
+      "hold_ms": {
+       "n": 195,
+       "p50": 3.517,
+       "p95": 20.558,
+       "p99": 27.783,
+       "max": 38.612,
+       "mean": 5.886
+      }
+     },
+     "add_llm_call": {
+      "n": 712,
+      "wait_ms": {
+       "n": 712,
+       "p50": 1.55,
+       "p95": 61.018,
+       "p99": 271.361,
+       "max": 704.123,
+       "mean": 14.765
+      },
+      "hold_ms": {
+       "n": 712,
+       "p50": 1.345,
+       "p95": 7.057,
+       "p99": 12.996,
+       "max": 29.835,
+       "mean": 2.081
+      }
+     },
+     "add_message": {
+      "n": 356,
+      "wait_ms": {
+       "n": 356,
+       "p50": 1.534,
+       "p95": 102.6,
+       "p99": 368.412,
+       "max": 679.755,
+       "mean": 18.521
+      },
+      "hold_ms": {
+       "n": 356,
+       "p50": 1.098,
+       "p95": 7.075,
+       "p99": 16.929,
+       "max": 24.075,
+       "mean": 1.999
+      }
+     },
+     "add_tool_call": {
+      "n": 356,
+      "wait_ms": {
+       "n": 356,
+       "p50": 0.572,
+       "p95": 61.715,
+       "p99": 177.358,
+       "max": 471.512,
+       "mean": 12.029
+      },
+      "hold_ms": {
+       "n": 356,
+       "p50": 0.985,
+       "p95": 3.98,
+       "p99": 11.209,
+       "max": 16.969,
+       "mean": 1.47
+      }
+     },
+     "post_assistant_message": {
+      "n": 356,
+      "wait_ms": {
+       "n": 356,
+       "p50": 0.183,
+       "p95": 52.299,
+       "p99": 137.857,
+       "max": 353.01,
+       "mean": 8.981
+      },
+      "hold_ms": {
+       "n": 356,
+       "p50": 2.645,
+       "p95": 15.953,
+       "p99": 22.162,
+       "max": 36.698,
+       "mean": 3.998
+      }
+     },
+     "quote_route": {
+      "n": 356,
+      "wait_ms": {
+       "n": 356,
+       "p50": 0.694,
+       "p95": 52.76,
+       "p99": 181.267,
+       "max": 578.221,
+       "mean": 11.268
+      },
+      "hold_ms": {
+       "n": 356,
+       "p50": 1.332,
+       "p95": 8.367,
+       "p99": 16.048,
+       "max": 24.53,
+       "mean": 2.122
+      }
+     },
+     "reserve_message": {
+      "n": 356,
+      "wait_ms": {
+       "n": 356,
+       "p50": 1.54,
+       "p95": 45.629,
+       "p99": 135.785,
+       "max": 792.015,
+       "mean": 13.497
+      },
+      "hold_ms": {
+       "n": 356,
+       "p50": 7.133,
+       "p95": 25.913,
+       "p99": 33.98,
+       "max": 40.786,
+       "mean": 9.315
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 195,
+     "p50": 0.479,
+     "p95": 6.713,
+     "p99": 12.791,
+     "max": 13.586,
+     "mean": 1.168
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 26231,
+      "p50": 0.309,
+      "p95": 1.623,
+      "p99": 12.118,
+      "max": 28.493,
+      "mean": 0.752
+     },
+     "strict": {
+      "n": 195,
+      "p50": 0.392,
+      "p95": 6.609,
+      "p99": 12.732,
+      "max": 13.46,
+      "mean": 1.073
+     }
+    }
+   },
+   "client": {
+    "requests": 1785,
+    "by_endpoint": {
+     "book": {
+      "n": 195,
+      "p50": 17.537,
+      "p95": 109.696,
+      "p99": 160.454,
+      "max": 1219.602,
+      "mean": 35.618,
+      "codes": {
+       "ok": 195
+      }
+     },
+     "chat": {
+      "n": 356,
+      "p50": 245.19,
+      "p95": 602.209,
+      "p99": 775.873,
+      "max": 1163.12,
+      "mean": 273.118,
+      "codes": {
+       "ok": 356
+      }
+     },
+     "conversations": {
+      "n": 242,
+      "p50": 5.244,
+      "p95": 24.937,
+      "p99": 36.652,
+      "max": 42.521,
+      "mean": 7.723,
+      "codes": {
+       "ok": 242
+      }
+     },
+     "history": {
+      "n": 626,
+      "p50": 54.203,
+      "p95": 170.95,
+      "p99": 195.333,
+      "max": 247.079,
+      "mean": 69.256,
+      "codes": {
+       "ok": 626
+      }
+     },
+     "tickets": {
+      "n": 366,
+      "p50": 6.858,
+      "p95": 26.275,
+      "p99": 48.545,
+      "max": 56.899,
+      "mean": 9.367,
+      "codes": {
+       "ok": 366
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 1785
+    },
+    "throughput_rps": 115.4
+   },
+   "reps": [
+    {
+     "seconds": 5.176,
+     "throughput_rps": 154.6,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.132,
+     "throughput_rps": 103.5,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.157,
+     "throughput_rps": 88.0,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 115.4,
+    "min": 88.0,
+    "max": 154.6
+   },
+   "resources": {
+    "cpu_percent_mean": 258.1,
+    "cpu_percent_max": 336.0,
+    "rss_mb_max": 127.6
+   },
+   "counters": {},
+   "burst": {
+    "client": {
+     "requests": 30,
+     "by_endpoint": {
+      "book": {
+       "n": 30,
+       "p50": 13.476,
+       "p95": 37.753,
+       "p99": 56.231,
+       "max": 63.187,
+       "mean": 18.037,
+       "codes": {
+        "ok": 30
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 30
+     }
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 30,
+      "p50": 3.274,
+      "p95": 25.68,
+      "p99": 42.721,
+      "max": 49.055,
+      "mean": 7.277
+     },
+     "write_hold_ms": {
+      "n": 30,
+      "p50": 0.723,
+      "p95": 3.369,
+      "p99": 4.145,
+      "max": 4.367,
+      "mean": 1.198
+     },
+     "write_total_ms": {
+      "n": 30,
+      "p50": 4.456,
+      "p95": 26.852,
+      "p99": 44.891,
+      "max": 51.606,
+      "mean": 8.969
+     },
+     "non_booking_write_wait_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "read_total_ms": {
+      "n": 60,
+      "p50": 1.112,
+      "p95": 2.678,
+      "p99": 2.911,
+      "max": 3.007,
+      "mean": 1.395
+     },
+     "outcomes": {
+      "commit": 30,
+      "read_ok": 60
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 232.4,
+     "by_site": {
+      "_book_transaction": {
+       "n": 30,
+       "wait_ms": {
+        "n": 30,
+        "p50": 3.274,
+        "p95": 25.68,
+        "p99": 42.721,
+        "max": 49.055,
+        "mean": 7.277
+       },
+       "hold_ms": {
+        "n": 30,
+        "p50": 0.723,
+        "p95": 3.369,
+        "p99": 4.145,
+        "max": 4.367,
+        "mean": 1.198
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 30,
+      "p50": 0.17,
+      "p95": 0.409,
+      "p99": 0.671,
+      "max": 0.747,
+      "mean": 0.203
+     },
+     "rebuild_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "rebuild_in_recheck": 0,
+     "locations_current_ms": {
+      "normal": {
+       "n": 30,
+       "p50": 0.086,
+       "p95": 0.262,
+       "p99": 0.302,
+       "max": 0.311,
+       "mean": 0.113
+      },
+      "strict": {
+       "n": 30,
+       "p50": 0.077,
+       "p95": 0.267,
+       "p99": 0.587,
+       "max": 0.689,
+       "mean": 0.114
+      }
+     }
+    }
+   },
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 287
+   }
+  },
+  {
+   "clients": 25,
+   "llm_delay_s": 0.0,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 4390,
+     "p50": 1.47,
+     "p95": 102.548,
+     "p99": 577.408,
+     "max": 2217.44,
+     "mean": 26.484
+    },
+    "write_hold_ms": {
+     "n": 4390,
+     "p50": 1.095,
+     "p95": 10.25,
+     "p99": 19.348,
+     "max": 46.913,
+     "mean": 2.625
+    },
+    "write_total_ms": {
+     "n": 4390,
+     "p50": 4.334,
+     "p95": 108.365,
+     "p99": 580.213,
+     "max": 2222.694,
+     "mean": 29.718
+    },
+    "non_booking_write_wait_ms": {
+     "n": 4095,
+     "p50": 1.438,
+     "p95": 100.907,
+     "p99": 576.852,
+     "max": 1825.145,
+     "mean": 25.593
+    },
+    "read_total_ms": {
+     "n": 22829,
+     "p50": 1.144,
+     "p95": 10.001,
+     "p99": 41.354,
+     "max": 329.547,
+     "mean": 3.261
+    },
+    "outcomes": {
+     "commit": 4390,
+     "read_ok": 22829
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 270.5,
+    "by_site": {
+     "_book_transaction": {
+      "n": 295,
+      "wait_ms": {
+       "n": 295,
+       "p50": 1.643,
+       "p95": 136.492,
+       "p99": 690.69,
+       "max": 2217.44,
+       "mean": 38.848
+      },
+      "hold_ms": {
+       "n": 295,
+       "p50": 2.306,
+       "p95": 9.417,
+       "p99": 16.554,
+       "max": 25.556,
+       "mean": 3.487
+      }
+     },
+     "add_llm_call": {
+      "n": 1170,
+      "wait_ms": {
+       "n": 1170,
+       "p50": 1.555,
+       "p95": 124.44,
+       "p99": 472.904,
+       "max": 998.971,
+       "mean": 25.217
+      },
+      "hold_ms": {
+       "n": 1170,
+       "p50": 0.877,
+       "p95": 4.777,
+       "p99": 10.957,
+       "max": 15.086,
+       "mean": 1.458
+      }
+     },
+     "add_message": {
+      "n": 585,
+      "wait_ms": {
+       "n": 585,
+       "p50": 1.565,
+       "p95": 118.743,
+       "p99": 693.065,
+       "max": 1825.145,
+       "mean": 30.765
+      },
+      "hold_ms": {
+       "n": 585,
+       "p50": 0.89,
+       "p95": 6.533,
+       "p99": 10.878,
+       "max": 14.211,
+       "mean": 1.64
+      }
+     },
+     "add_tool_call": {
+      "n": 585,
+      "wait_ms": {
+       "n": 585,
+       "p50": 1.139,
+       "p95": 88.103,
+       "p99": 358.88,
+       "max": 1075.182,
+       "mean": 17.159
+      },
+      "hold_ms": {
+       "n": 585,
+       "p50": 0.664,
+       "p95": 5.21,
+       "p99": 9.704,
+       "max": 16.457,
+       "mean": 1.244
+      }
+     },
+     "post_assistant_message": {
+      "n": 585,
+      "wait_ms": {
+       "n": 585,
+       "p50": 0.125,
+       "p95": 67.565,
+       "p99": 584.831,
+       "max": 1789.85,
+       "mean": 21.693
+      },
+      "hold_ms": {
+       "n": 585,
+       "p50": 1.278,
+       "p95": 8.825,
+       "p99": 13.807,
+       "max": 21.19,
+       "mean": 2.425
+      }
+     },
+     "quote_route": {
+      "n": 585,
+      "wait_ms": {
+       "n": 585,
+       "p50": 0.203,
+       "p95": 65.638,
+       "p99": 382.808,
+       "max": 576.847,
+       "mean": 14.877
+      },
+      "hold_ms": {
+       "n": 585,
+       "p50": 0.769,
+       "p95": 4.883,
+       "p99": 9.267,
+       "max": 16.373,
+       "mean": 1.391
+      }
+     },
+     "reserve_message": {
+      "n": 585,
+      "wait_ms": {
+       "n": 585,
+       "p50": 1.891,
+       "p95": 158.566,
+       "p99": 1094.885,
+       "max": 1821.811,
+       "mean": 44.225
+      },
+      "hold_ms": {
+       "n": 585,
+       "p50": 6.586,
+       "p95": 21.092,
+       "p99": 29.245,
+       "max": 46.913,
+       "mean": 8.324
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 295,
+     "p50": 0.322,
+     "p95": 3.161,
+     "p99": 7.611,
+     "max": 9.649,
+     "mean": 0.797
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 26840,
+      "p50": 0.118,
+      "p95": 3.337,
+      "p99": 9.737,
+      "max": 24.811,
+      "mean": 0.661
+     },
+     "strict": {
+      "n": 295,
+      "p50": 0.221,
+      "p95": 3.018,
+      "p99": 7.515,
+      "max": 9.56,
+      "mean": 0.699
+     }
+    }
+   },
+   "client": {
+    "requests": 2855,
+    "by_endpoint": {
+     "book": {
+      "n": 295,
+      "p50": 14.94,
+      "p95": 151.076,
+      "p99": 699.542,
+      "max": 2470.09,
+      "mean": 52.588,
+      "codes": {
+       "ok": 295
+      }
+     },
+     "chat": {
+      "n": 585,
+      "p50": 477.506,
+      "p95": 1260.36,
+      "p99": 2170.998,
+      "max": 2839.508,
+      "mean": 558.886,
+      "codes": {
+       "ok": 585
+      }
+     },
+     "conversations": {
+      "n": 419,
+      "p50": 4.765,
+      "p95": 19.705,
+      "p99": 64.799,
+      "max": 165.582,
+      "mean": 7.819,
+      "codes": {
+       "ok": 419
+      }
+     },
+     "history": {
+      "n": 982,
+      "p50": 20.23,
+      "p95": 139.58,
+      "p99": 275.391,
+      "max": 348.088,
+      "mean": 39.612,
+      "codes": {
+       "ok": 982
+      }
+     },
+     "tickets": {
+      "n": 574,
+      "p50": 5.037,
+      "p95": 25.151,
+      "p99": 86.983,
+      "max": 169.45,
+      "mean": 9.268,
+      "codes": {
+       "ok": 574
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 2855
+    },
+    "throughput_rps": 176.0
+   },
+   "reps": [
+    {
+     "seconds": 5.352,
+     "throughput_rps": 244.7,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.401,
+     "throughput_rps": 168.7,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.473,
+     "throughput_rps": 115.8,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 176.4,
+    "min": 115.8,
+    "max": 244.7
+   },
+   "resources": {
+    "cpu_percent_mean": 237.5,
+    "cpu_percent_max": 286.5,
+    "rss_mb_max": 117.3
+   },
+   "counters": {},
+   "burst": {
+    "client": {
+     "requests": 75,
+     "by_endpoint": {
+      "book": {
+       "n": 75,
+       "p50": 34.43,
+       "p95": 57.768,
+       "p99": 64.35,
+       "max": 70.069,
+       "mean": 36.183,
+       "codes": {
+        "ok": 75
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 75
+     }
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 75,
+      "p50": 1.052,
+      "p95": 5.811,
+      "p99": 14.531,
+      "max": 25.606,
+      "mean": 1.783
+     },
+     "write_hold_ms": {
+      "n": 75,
+      "p50": 0.828,
+      "p95": 1.178,
+      "p99": 1.333,
+      "max": 1.544,
+      "mean": 0.849
+     },
+     "write_total_ms": {
+      "n": 75,
+      "p50": 1.907,
+      "p95": 6.91,
+      "p99": 16.391,
+      "max": 27.314,
+      "mean": 2.837
+     },
+     "non_booking_write_wait_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "read_total_ms": {
+      "n": 150,
+      "p50": 0.374,
+      "p95": 1.598,
+      "p99": 2.89,
+      "max": 3.844,
+      "mean": 0.531
+     },
+     "outcomes": {
+      "commit": 75,
+      "read_ok": 150
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 390.4,
+     "by_site": {
+      "_book_transaction": {
+       "n": 75,
+       "wait_ms": {
+        "n": 75,
+        "p50": 1.052,
+        "p95": 5.811,
+        "p99": 14.531,
+        "max": 25.606,
+        "mean": 1.783
+       },
+       "hold_ms": {
+        "n": 75,
+        "p50": 0.828,
+        "p95": 1.178,
+        "p99": 1.333,
+        "max": 1.544,
+        "mean": 0.849
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 75,
+      "p50": 0.156,
+      "p95": 0.246,
+      "p99": 0.286,
+      "max": 0.293,
+      "mean": 0.168
+     },
+     "rebuild_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "rebuild_in_recheck": 0,
+     "locations_current_ms": {
+      "normal": {
+       "n": 75,
+       "p50": 0.041,
+       "p95": 0.182,
+       "p99": 0.202,
+       "max": 0.206,
+       "mean": 0.062
+      },
+      "strict": {
+       "n": 75,
+       "p50": 0.078,
+       "p95": 0.131,
+       "p99": 0.147,
+       "max": 0.164,
+       "mean": 0.086
+      }
+     }
+    }
+   },
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 446
+   }
+  },
+  {
+   "clients": 50,
+   "llm_delay_s": 0.0,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 4579,
+     "p50": 0.204,
+     "p95": 20.802,
+     "p99": 188.451,
+     "max": 1794.561,
+     "mean": 7.297
+    },
+    "write_hold_ms": {
+     "n": 4579,
+     "p50": 0.615,
+     "p95": 5.49,
+     "p99": 11.027,
+     "max": 50.12,
+     "mean": 1.413
+    },
+    "write_total_ms": {
+     "n": 4579,
+     "p50": 1.469,
+     "p95": 24.236,
+     "p99": 189.908,
+     "max": 1795.403,
+     "mean": 8.993
+    },
+    "non_booking_write_wait_ms": {
+     "n": 4270,
+     "p50": 0.193,
+     "p95": 19.86,
+     "p99": 144.544,
+     "max": 1794.561,
+     "mean": 6.735
+    },
+    "read_total_ms": {
+     "n": 19478,
+     "p50": 0.546,
+     "p95": 4.775,
+     "p99": 15.831,
+     "max": 205.412,
+     "mean": 1.726
+    },
+    "outcomes": {
+     "commit": 4579,
+     "read_ok": 19478
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 285.4,
+    "by_site": {
+     "_book_transaction": {
+      "n": 309,
+      "wait_ms": {
+       "n": 309,
+       "p50": 1.066,
+       "p95": 67.267,
+       "p99": 255.523,
+       "max": 671.346,
+       "mean": 15.069
+      },
+      "hold_ms": {
+       "n": 309,
+       "p50": 1.075,
+       "p95": 5.144,
+       "p99": 18.424,
+       "max": 50.12,
+       "mean": 1.949
+      }
+     },
+     "add_llm_call": {
+      "n": 1220,
+      "wait_ms": {
+       "n": 1220,
+       "p50": 0.233,
+       "p95": 19.847,
+       "p99": 112.415,
+       "max": 576.21,
+       "mean": 5.781
+      },
+      "hold_ms": {
+       "n": 1220,
+       "p50": 0.598,
+       "p95": 2.216,
+       "p99": 5.499,
+       "max": 11.019,
+       "mean": 0.843
+      }
+     },
+     "add_message": {
+      "n": 610,
+      "wait_ms": {
+       "n": 610,
+       "p50": 0.235,
+       "p95": 25.86,
+       "p99": 213.41,
+       "max": 1794.561,
+       "mean": 10.727
+      },
+      "hold_ms": {
+       "n": 610,
+       "p50": 0.412,
+       "p95": 2.313,
+       "p99": 6.268,
+       "max": 15.347,
+       "mean": 0.72
+      }
+     },
+     "add_tool_call": {
+      "n": 610,
+      "wait_ms": {
+       "n": 610,
+       "p50": 0.09,
+       "p95": 12.313,
+       "p99": 46.836,
+       "max": 253.154,
+       "mean": 3.075
+      },
+      "hold_ms": {
+       "n": 610,
+       "p50": 0.411,
+       "p95": 1.028,
+       "p99": 3.674,
+       "max": 7.471,
+       "mean": 0.56
+      }
+     },
+     "post_assistant_message": {
+      "n": 610,
+      "wait_ms": {
+       "n": 610,
+       "p50": 0.041,
+       "p95": 4.549,
+       "p99": 20.846,
+       "max": 112.005,
+       "mean": 1.544
+      },
+      "hold_ms": {
+       "n": 610,
+       "p50": 0.709,
+       "p95": 2.953,
+       "p99": 6.958,
+       "max": 21.916,
+       "mean": 1.057
+      }
+     },
+     "quote_route": {
+      "n": 610,
+      "wait_ms": {
+       "n": 610,
+       "p50": 0.084,
+       "p95": 20.006,
+       "p99": 196.422,
+       "max": 453.458,
+       "mean": 6.067
+      },
+      "hold_ms": {
+       "n": 610,
+       "p50": 0.465,
+       "p95": 2.563,
+       "p99": 5.554,
+       "max": 7.671,
+       "mean": 0.731
+      }
+     },
+     "reserve_message": {
+      "n": 610,
+      "wait_ms": {
+       "n": 610,
+       "p50": 0.643,
+       "p95": 58.164,
+       "p99": 369.436,
+       "max": 480.357,
+       "mean": 14.171
+      },
+      "hold_ms": {
+       "n": 610,
+       "p50": 3.779,
+       "p95": 11.822,
+       "p99": 18.09,
+       "max": 35.01,
+       "mean": 4.864
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 309,
+     "p50": 0.193,
+     "p95": 1.828,
+     "p99": 7.354,
+     "max": 20.926,
+     "mean": 0.557
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 21877,
+      "p50": 0.039,
+      "p95": 2.043,
+      "p99": 8.049,
+      "max": 24.564,
+      "mean": 0.375
+     },
+     "strict": {
+      "n": 309,
+      "p50": 0.091,
+      "p95": 1.733,
+      "p99": 7.3,
+      "max": 20.837,
+      "mean": 0.463
+     }
+    }
+   },
+   "client": {
+    "requests": 3181,
+    "by_endpoint": {
+     "book": {
+      "n": 309,
+      "p50": 145.429,
+      "p95": 659.962,
+      "p99": 1087.512,
+      "max": 1326.939,
+      "mean": 229.258,
+      "codes": {
+       "ok": 309
+      }
+     },
+     "chat": {
+      "n": 610,
+      "p50": 218.252,
+      "p95": 774.176,
+      "p99": 1195.141,
+      "max": 2671.213,
+      "mean": 300.244,
+      "codes": {
+       "ok": 610
+      }
+     },
+     "conversations": {
+      "n": 457,
+      "p50": 145.033,
+      "p95": 653.305,
+      "p99": 941.266,
+      "max": 1641.17,
+      "mean": 214.695,
+      "codes": {
+       "ok": 457
+      }
+     },
+     "history": {
+      "n": 1156,
+      "p50": 139.972,
+      "p95": 765.347,
+      "p99": 1045.234,
+      "max": 1863.759,
+      "mean": 227.688,
+      "codes": {
+       "ok": 1156
+      }
+     },
+     "tickets": {
+      "n": 649,
+      "p50": 135.525,
+      "p95": 708.745,
+      "p99": 1092.507,
+      "max": 1808.153,
+      "mean": 227.736,
+      "codes": {
+       "ok": 649
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 3181
+    },
+    "throughput_rps": 198.3
+   },
+   "reps": [
+    {
+     "seconds": 5.297,
+     "throughput_rps": 205.8,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.304,
+     "throughput_rps": 197.4,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.443,
+     "throughput_rps": 191.8,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 198.3,
+    "min": 191.8,
+    "max": 205.8
+   },
+   "resources": {
+    "cpu_percent_mean": 154.4,
+    "cpu_percent_max": 270.8,
+    "rss_mb_max": 112.9
+   },
+   "counters": {},
+   "burst": {
+    "client": {
+     "requests": 150,
+     "by_endpoint": {
+      "book": {
+       "n": 150,
+       "p50": 126.258,
+       "p95": 207.62,
+       "p99": 221.174,
+       "max": 224.656,
+       "mean": 127.727,
+       "codes": {
+        "ok": 150
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 150
+     }
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 150,
+      "p50": 0.278,
+      "p95": 1.687,
+      "p99": 3.689,
+      "max": 4.309,
+      "mean": 0.552
+     },
+     "write_hold_ms": {
+      "n": 150,
+      "p50": 0.738,
+      "p95": 1.043,
+      "p99": 1.098,
+      "max": 1.149,
+      "mean": 0.777
+     },
+     "write_total_ms": {
+      "n": 150,
+      "p50": 1.463,
+      "p95": 2.977,
+      "p99": 5.038,
+      "max": 5.987,
+      "mean": 1.703
+     },
+     "non_booking_write_wait_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "read_total_ms": {
+      "n": 300,
+      "p50": 0.561,
+      "p95": 1.828,
+      "p99": 2.27,
+      "max": 4.522,
+      "mean": 0.649
+     },
+     "outcomes": {
+      "commit": 150,
+      "read_ok": 300
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 220.1,
+     "by_site": {
+      "_book_transaction": {
+       "n": 150,
+       "wait_ms": {
+        "n": 150,
+        "p50": 0.278,
+        "p95": 1.687,
+        "p99": 3.689,
+        "max": 4.309,
+        "mean": 0.552
+       },
+       "hold_ms": {
+        "n": 150,
+        "p50": 0.738,
+        "p95": 1.043,
+        "p99": 1.098,
+        "max": 1.149,
+        "mean": 0.777
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 150,
+      "p50": 0.15,
+      "p95": 0.232,
+      "p99": 0.277,
+      "max": 0.363,
+      "mean": 0.16
+     },
+     "rebuild_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "rebuild_in_recheck": 0,
+     "locations_current_ms": {
+      "normal": {
+       "n": 150,
+       "p50": 0.039,
+       "p95": 0.082,
+       "p99": 0.146,
+       "max": 0.244,
+       "mean": 0.045
+      },
+      "strict": {
+       "n": 150,
+       "p50": 0.07,
+       "p95": 0.123,
+       "p99": 0.165,
+       "max": 0.258,
+       "mean": 0.079
+      }
+     }
+    }
+   },
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 541
+   }
+  },
+  {
+   "clients": 100,
+   "llm_delay_s": 0.0,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 4198,
+     "p50": 0.257,
+     "p95": 37.702,
+     "p99": 366.963,
+     "max": 1364.15,
+     "mean": 13.916
+    },
+    "write_hold_ms": {
+     "n": 4198,
+     "p50": 0.49,
+     "p95": 2.832,
+     "p99": 5.941,
+     "max": 72.314,
+     "mean": 0.969
+    },
+    "write_total_ms": {
+     "n": 4198,
+     "p50": 1.297,
+     "p95": 40.464,
+     "p99": 371.151,
+     "max": 1367.257,
+     "mean": 15.219
+    },
+    "non_booking_write_wait_ms": {
+     "n": 3962,
+     "p50": 0.255,
+     "p95": 28.084,
+     "p99": 362.219,
+     "max": 1364.15,
+     "mean": 12.594
+    },
+    "read_total_ms": {
+     "n": 13537,
+     "p50": 0.59,
+     "p95": 9.27,
+     "p99": 60.497,
+     "max": 190.057,
+     "mean": 2.621
+    },
+    "outcomes": {
+     "commit": 4198,
+     "read_ok": 13537
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 250.7,
+    "by_site": {
+     "_book_transaction": {
+      "n": 236,
+      "wait_ms": {
+       "n": 236,
+       "p50": 0.304,
+       "p95": 263.113,
+       "p99": 433.944,
+       "max": 1177.004,
+       "mean": 36.105
+      },
+      "hold_ms": {
+       "n": 236,
+       "p50": 0.959,
+       "p95": 6.148,
+       "p99": 21.931,
+       "max": 37.817,
+       "mean": 2.209
+      }
+     },
+     "add_llm_call": {
+      "n": 1132,
+      "wait_ms": {
+       "n": 1132,
+       "p50": 0.274,
+       "p95": 15.391,
+       "p99": 211.61,
+       "max": 1055.148,
+       "mean": 7.042
+      },
+      "hold_ms": {
+       "n": 1132,
+       "p50": 0.445,
+       "p95": 1.421,
+       "p99": 2.63,
+       "max": 19.18,
+       "mean": 0.62
+      }
+     },
+     "add_message": {
+      "n": 566,
+      "wait_ms": {
+       "n": 566,
+       "p50": 0.259,
+       "p95": 22.001,
+       "p99": 223.028,
+       "max": 1364.15,
+       "mean": 9.839
+      },
+      "hold_ms": {
+       "n": 566,
+       "p50": 0.378,
+       "p95": 1.29,
+       "p99": 2.23,
+       "max": 3.156,
+       "mean": 0.496
+      }
+     },
+     "add_tool_call": {
+      "n": 566,
+      "wait_ms": {
+       "n": 566,
+       "p50": 0.192,
+       "p95": 10.097,
+       "p99": 59.726,
+       "max": 875.177,
+       "mean": 5.096
+      },
+      "hold_ms": {
+       "n": 566,
+       "p50": 0.341,
+       "p95": 1.058,
+       "p99": 2.839,
+       "max": 30.842,
+       "mean": 0.518
+      }
+     },
+     "post_assistant_message": {
+      "n": 566,
+      "wait_ms": {
+       "n": 566,
+       "p50": 0.228,
+       "p95": 10.805,
+       "p99": 93.442,
+       "max": 559.876,
+       "mean": 4.75
+      },
+      "hold_ms": {
+       "n": 566,
+       "p50": 0.567,
+       "p95": 2.185,
+       "p99": 3.708,
+       "max": 72.314,
+       "mean": 0.937
+      }
+     },
+     "quote_route": {
+      "n": 566,
+      "wait_ms": {
+       "n": 566,
+       "p50": 0.237,
+       "p95": 11.44,
+       "p99": 118.893,
+       "max": 886.263,
+       "mean": 8.296
+      },
+      "hold_ms": {
+       "n": 566,
+       "p50": 0.38,
+       "p95": 1.393,
+       "p99": 2.721,
+       "max": 9.463,
+       "mean": 0.561
+      }
+     },
+     "reserve_message": {
+      "n": 566,
+      "wait_ms": {
+       "n": 566,
+       "p50": 0.321,
+       "p95": 322.349,
+       "p99": 689.867,
+       "max": 1295.21,
+       "mean": 46.091
+      },
+      "hold_ms": {
+       "n": 566,
+       "p50": 2.09,
+       "p95": 5.048,
+       "p99": 10.818,
+       "max": 34.757,
+       "mean": 2.513
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 236,
+     "p50": 0.186,
+     "p95": 3.672,
+     "p99": 13.738,
+     "max": 17.613,
+     "mean": 0.748
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 11698,
+      "p50": 0.039,
+      "p95": 5.418,
+      "p99": 15.17,
+      "max": 27.607,
+      "mean": 0.877
+     },
+     "strict": {
+      "n": 236,
+      "p50": 0.086,
+      "p95": 3.601,
+      "p99": 13.657,
+      "max": 17.472,
+      "mean": 0.657
+     }
+    }
+   },
+   "client": {
+    "requests": 2690,
+    "by_endpoint": {
+     "book": {
+      "n": 236,
+      "p50": 195.842,
+      "p95": 1861.404,
+      "p99": 3034.71,
+      "max": 3485.98,
+      "mean": 506.083,
+      "codes": {
+       "ok": 236
+      }
+     },
+     "chat": {
+      "n": 566,
+      "p50": 795.931,
+      "p95": 2247.86,
+      "p99": 2774.693,
+      "max": 3780.925,
+      "mean": 899.088,
+      "codes": {
+       "ok": 566
+      }
+     },
+     "conversations": {
+      "n": 405,
+      "p50": 107.583,
+      "p95": 2149.898,
+      "p99": 2903.161,
+      "max": 4786.974,
+      "mean": 463.927,
+      "codes": {
+       "ok": 405
+      }
+     },
+     "history": {
+      "n": 961,
+      "p50": 129.224,
+      "p95": 2240.709,
+      "p99": 3591.627,
+      "max": 4789.875,
+      "mean": 493.012,
+      "codes": {
+       "ok": 961
+      }
+     },
+     "tickets": {
+      "n": 522,
+      "p50": 122.761,
+      "p95": 1965.151,
+      "p99": 3136.513,
+      "max": 4405.936,
+      "mean": 474.113,
+      "codes": {
+       "ok": 522
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 2690
+    },
+    "throughput_rps": 160.7
+   },
+   "reps": [
+    {
+     "seconds": 5.593,
+     "throughput_rps": 268.0,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.652,
+     "throughput_rps": 101.9,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 5.493,
+     "throughput_rps": 112.0,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 160.6,
+    "min": 101.9,
+    "max": 268.0
+   },
+   "resources": {
+    "cpu_percent_mean": 91.9,
+    "cpu_percent_max": 280.0,
+    "rss_mb_max": 109.0
+   },
+   "counters": {},
+   "burst": {
+    "client": {
+     "requests": 299,
+     "by_endpoint": {
+      "book": {
+       "n": 299,
+       "p50": 494.344,
+       "p95": 896.676,
+       "p99": 953.815,
+       "max": 1013.581,
+       "mean": 531.684,
+       "codes": {
+        "ok": 299
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 299
+     }
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 299,
+      "p50": 0.262,
+      "p95": 1.621,
+      "p99": 1.702,
+      "max": 4.543,
+      "mean": 0.381
+     },
+     "write_hold_ms": {
+      "n": 299,
+      "p50": 0.707,
+      "p95": 0.959,
+      "p99": 1.075,
+      "max": 1.18,
+      "mean": 0.738
+     },
+     "write_total_ms": {
+      "n": 299,
+      "p50": 1.423,
+      "p95": 2.719,
+      "p99": 2.936,
+      "max": 5.853,
+      "mean": 1.532
+     },
+     "non_booking_write_wait_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "read_total_ms": {
+      "n": 598,
+      "p50": 0.534,
+      "p95": 0.673,
+      "p99": 2.19,
+      "max": 2.282,
+      "mean": 0.554
+     },
+     "outcomes": {
+      "commit": 299,
+      "read_ok": 598
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 100.6,
+     "by_site": {
+      "_book_transaction": {
+       "n": 299,
+       "wait_ms": {
+        "n": 299,
+        "p50": 0.262,
+        "p95": 1.621,
+        "p99": 1.702,
+        "max": 4.543,
+        "mean": 0.381
+       },
+       "hold_ms": {
+        "n": 299,
+        "p50": 0.707,
+        "p95": 0.959,
+        "p99": 1.075,
+        "max": 1.18,
+        "mean": 0.738
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 299,
+      "p50": 0.144,
+      "p95": 0.215,
+      "p99": 0.289,
+      "max": 0.329,
+      "mean": 0.152
+     },
+     "rebuild_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "rebuild_in_recheck": 0,
+     "locations_current_ms": {
+      "normal": {
+       "n": 299,
+       "p50": 0.037,
+       "p95": 0.047,
+       "p99": 0.066,
+       "max": 0.071,
+       "mean": 0.038
+      },
+      "strict": {
+       "n": 299,
+       "p50": 0.07,
+       "p95": 0.104,
+       "p99": 0.125,
+       "max": 0.169,
+       "mean": 0.074
+      }
+     }
+    }
+   },
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 572
+   }
+  }
+ ],
+ "server_settings": {
+  "turn_concurrency": {
+   "max_active_turns": 8,
+   "queue_seconds": 5.0,
+   "max_turns_per_user": 2
+  },
+  "agent_budget": {
+   "max_steps": 6,
+   "max_tool_calls_per_step": 4,
+   "max_tool_calls_per_turn": 12,
+   "max_output_tokens_per_call": 4096,
+   "max_total_tokens_per_turn": 60000,
+   "max_turn_seconds": 90.0
+  },
+  "executor_workers": 32,
+  "busy_timeout": 10.0,
+  "operation_timeout": 10.0,
+  "book_lock_timeout": 5.0,
+  "book_max_pending_per_user": 2
+ },
+ "correctness": {
+  "clients": 25,
+  "double_click": {
+   "quotes": 25,
+   "clicks_per_quote": 4,
+   "quotes_with_more_than_one_success": 0,
+   "quotes_with_no_success": 0,
+   "unexpected_codes": {},
+   "client": {
+    "requests": 100,
+    "by_endpoint": {
+     "book": {
+      "n": 100,
+      "p50": 136.693,
+      "p95": 193.822,
+      "p99": 208.456,
+      "max": 219.943,
+      "mean": 138.414,
+      "codes": {
+       "conversation_busy": 50,
+       "ok": 25,
+       "already_booked": 25
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "conversation_busy": 50,
+     "ok": 25,
+     "already_booked": 25
+    }
+   }
+  },
+  "concurrent_turns": {
+   "per_conversation": 3,
+   "client": {
+    "requests": 75,
+    "by_endpoint": {
+     "chat": {
+      "n": 75,
+      "p50": 456.025,
+      "p95": 772.302,
+      "p99": 790.301,
+      "max": 812.077,
+      "mean": 459.566,
+      "codes": {
+       "ok": 75
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 75
+    }
+   }
+  },
+  "turn_and_click": {
+   "client": {
+    "requests": 50,
+    "by_endpoint": {
+     "book": {
+      "n": 25,
+      "p50": 349.397,
+      "p95": 496.534,
+      "p99": 531.368,
+      "max": 542.187,
+      "mean": 332.329,
+      "codes": {
+       "ok": 25
+      }
+     },
+     "chat": {
+      "n": 25,
+      "p50": 314.003,
+      "p95": 532.065,
+      "p99": 557.809,
+      "max": 563.3,
+      "mean": 335.354,
+      "codes": {
+       "ok": 25
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 50
+    }
+   }
+  },
+  "integrity": {
+   "double_bookings": 0,
+   "booked_without_ticket": 0,
+   "ticket_quote_not_booked": 0,
+   "ticket_without_used_nonce": 0,
+   "ticket_owner_mismatch": 0,
+   "client_double_success": 0,
+   "client_success_without_ticket": 0,
+   "ticket_without_client_success": 0,
+   "turn_interleavings": 0,
+   "tickets": 50
+  }
+ },
+ "recheck": {
+  "clients": 10,
+  "mix": {
+   "history": 0.2,
+   "chat": 0.4,
+   "book": 0.4
+  },
+  "modes": {
+   "unchanged": {
+    "client": {
+     "requests": 469,
+     "by_endpoint": {
+      "book": {
+       "n": 174,
+       "p50": 9.685,
+       "p95": 59.264,
+       "p99": 144.925,
+       "max": 263.191,
+       "mean": 18.752,
+       "codes": {
+        "ok": 174
+       }
+      },
+      "chat": {
+       "n": 179,
+       "p50": 158.232,
+       "p95": 760.685,
+       "p99": 1525.011,
+       "max": 2120.079,
+       "mean": 251.043,
+       "codes": {
+        "ok": 179
+       }
+      },
+      "history": {
+       "n": 116,
+       "p50": 19.261,
+       "p95": 72.493,
+       "p99": 102.426,
+       "max": 104.746,
+       "mean": 26.261,
+       "codes": {
+        "ok": 116
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 469
+     },
+     "throughput_rps": 90.0
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 1427,
+      "p50": 1.252,
+      "p95": 77.198,
+      "p99": 383.569,
+      "max": 1943.341,
+      "mean": 20.287
+     },
+     "write_hold_ms": {
+      "n": 1427,
+      "p50": 0.903,
+      "p95": 12.917,
+      "p99": 20.133,
+      "max": 33.098,
+      "mean": 2.601
+     },
+     "write_total_ms": {
+      "n": 1427,
+      "p50": 3.036,
+      "p95": 83.924,
+      "p99": 385.739,
+      "max": 1944.492,
+      "mean": 23.411
+     },
+     "non_booking_write_wait_ms": {
+      "n": 1253,
+      "p50": 1.254,
+      "p95": 88.76,
+      "p99": 471.063,
+      "max": 1943.341,
+      "mean": 21.853
+     },
+     "read_total_ms": {
+      "n": 6840,
+      "p50": 0.695,
+      "p95": 8.866,
+      "p99": 20.12,
+      "max": 99.434,
+      "mean": 1.889
+     },
+     "outcomes": {
+      "commit": 1427,
+      "read_ok": 6840
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 273.7,
+     "by_site": {
+      "_book_transaction": {
+       "n": 174,
+       "wait_ms": {
+        "n": 174,
+        "p50": 1.165,
+        "p95": 42.108,
+        "p99": 111.538,
+        "max": 248.966,
+        "mean": 9.005
+       },
+       "hold_ms": {
+        "n": 174,
+        "p50": 1.462,
+        "p95": 14.667,
+        "p99": 22.917,
+        "max": 25.466,
+        "mean": 3.528
+       }
+      },
+      "add_llm_call": {
+       "n": 358,
+       "wait_ms": {
+        "n": 358,
+        "p50": 1.552,
+        "p95": 76.639,
+        "p99": 270.255,
+        "max": 678.075,
+        "mean": 16.663
+       },
+       "hold_ms": {
+        "n": 358,
+        "p50": 0.825,
+        "p95": 7.837,
+        "p99": 12.234,
+        "max": 14.023,
+        "mean": 1.63
+       }
+      },
+      "add_message": {
+       "n": 179,
+       "wait_ms": {
+        "n": 179,
+        "p50": 1.299,
+        "p95": 94.078,
+        "p99": 683.53,
+        "max": 1943.341,
+        "mean": 34.755
+       },
+       "hold_ms": {
+        "n": 179,
+        "p50": 0.532,
+        "p95": 5.174,
+        "p99": 13.956,
+        "max": 17.004,
+        "mean": 1.283
+       }
+      },
+      "add_tool_call": {
+       "n": 179,
+       "wait_ms": {
+        "n": 179,
+        "p50": 0.087,
+        "p95": 74.987,
+        "p99": 450.143,
+        "max": 1302.606,
+        "mean": 21.937
+       },
+       "hold_ms": {
+        "n": 179,
+        "p50": 0.547,
+        "p95": 4.191,
+        "p99": 10.93,
+        "max": 13.27,
+        "mean": 1.071
+       }
+      },
+      "post_assistant_message": {
+       "n": 179,
+       "wait_ms": {
+        "n": 179,
+        "p50": 0.055,
+        "p95": 50.232,
+        "p99": 226.28,
+        "max": 788.239,
+        "mean": 13.512
+       },
+       "hold_ms": {
+        "n": 179,
+        "p50": 0.988,
+        "p95": 12.443,
+        "p99": 20.292,
+        "max": 30.028,
+        "mean": 2.461
+       }
+      },
+      "quote_route": {
+       "n": 179,
+       "wait_ms": {
+        "n": 179,
+        "p50": 0.069,
+        "p95": 109.646,
+        "p99": 580.994,
+        "max": 1185.257,
+        "mean": 24.983
+       },
+       "hold_ms": {
+        "n": 179,
+        "p50": 0.653,
+        "p95": 11.687,
+        "p99": 16.645,
+        "max": 20.653,
+        "mean": 1.961
+       }
+      },
+      "reserve_message": {
+       "n": 179,
+       "wait_ms": {
+        "n": 179,
+        "p50": 1.553,
+        "p95": 88.735,
+        "p99": 359.106,
+        "max": 1090.446,
+        "mean": 24.462
+       },
+       "hold_ms": {
+        "n": 179,
+        "p50": 4.446,
+        "p95": 19.013,
+        "p99": 23.234,
+        "max": 33.098,
+        "mean": 7.269
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 174,
+      "p50": 0.204,
+      "p95": 3.125,
+      "p99": 11.382,
+      "max": 12.911,
+      "mean": 0.751
+     },
+     "rebuild_ms": {
+      "n": 0,
+      "p50": null,
+      "p95": null,
+      "p99": null,
+      "max": null,
+      "mean": null
+     },
+     "rebuild_in_recheck": 0,
+     "locations_current_ms": {
+      "normal": {
+       "n": 4622,
+       "p50": 0.052,
+       "p95": 0.59,
+       "p99": 7.003,
+       "max": 18.535,
+       "mean": 0.262
+      },
+      "strict": {
+       "n": 174,
+       "p50": 0.108,
+       "p95": 3.034,
+       "p99": 11.299,
+       "max": 12.811,
+       "mean": 0.659
+      }
+     }
+    }
+   },
+   "changed_before_click": {
+    "client": {
+     "requests": 86,
+     "by_endpoint": {
+      "book": {
+       "n": 36,
+       "p50": 172.343,
+       "p95": 807.723,
+       "p99": 1360.046,
+       "max": 1593.049,
+       "mean": 263.383,
+       "codes": {
+        "ok": 36
+       }
+      },
+      "chat": {
+       "n": 37,
+       "p50": 655.815,
+       "p95": 2766.135,
+       "p99": 4519.955,
+       "max": 5093.605,
+       "mean": 1019.811,
+       "codes": {
+        "ok": 37
+       }
+      },
+      "history": {
+       "n": 13,
+       "p50": 226.921,
+       "p95": 514.687,
+       "p99": 515.124,
+       "max": 515.233,
+       "mean": 245.871,
+       "codes": {
+        "ok": 13
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 86
+     },
+     "throughput_rps": 16.5
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 295,
+      "p50": 1.599,
+      "p95": 392.53,
+      "p99": 1045.548,
+      "max": 4076.466,
+      "mean": 74.869
+     },
+     "write_hold_ms": {
+      "n": 295,
+      "p50": 1.605,
+      "p95": 96.902,
+      "p99": 153.123,
+      "max": 174.626,
+      "mean": 14.573
+     },
+     "write_total_ms": {
+      "n": 295,
+      "p50": 7.127,
+      "p95": 476.512,
+      "p99": 1052.116,
+      "max": 4251.158,
+      "mean": 92.088
+     },
+     "non_booking_write_wait_ms": {
+      "n": 259,
+      "p50": 1.551,
+      "p95": 379.656,
+      "p99": 964.977,
+      "max": 4076.466,
+      "mean": 71.487
+     },
+     "read_total_ms": {
+      "n": 1727,
+      "p50": 1.032,
+      "p95": 49.239,
+      "p99": 122.973,
+      "max": 509.763,
+      "mean": 8.499
+     },
+     "outcomes": {
+      "commit": 295,
+      "read_ok": 1727
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 56.7,
+     "by_site": {
+      "_book_transaction": {
+       "n": 36,
+       "wait_ms": {
+        "n": 36,
+        "p50": 4.595,
+        "p95": 514.274,
+        "p99": 1096.744,
+        "max": 1362.091,
+        "mean": 99.203
+       },
+       "hold_ms": {
+        "n": 36,
+        "p50": 5.988,
+        "p95": 147.892,
+        "p99": 155.242,
+        "max": 155.92,
+        "mean": 37.3
+       }
+      },
+      "add_llm_call": {
+       "n": 74,
+       "wait_ms": {
+        "n": 74,
+        "p50": 1.654,
+        "p95": 415.488,
+        "p99": 614.9,
+        "max": 921.263,
+        "mean": 57.474
+       },
+       "hold_ms": {
+        "n": 74,
+        "p50": 1.242,
+        "p95": 11.163,
+        "p99": 62.488,
+        "max": 89.654,
+        "mean": 4.006
+       }
+      },
+      "add_message": {
+       "n": 37,
+       "wait_ms": {
+        "n": 37,
+        "p50": 1.499,
+        "p95": 400.534,
+        "p99": 621.899,
+        "max": 703.639,
+        "mean": 80.396
+       },
+       "hold_ms": {
+        "n": 37,
+        "p50": 0.949,
+        "p95": 70.76,
+        "p99": 101.685,
+        "max": 111.055,
+        "mean": 8.896
+       }
+      },
+      "add_tool_call": {
+       "n": 37,
+       "wait_ms": {
+        "n": 37,
+        "p50": 1.569,
+        "p95": 68.283,
+        "p99": 120.064,
+        "max": 143.479,
+        "mean": 11.098
+       },
+       "hold_ms": {
+        "n": 37,
+        "p50": 0.903,
+        "p95": 18.918,
+        "p99": 59.387,
+        "max": 68.193,
+        "mean": 4.453
+       }
+      },
+      "post_assistant_message": {
+       "n": 37,
+       "wait_ms": {
+        "n": 37,
+        "p50": 0.111,
+        "p95": 62.349,
+        "p99": 364.383,
+        "max": 490.295,
+        "mean": 22.199
+       },
+       "hold_ms": {
+        "n": 37,
+        "p50": 1.937,
+        "p95": 142.07,
+        "p99": 166.865,
+        "max": 174.626,
+        "mean": 16.594
+       }
+      },
+      "quote_route": {
+       "n": 37,
+       "wait_ms": {
+        "n": 37,
+        "p50": 1.084,
+        "p95": 518.194,
+        "p99": 1977.366,
+        "max": 2512.879,
+        "mean": 124.319
+       },
+       "hold_ms": {
+        "n": 37,
+        "p50": 1.063,
+        "p95": 21.135,
+        "p99": 47.353,
+        "max": 54.716,
+        "mean": 4.843
+       }
+      },
+      "reserve_message": {
+       "n": 37,
+       "wait_ms": {
+        "n": 37,
+        "p50": 1.521,
+        "p95": 343.509,
+        "p99": 2817.336,
+        "max": 4076.466,
+        "mean": 147.45
+       },
+       "hold_ms": {
+        "n": 37,
+        "p50": 16.571,
+        "p95": 107.845,
+        "p99": 129.754,
+        "max": 136.162,
+        "mean": 37.104
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 36,
+      "p50": 0.41,
+      "p95": 140.599,
+      "p99": 147.036,
+      "max": 149.912,
+      "mean": 23.086
+     },
+     "rebuild_ms": {
+      "n": 26,
+      "p50": 140.86,
+      "p95": 153.348,
+      "p99": 161.202,
+      "max": 163.809,
+      "mean": 144.505
+     },
+     "rebuild_in_recheck": 3,
+     "locations_current_ms": {
+      "normal": {
+       "n": 694,
+       "p50": 0.149,
+       "p95": 140.118,
+       "p99": 153.157,
+       "max": 164.624,
+       "mean": 12.777
+      },
+      "strict": {
+       "n": 36,
+       "p50": 0.319,
+       "p95": 140.436,
+       "p99": 146.934,
+       "max": 149.818,
+       "mean": 22.983
+      }
+     }
+    }
+   },
+   "changed_inside_transaction": {
+    "client": {
+     "requests": 78,
+     "by_endpoint": {
+      "book": {
+       "n": 32,
+       "p50": 157.013,
+       "p95": 1560.855,
+       "p99": 3372.725,
+       "max": 4165.699,
+       "mean": 462.23,
+       "codes": {
+        "ok": 32
+       }
+      },
+      "chat": {
+       "n": 25,
+       "p50": 972.242,
+       "p95": 4076.399,
+       "p99": 4574.462,
+       "max": 4721.805,
+       "mean": 1471.269,
+       "codes": {
+        "ok": 25
+       }
+      },
+      "history": {
+       "n": 21,
+       "p50": 16.873,
+       "p95": 282.464,
+       "p99": 292.307,
+       "max": 294.768,
+       "mean": 80.422,
+       "codes": {
+        "ok": 21
+       }
+      }
+     },
+     "http_5xx": 0,
+     "codes": {
+      "ok": 78
+     },
+     "throughput_rps": 14.0
+    },
+    "server": {
+     "write_lock_wait_ms": {
+      "n": 207,
+      "p50": 0.196,
+      "p95": 1198.363,
+      "p99": 2930.413,
+      "max": 4492.449,
+      "mean": 187.668
+     },
+     "write_hold_ms": {
+      "n": 207,
+      "p50": 0.867,
+      "p95": 141.529,
+      "p99": 161.093,
+      "max": 203.395,
+      "mean": 24.26
+     },
+     "write_total_ms": {
+      "n": 207,
+      "p50": 2.872,
+      "p95": 1207.923,
+      "p99": 2931.944,
+      "max": 4493.466,
+      "mean": 212.823
+     },
+     "non_booking_write_wait_ms": {
+      "n": 175,
+      "p50": 0.09,
+      "p95": 969.202,
+      "p99": 2786.333,
+      "max": 4492.449,
+      "mean": 171.312
+     },
+     "read_total_ms": {
+      "n": 1355,
+      "p50": 0.503,
+      "p95": 32.945,
+      "p99": 91.132,
+      "max": 279.54,
+      "mean": 5.076
+     },
+     "outcomes": {
+      "commit": 207,
+      "read_ok": 1355
+     },
+     "busy": 0,
+     "timeouts": 0,
+     "writes_per_s": 37.1,
+     "by_site": {
+      "_book_transaction": {
+       "n": 32,
+       "wait_ms": {
+        "n": 32,
+        "p50": 1.534,
+        "p95": 1323.248,
+        "p99": 3193.775,
+        "max": 3986.641,
+        "mean": 277.111
+       },
+       "hold_ms": {
+        "n": 32,
+        "p50": 137.838,
+        "p95": 168.224,
+        "p99": 195.113,
+        "max": 203.395,
+        "mean": 143.509
+       }
+      },
+      "add_llm_call": {
+       "n": 50,
+       "wait_ms": {
+        "n": 50,
+        "p50": 1.543,
+        "p95": 2242.646,
+        "p99": 3733.281,
+        "max": 4492.449,
+        "mean": 268.159
+       },
+       "hold_ms": {
+        "n": 50,
+        "p50": 0.89,
+        "p95": 1.356,
+        "p99": 10.652,
+        "max": 11.656,
+        "mean": 1.277
+       }
+      },
+      "add_message": {
+       "n": 25,
+       "wait_ms": {
+        "n": 25,
+        "p50": 1.399,
+        "p95": 868.272,
+        "p99": 1167.702,
+        "max": 1249.29,
+        "mean": 140.704
+       },
+       "hold_ms": {
+        "n": 25,
+        "p50": 0.427,
+        "p95": 9.448,
+        "p99": 14.21,
+        "max": 15.078,
+        "mean": 1.546
+       }
+      },
+      "add_tool_call": {
+       "n": 25,
+       "wait_ms": {
+        "n": 25,
+        "p50": 1.537,
+        "p95": 1230.885,
+        "p99": 1999.337,
+        "max": 2201.158,
+        "mean": 233.536
+       },
+       "hold_ms": {
+        "n": 25,
+        "p50": 0.544,
+        "p95": 3.506,
+        "p99": 9.962,
+        "max": 11.792,
+        "mean": 1.115
+       }
+      },
+      "post_assistant_message": {
+       "n": 25,
+       "wait_ms": {
+        "n": 25,
+        "p50": 0.034,
+        "p95": 3.856,
+        "p99": 371.396,
+        "max": 487.28,
+        "mean": 19.827
+       },
+       "hold_ms": {
+        "n": 25,
+        "p50": 0.832,
+        "p95": 2.087,
+        "p99": 3.113,
+        "max": 3.399,
+        "mean": 1.023
+       }
+      },
+      "quote_route": {
+       "n": 25,
+       "wait_ms": {
+        "n": 25,
+        "p50": 0.033,
+        "p95": 14.738,
+        "p99": 130.725,
+        "max": 166.218,
+        "mean": 7.437
+       },
+       "hold_ms": {
+        "n": 25,
+        "p50": 0.451,
+        "p95": 1.038,
+        "p99": 14.291,
+        "max": 18.462,
+        "mean": 1.199
+       }
+      },
+      "reserve_message": {
+       "n": 25,
+       "wait_ms": {
+        "n": 25,
+        "p50": 12.073,
+        "p95": 807.188,
+        "p99": 1225.893,
+        "max": 1357.019,
+        "mean": 261.365
+       },
+       "hold_ms": {
+        "n": 25,
+        "p50": 6.171,
+        "p95": 18.567,
+        "p99": 24.445,
+        "max": 26.286,
+        "mean": 9.74
+       }
+      }
+     },
+     "recheck_ms": {
+      "n": 32,
+      "p50": 136.291,
+      "p95": 145.555,
+      "p99": 160.091,
+      "max": 166.398,
+      "mean": 138.436
+     },
+     "rebuild_ms": {
+      "n": 32,
+      "p50": 135.92,
+      "p95": 145.204,
+      "p99": 151.219,
+      "max": 153.612,
+      "mean": 137.609
+     },
+     "rebuild_in_recheck": 30,
+     "locations_current_ms": {
+      "normal": {
+       "n": 1082,
+       "p50": 0.036,
+       "p95": 0.229,
+       "p99": 134.643,
+       "max": 163.01,
+       "mean": 2.193
+      },
+      "strict": {
+       "n": 32,
+       "p50": 136.215,
+       "p95": 145.446,
+       "p99": 159.979,
+       "max": 166.27,
+       "mean": 138.33
+      }
+     }
+    }
+   }
+  },
+  "counters": {
+   "book_pool_empty": 46
+  },
+  "integrity": {
+   "double_bookings": 0,
+   "booked_without_ticket": 0,
+   "ticket_quote_not_booked": 0,
+   "ticket_without_used_nonce": 0,
+   "ticket_owner_mismatch": 0,
+   "client_double_success": 0,
+   "client_success_without_ticket": 0,
+   "ticket_without_client_success": 0,
+   "turn_interleavings": 0,
+   "tickets": 380
+  }
+ },
+ "llm_latency": [
+  {
+   "clients": 10,
+   "llm_delay_s": 0.6,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 762,
+     "p50": 0.851,
+     "p95": 13.04,
+     "p99": 47.395,
+     "max": 118.671,
+     "mean": 3.557
+    },
+    "write_hold_ms": {
+     "n": 762,
+     "p50": 1.276,
+     "p95": 4.317,
+     "p99": 6.649,
+     "max": 12.595,
+     "mean": 1.713
+    },
+    "write_total_ms": {
+     "n": 762,
+     "p50": 3.216,
+     "p95": 17.842,
+     "p99": 50.031,
+     "max": 120.922,
+     "mean": 5.95
+    },
+    "non_booking_write_wait_ms": {
+     "n": 714,
+     "p50": 0.856,
+     "p95": 12.944,
+     "p99": 47.603,
+     "max": 118.671,
+     "mean": 3.566
+    },
+    "read_total_ms": {
+     "n": 2768,
+     "p50": 1.227,
+     "p95": 5.267,
+     "p99": 11.622,
+     "max": 20.351,
+     "mean": 1.878
+    },
+    "outcomes": {
+     "commit": 762,
+     "read_ok": 2768
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 39.7,
+    "by_site": {
+     "_book_transaction": {
+      "n": 48,
+      "wait_ms": {
+       "n": 48,
+       "p50": 0.337,
+       "p95": 18.444,
+       "p99": 42.831,
+       "max": 46.25,
+       "mean": 3.435
+      },
+      "hold_ms": {
+       "n": 48,
+       "p50": 2.373,
+       "p95": 6.311,
+       "p99": 10.906,
+       "max": 11.495,
+       "mean": 2.891
+      }
+     },
+     "add_llm_call": {
+      "n": 204,
+      "wait_ms": {
+       "n": 204,
+       "p50": 1.432,
+       "p95": 20.246,
+       "p99": 59.204,
+       "max": 118.671,
+       "mean": 4.427
+      },
+      "hold_ms": {
+       "n": 204,
+       "p50": 1.413,
+       "p95": 3.601,
+       "p99": 4.387,
+       "max": 6.845,
+       "mean": 1.728
+      }
+     },
+     "add_message": {
+      "n": 102,
+      "wait_ms": {
+       "n": 102,
+       "p50": 1.127,
+       "p95": 9.702,
+       "p99": 47.112,
+       "max": 74.946,
+       "mean": 3.1
+      },
+      "hold_ms": {
+       "n": 102,
+       "p50": 1.171,
+       "p95": 3.253,
+       "p99": 5.084,
+       "max": 6.118,
+       "mean": 1.423
+      }
+     },
+     "add_tool_call": {
+      "n": 102,
+      "wait_ms": {
+       "n": 102,
+       "p50": 0.602,
+       "p95": 4.562,
+       "p99": 11.64,
+       "max": 12.131,
+       "mean": 1.173
+      },
+      "hold_ms": {
+       "n": 102,
+       "p50": 0.812,
+       "p95": 1.349,
+       "p99": 1.568,
+       "max": 1.621,
+       "mean": 0.887
+      }
+     },
+     "post_assistant_message": {
+      "n": 102,
+      "wait_ms": {
+       "n": 102,
+       "p50": 0.434,
+       "p95": 23.772,
+       "p99": 47.593,
+       "max": 91.261,
+       "mean": 4.331
+      },
+      "hold_ms": {
+       "n": 102,
+       "p50": 1.974,
+       "p95": 4.853,
+       "p99": 8.521,
+       "max": 12.595,
+       "mean": 2.348
+      }
+     },
+     "quote_route": {
+      "n": 102,
+      "wait_ms": {
+       "n": 102,
+       "p50": 0.737,
+       "p95": 10.976,
+       "p99": 25.215,
+       "max": 26.577,
+       "mean": 2.06
+      },
+      "hold_ms": {
+       "n": 102,
+       "p50": 1.045,
+       "p95": 1.945,
+       "p99": 2.194,
+       "max": 2.662,
+       "mean": 1.135
+      }
+     },
+     "reserve_message": {
+      "n": 102,
+      "wait_ms": {
+       "n": 102,
+       "p50": 0.311,
+       "p95": 36.586,
+       "p99": 63.81,
+       "max": 98.86,
+       "mean": 5.442
+      },
+      "hold_ms": {
+       "n": 102,
+       "p50": 1.555,
+       "p95": 4.947,
+       "p99": 6.518,
+       "max": 11.657,
+       "mean": 2.188
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 48,
+     "p50": 0.28,
+     "p95": 2.178,
+     "p99": 4.14,
+     "max": 5.572,
+     "mean": 0.551
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 2752,
+      "p50": 0.068,
+      "p95": 0.501,
+      "p99": 1.479,
+      "max": 4.274,
+      "mean": 0.154
+     },
+     "strict": {
+      "n": 48,
+      "p50": 0.155,
+      "p95": 2.085,
+      "p99": 3.995,
+      "max": 5.391,
+      "mean": 0.425
+     }
+    }
+   },
+   "client": {
+    "requests": 506,
+    "by_endpoint": {
+     "book": {
+      "n": 48,
+      "p50": 8.989,
+      "p95": 26.013,
+      "p99": 53.297,
+      "max": 54.135,
+      "mean": 11.97,
+      "codes": {
+       "ok": 48
+      }
+     },
+     "chat": {
+      "n": 102,
+      "p50": 1289.749,
+      "p95": 2445.67,
+      "p99": 2502.587,
+      "max": 2531.11,
+      "mean": 1552.618,
+      "codes": {
+       "ok": 102
+      }
+     },
+     "conversations": {
+      "n": 71,
+      "p50": 5.088,
+      "p95": 18.435,
+      "p99": 25.301,
+      "max": 26.416,
+      "mean": 6.619,
+      "codes": {
+       "ok": 71
+      }
+     },
+     "history": {
+      "n": 181,
+      "p50": 9.726,
+      "p95": 29.11,
+      "p99": 38.82,
+      "max": 46.307,
+      "mean": 11.829,
+      "codes": {
+       "ok": 181
+      }
+     },
+     "tickets": {
+      "n": 104,
+      "p50": 4.83,
+      "p95": 14.316,
+      "p99": 18.451,
+      "max": 28.795,
+      "mean": 6.067,
+      "codes": {
+       "ok": 104
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 506
+    },
+    "throughput_rps": 26.4
+   },
+   "reps": [
+    {
+     "seconds": 6.347,
+     "throughput_rps": 26.3,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 6.411,
+     "throughput_rps": 23.9,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 6.429,
+     "throughput_rps": 28.9,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 26.4,
+    "min": 23.9,
+    "max": 28.9
+   },
+   "resources": {
+    "cpu_percent_mean": 27.4,
+    "cpu_percent_max": 97.4,
+    "rss_mb_max": 85.1
+   },
+   "counters": {},
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 53
+   }
+  },
+  {
+   "clients": 50,
+   "llm_delay_s": 0.6,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 1469,
+     "p50": 0.35,
+     "p95": 11.156,
+     "p99": 39.606,
+     "max": 113.671,
+     "mean": 2.45
+    },
+    "write_hold_ms": {
+     "n": 1469,
+     "p50": 0.931,
+     "p95": 3.25,
+     "p99": 4.943,
+     "max": 13.929,
+     "mean": 1.228
+    },
+    "write_total_ms": {
+     "n": 1469,
+     "p50": 2.178,
+     "p95": 13.292,
+     "p99": 41.843,
+     "max": 116.719,
+     "mean": 4.174
+    },
+    "non_booking_write_wait_ms": {
+     "n": 1374,
+     "p50": 0.368,
+     "p95": 11.074,
+     "p99": 37.738,
+     "max": 113.671,
+     "mean": 2.397
+    },
+    "read_total_ms": {
+     "n": 4620,
+     "p50": 0.721,
+     "p95": 4.458,
+     "p99": 12.524,
+     "max": 53.135,
+     "mean": 1.488
+    },
+    "outcomes": {
+     "commit": 1469,
+     "read_ok": 4620
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 48.5,
+    "by_site": {
+     "_book_transaction": {
+      "n": 95,
+      "wait_ms": {
+       "n": 95,
+       "p50": 0.234,
+       "p95": 11.36,
+       "p99": 44.96,
+       "max": 91.829,
+       "mean": 3.214
+      },
+      "hold_ms": {
+       "n": 95,
+       "p50": 1.087,
+       "p95": 5.478,
+       "p99": 8.729,
+       "max": 13.136,
+       "mean": 1.941
+      }
+     },
+     "add_llm_call": {
+      "n": 372,
+      "wait_ms": {
+       "n": 372,
+       "p50": 0.759,
+       "p95": 12.053,
+       "p99": 50.741,
+       "max": 100.085,
+       "mean": 2.959
+      },
+      "hold_ms": {
+       "n": 372,
+       "p50": 1.071,
+       "p95": 3.302,
+       "p99": 3.71,
+       "max": 4.408,
+       "mean": 1.291
+      }
+     },
+     "add_message": {
+      "n": 186,
+      "wait_ms": {
+       "n": 186,
+       "p50": 0.266,
+       "p95": 5.395,
+       "p99": 43.0,
+       "max": 91.634,
+       "mean": 2.284
+      },
+      "hold_ms": {
+       "n": 186,
+       "p50": 0.543,
+       "p95": 2.092,
+       "p99": 2.904,
+       "max": 4.018,
+       "mean": 0.869
+      }
+     },
+     "add_tool_call": {
+      "n": 186,
+      "wait_ms": {
+       "n": 186,
+       "p50": 0.464,
+       "p95": 4.651,
+       "p99": 21.897,
+       "max": 26.478,
+       "mean": 1.532
+      },
+      "hold_ms": {
+       "n": 186,
+       "p50": 0.707,
+       "p95": 1.313,
+       "p99": 1.657,
+       "max": 1.898,
+       "mean": 0.75
+      }
+     },
+     "post_assistant_message": {
+      "n": 186,
+      "wait_ms": {
+       "n": 186,
+       "p50": 0.324,
+       "p95": 22.978,
+       "p99": 49.184,
+       "max": 113.671,
+       "mean": 3.668
+      },
+      "hold_ms": {
+       "n": 186,
+       "p50": 1.2,
+       "p95": 3.818,
+       "p99": 5.068,
+       "max": 7.347,
+       "mean": 1.604
+      }
+     },
+     "quote_route": {
+      "n": 186,
+      "wait_ms": {
+       "n": 186,
+       "p50": 0.455,
+       "p95": 4.751,
+       "p99": 14.218,
+       "max": 72.172,
+       "mean": 1.692
+      },
+      "hold_ms": {
+       "n": 186,
+       "p50": 0.849,
+       "p95": 2.05,
+       "p99": 2.422,
+       "max": 2.787,
+       "mean": 0.952
+      }
+     },
+     "release_message": {
+      "n": 36,
+      "wait_ms": {
+       "n": 36,
+       "p50": 1.102,
+       "p95": 12.216,
+       "p99": 19.379,
+       "max": 22.893,
+       "mean": 2.456
+      },
+      "hold_ms": {
+       "n": 36,
+       "p50": 1.091,
+       "p95": 2.141,
+       "p99": 2.492,
+       "max": 2.6,
+       "mean": 1.215
+      }
+     },
+     "reserve_message": {
+      "n": 222,
+      "wait_ms": {
+       "n": 222,
+       "p50": 0.256,
+       "p95": 9.703,
+       "p99": 34.256,
+       "max": 57.546,
+       "mean": 1.788
+      },
+      "hold_ms": {
+       "n": 222,
+       "p50": 0.999,
+       "p95": 3.776,
+       "p99": 5.755,
+       "max": 13.929,
+       "mean": 1.435
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 95,
+     "p50": 0.225,
+     "p95": 2.067,
+     "p99": 4.141,
+     "max": 10.553,
+     "mean": 0.552
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 4115,
+      "p50": 0.051,
+      "p95": 1.215,
+      "p99": 3.449,
+      "max": 11.504,
+      "mean": 0.242
+     },
+     "strict": {
+      "n": 95,
+      "p50": 0.107,
+      "p95": 1.481,
+      "p99": 3.442,
+      "max": 3.665,
+      "mean": 0.345
+     }
+    }
+   },
+   "client": {
+    "requests": 1044,
+    "by_endpoint": {
+     "book": {
+      "n": 95,
+      "p50": 20.272,
+      "p95": 249.156,
+      "p99": 354.279,
+      "max": 361.9,
+      "mean": 63.766,
+      "codes": {
+       "ok": 95
+      }
+     },
+     "chat": {
+      "n": 222,
+      "p50": 5010.787,
+      "p95": 6238.408,
+      "p99": 6287.086,
+      "max": 6306.744,
+      "mean": 4542.367,
+      "codes": {
+       "ok": 186,
+       "server_busy": 36
+      }
+     },
+     "conversations": {
+      "n": 169,
+      "p50": 11.637,
+      "p95": 178.096,
+      "p99": 371.94,
+      "max": 380.714,
+      "mean": 44.983,
+      "codes": {
+       "ok": 169
+      }
+     },
+     "history": {
+      "n": 385,
+      "p50": 17.453,
+      "p95": 214.43,
+      "p99": 350.072,
+      "max": 491.283,
+      "mean": 53.024,
+      "codes": {
+       "ok": 385
+      }
+     },
+     "tickets": {
+      "n": 173,
+      "p50": 9.732,
+      "p95": 274.87,
+      "p99": 353.778,
+      "max": 413.124,
+      "mean": 55.991,
+      "codes": {
+       "ok": 173
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 1008,
+     "server_busy": 36
+    },
+    "throughput_rps": 34.5
+   },
+   "reps": [
+    {
+     "seconds": 10.086,
+     "throughput_rps": 29.8,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 10.059,
+     "throughput_rps": 40.1,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 10.155,
+     "throughput_rps": 33.5,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 34.5,
+    "min": 29.8,
+    "max": 40.1
+   },
+   "resources": {
+    "cpu_percent_mean": 19.1,
+    "cpu_percent_max": 47.0,
+    "rss_mb_max": 94.2
+   },
+   "counters": {},
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 112
+   }
+  },
+  {
+   "clients": 100,
+   "llm_delay_s": 0.6,
+   "server_settings": {
+    "turn_concurrency": {
+     "max_active_turns": 8,
+     "queue_seconds": 5.0,
+     "max_turns_per_user": 2
+    },
+    "agent_budget": {
+     "max_steps": 6,
+     "max_tool_calls_per_step": 4,
+     "max_tool_calls_per_turn": 12,
+     "max_output_tokens_per_call": 4096,
+     "max_total_tokens_per_turn": 60000,
+     "max_turn_seconds": 90.0
+    },
+    "executor_workers": 32,
+    "busy_timeout": 10.0,
+    "operation_timeout": 10.0,
+    "book_lock_timeout": 5.0,
+    "book_max_pending_per_user": 2
+   },
+   "server": {
+    "write_lock_wait_ms": {
+     "n": 1845,
+     "p50": 0.413,
+     "p95": 13.28,
+     "p99": 196.213,
+     "max": 389.154,
+     "mean": 6.227
+    },
+    "write_hold_ms": {
+     "n": 1845,
+     "p50": 0.877,
+     "p95": 3.059,
+     "p99": 6.504,
+     "max": 23.669,
+     "mean": 1.248
+    },
+    "write_total_ms": {
+     "n": 1845,
+     "p50": 2.046,
+     "p95": 21.895,
+     "p99": 201.703,
+     "max": 391.379,
+     "mean": 8.038
+    },
+    "non_booking_write_wait_ms": {
+     "n": 1694,
+     "p50": 0.439,
+     "p95": 12.223,
+     "p99": 137.515,
+     "max": 389.154,
+     "mean": 5.216
+    },
+    "read_total_ms": {
+     "n": 6141,
+     "p50": 0.718,
+     "p95": 6.405,
+     "p99": 36.052,
+     "max": 86.545,
+     "mean": 2.17
+    },
+    "outcomes": {
+     "commit": 1845,
+     "read_ok": 6141
+    },
+    "busy": 0,
+    "timeouts": 0,
+    "writes_per_s": 59.5,
+    "by_site": {
+     "_book_transaction": {
+      "n": 151,
+      "wait_ms": {
+       "n": 151,
+       "p50": 0.295,
+       "p95": 170.41,
+       "p99": 258.079,
+       "max": 261.985,
+       "mean": 17.568
+      },
+      "hold_ms": {
+       "n": 151,
+       "p50": 0.906,
+       "p95": 7.072,
+       "p99": 17.758,
+       "max": 23.669,
+       "mean": 2.097
+      }
+     },
+     "add_llm_call": {
+      "n": 380,
+      "wait_ms": {
+       "n": 380,
+       "p50": 0.909,
+       "p95": 12.133,
+       "p99": 160.387,
+       "max": 256.387,
+       "mean": 5.395
+      },
+      "hold_ms": {
+       "n": 380,
+       "p50": 1.094,
+       "p95": 3.21,
+       "p99": 3.713,
+       "max": 9.645,
+       "mean": 1.358
+      }
+     },
+     "add_message": {
+      "n": 190,
+      "wait_ms": {
+       "n": 190,
+       "p50": 0.333,
+       "p95": 10.176,
+       "p99": 26.007,
+       "max": 70.355,
+       "mean": 1.97
+      },
+      "hold_ms": {
+       "n": 190,
+       "p50": 0.617,
+       "p95": 1.987,
+       "p99": 2.96,
+       "max": 4.663,
+       "mean": 0.842
+      }
+     },
+     "add_tool_call": {
+      "n": 190,
+      "wait_ms": {
+       "n": 190,
+       "p50": 0.621,
+       "p95": 10.573,
+       "p99": 28.595,
+       "max": 61.956,
+       "mean": 2.237
+      },
+      "hold_ms": {
+       "n": 190,
+       "p50": 0.731,
+       "p95": 1.424,
+       "p99": 2.163,
+       "max": 3.327,
+       "mean": 0.804
+      }
+     },
+     "post_assistant_message": {
+      "n": 190,
+      "wait_ms": {
+       "n": 190,
+       "p50": 0.362,
+       "p95": 8.31,
+       "p99": 28.617,
+       "max": 69.249,
+       "mean": 1.984
+      },
+      "hold_ms": {
+       "n": 190,
+       "p50": 1.381,
+       "p95": 3.379,
+       "p99": 4.483,
+       "max": 5.666,
+       "mean": 1.644
+      }
+     },
+     "quote_route": {
+      "n": 190,
+      "wait_ms": {
+       "n": 190,
+       "p50": 0.609,
+       "p95": 12.008,
+       "p99": 55.792,
+       "max": 201.953,
+       "mean": 3.633
+      },
+      "hold_ms": {
+       "n": 190,
+       "p50": 0.939,
+       "p95": 2.048,
+       "p99": 2.353,
+       "max": 10.95,
+       "mean": 1.051
+      }
+     },
+     "release_message": {
+      "n": 182,
+      "wait_ms": {
+       "n": 182,
+       "p50": 0.584,
+       "p95": 3.369,
+       "p99": 9.203,
+       "max": 11.338,
+       "mean": 1.114
+      },
+      "hold_ms": {
+       "n": 182,
+       "p50": 0.605,
+       "p95": 1.617,
+       "p99": 2.235,
+       "max": 2.477,
+       "mean": 0.794
+      }
+     },
+     "reserve_message": {
+      "n": 372,
+      "wait_ms": {
+       "n": 372,
+       "p50": 0.279,
+       "p95": 74.01,
+       "p99": 353.482,
+       "max": 389.154,
+       "mean": 12.678
+      },
+      "hold_ms": {
+       "n": 372,
+       "p50": 0.869,
+       "p95": 3.611,
+       "p99": 8.244,
+       "max": 18.615,
+       "mean": 1.346
+      }
+     }
+    },
+    "recheck_ms": {
+     "n": 151,
+     "p50": 0.184,
+     "p95": 2.92,
+     "p99": 6.533,
+     "max": 12.827,
+     "mean": 0.675
+    },
+    "rebuild_ms": {
+     "n": 0,
+     "p50": null,
+     "p95": null,
+     "p99": null,
+     "max": null,
+     "mean": null
+    },
+    "rebuild_in_recheck": 0,
+    "locations_current_ms": {
+     "normal": {
+      "n": 5616,
+      "p50": 0.038,
+      "p95": 3.755,
+      "p99": 8.641,
+      "max": 13.984,
+      "mean": 0.646
+     },
+     "strict": {
+      "n": 151,
+      "p50": 0.085,
+      "p95": 2.839,
+      "p99": 6.448,
+      "max": 12.656,
+      "mean": 0.578
+     }
+    }
+   },
+   "client": {
+    "requests": 1755,
+    "by_endpoint": {
+     "book": {
+      "n": 151,
+      "p50": 109.043,
+      "p95": 1171.847,
+      "p99": 1743.051,
+      "max": 1809.243,
+      "mean": 281.557,
+      "codes": {
+       "ok": 151
+      }
+     },
+     "chat": {
+      "n": 372,
+      "p50": 5056.563,
+      "p95": 6490.41,
+      "p99": 7049.358,
+      "max": 7697.043,
+      "mean": 4889.84,
+      "codes": {
+       "ok": 190,
+       "server_busy": 182
+      }
+     },
+     "conversations": {
+      "n": 262,
+      "p50": 71.608,
+      "p95": 966.605,
+      "p99": 1405.245,
+      "max": 1878.937,
+      "mean": 228.318,
+      "codes": {
+       "ok": 262
+      }
+     },
+     "history": {
+      "n": 646,
+      "p50": 57.792,
+      "p95": 1135.32,
+      "p99": 1759.784,
+      "max": 2003.999,
+      "mean": 259.239,
+      "codes": {
+       "ok": 646
+      }
+     },
+     "tickets": {
+      "n": 324,
+      "p50": 56.606,
+      "p95": 1348.738,
+      "p99": 1714.689,
+      "max": 1981.914,
+      "mean": 289.968,
+      "codes": {
+       "ok": 324
+      }
+     }
+    },
+    "http_5xx": 0,
+    "codes": {
+     "ok": 1573,
+     "server_busy": 182
+    },
+    "throughput_rps": 56.6
+   },
+   "reps": [
+    {
+     "seconds": 10.379,
+     "throughput_rps": 52.6,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 10.319,
+     "throughput_rps": 58.6,
+     "wal_bytes": 0
+    },
+    {
+     "seconds": 10.289,
+     "throughput_rps": 58.7,
+     "wal_bytes": 0
+    }
+   ],
+   "throughput_rps": {
+    "mean": 56.6,
+    "min": 52.6,
+    "max": 58.7
+   },
+   "resources": {
+    "cpu_percent_mean": 33.3,
+    "cpu_percent_max": 212.5,
+    "rss_mb_max": 104.2
+   },
+   "counters": {},
+   "integrity": {
+    "double_bookings": 0,
+    "booked_without_ticket": 0,
+    "ticket_quote_not_booked": 0,
+    "ticket_without_used_nonce": 0,
+    "ticket_owner_mismatch": 0,
+    "client_double_success": 0,
+    "client_success_without_ticket": 0,
+    "ticket_without_client_success": 0,
+    "turn_interleavings": 0,
+    "tickets": 192
+   }
+  }
+ ],
+ "micro": {
+  "writers": [
+   {
+    "threads": 1,
+    "seconds": 3.0,
+    "commits_per_s": 1343.0,
+    "busy": 0,
+    "errors": 0,
+    "lock_wait_ms": {
+     "n": 4029,
+     "p50": 0.23,
+     "p95": 0.291,
+     "p99": 0.32,
+     "max": 1.68,
+     "mean": 0.24
+    },
+    "hold_ms": {
+     "n": 4029,
+     "p50": 0.267,
+     "p95": 0.324,
+     "p99": 0.372,
+     "max": 1.706,
+     "mean": 0.275
+    },
+    "total_ms": {
+     "n": 4029,
+     "p50": 0.728,
+     "p95": 0.845,
+     "p99": 0.947,
+     "max": 2.242,
+     "mean": 0.743
+    }
+   },
+   {
+    "threads": 4,
+    "seconds": 3.093,
+    "commits_per_s": 3440.3,
+    "busy": 0,
+    "errors": 0,
+    "lock_wait_ms": {
+     "n": 10641,
+     "p50": 0.021,
+     "p95": 0.025,
+     "p99": 4.54,
+     "max": 1021.293,
+     "mean": 0.877
+    },
+    "hold_ms": {
+     "n": 10641,
+     "p50": 0.208,
+     "p95": 0.238,
+     "p99": 0.27,
+     "max": 1.278,
+     "mean": 0.215
+    },
+    "total_ms": {
+     "n": 10641,
+     "p50": 0.274,
+     "p95": 0.31,
+     "p99": 4.863,
+     "max": 1021.635,
+     "mean": 1.137
+    }
+   },
+   {
+    "threads": 16,
+    "seconds": 3.48,
+    "commits_per_s": 2905.7,
+    "busy": 0,
+    "errors": 0,
+    "lock_wait_ms": {
+     "n": 10113,
+     "p50": 0.021,
+     "p95": 0.027,
+     "p99": 65.289,
+     "max": 3040.434,
+     "mean": 4.643
+    },
+    "hold_ms": {
+     "n": 10113,
+     "p50": 0.212,
+     "p95": 0.251,
+     "p99": 0.333,
+     "max": 35.726,
+     "mean": 0.23
+    },
+    "total_ms": {
+     "n": 10113,
+     "p50": 0.279,
+     "p95": 0.334,
+     "p99": 65.665,
+     "max": 3041.72,
+     "mean": 4.92
+    }
+   },
+   {
+    "threads": 64,
+    "seconds": 3.586,
+    "commits_per_s": 2925.0,
+    "busy": 0,
+    "errors": 0,
+    "lock_wait_ms": {
+     "n": 10488,
+     "p50": 0.022,
+     "p95": 0.027,
+     "p99": 597.247,
+     "max": 3568.483,
+     "mean": 19.046
+    },
+    "hold_ms": {
+     "n": 10488,
+     "p50": 0.211,
+     "p95": 0.249,
+     "p99": 0.42,
+     "max": 2.981,
+     "mean": 0.224
+    },
+    "total_ms": {
+     "n": 10488,
+     "p50": 0.279,
+     "p95": 0.348,
+     "p99": 600.403,
+     "max": 3583.62,
+     "mean": 19.333
+    }
+   }
+  ],
+  "hook_overhead": {
+   "off_us_per_read": 429.03,
+   "on_us_per_read": 423.02,
+   "ops": 2000,
+   "rounds": 5
+  }
+ },
+ "wall_seconds": 285.0,
+ "integrity_failures": 0,
+ "work_dir_kept": false
+}
