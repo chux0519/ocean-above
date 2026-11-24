@@ -1,0 +1,214 @@
+== 1_streaming_first_token (11.9s)
+{
+ "pydantic_ai": {
+  "first_text_s_median": 1.018,
+  "all": [
+   1.062,
+   0.973,
+   1.402,
+   0.89,
+   1.018
+  ],
+  "first_thinking_s": [
+   0.857,
+   null,
+   1.084,
+   0.678,
+   0.737
+  ],
+  "deltas_per_reply": [
+   32,
+   34,
+   41,
+   41,
+   40
+  ],
+  "example": "I can find Ocean Above flights between two cities, quote routes, and start a booking for you. I can also look up the tickets you've already booked."
+ },
+ "backend_httpx_client": {
+  "first_text_s_median": 0.877,
+  "all": [
+   0.823,
+   0.964,
+   0.801,
+   0.877,
+   1.159
+  ]
+ }
+}
+== 2_tools (5.9s)
+{
+ "parallel": {
+  "tool_calls_per_completion": [
+   [
+    "find_city({\"name\":\"Abu Dhabi\"})",
+    "find_city({\"name\":\"Reykjavik\"})"
+   ],
+   []
+  ],
+  "llm_requests": 2,
+  "backend_codes": [
+   "no_service",
+   "ok"
+  ],
+  "reply": "Abu Dhabi is not served by Ocean Above; the card lists the nearest served cities. Reykjavik is served, with a connection via Chicago — both results are on the cards.",
+  "tool_schema_strict_flag_sent": [
+   true,
+   true,
+   true,
+   null
+  ]
+ },
+ "serial": {
+  "tool_calls_per_completion": [
+   [
+    "quote_route({\"origin\":\"Paris\",\"destination\":\"Sydney\"})"
+   ],
+   [
+    "request_booking({\"quote_id\":\"q_b4ee2ae4ba995197\"})"
+   ],
+   []
+  ],
+  "llm_requests": 3,
+  "backend_codes": [
+   "ok",
+   "ok"
+  ],
+  "reply": "The cheapest route from Paris to Sydney is on the card, with transfers in Honolulu and Miami, and the booking confirmation is shown too. Please check the route, distance and price on the card, then click \"Confirm booking\" to issue the ticket.",
+  "tool_schema_strict_flag_sent": [
+   true,
+   true,
+   true,
+   null
+  ]
+ }
+}
+== 7_thinking (6.3s)
+{
+ "high": {
+  "request_fields": {
+   "max_tokens": 4096,
+   "reasoning_effort": "high",
+   "temperature": 0
+  },
+  "thinking_parts": 1,
+  "thinking_chars": 868,
+  "thinking_part_id_provider": [
+   [
+    "reasoning_content",
+    "deepseek"
+   ]
+  ],
+  "reasoning_content_sent_back_on_tool_call_msg": true,
+  "reasoning_tokens": 211
+ },
+ "none": {
+  "request_fields": {
+   "max_tokens": 4096,
+   "reasoning_effort": "none",
+   "temperature": 0
+  },
+  "thinking_parts": 0,
+  "thinking_chars": 0,
+  "thinking_part_id_provider": [],
+  "reasoning_content_sent_back_on_tool_call_msg": false,
+  "reasoning_tokens": null
+ },
+ "max": {
+  "request_fields": {
+   "max_tokens": 4096,
+   "reasoning_effort": "max",
+   "temperature": 0
+  },
+  "thinking_parts": 1,
+  "thinking_chars": 233,
+  "thinking_part_id_provider": [
+   [
+    "reasoning_content",
+    "deepseek"
+   ]
+  ],
+  "reasoning_content_sent_back_on_tool_call_msg": false,
+  "reasoning_tokens": 44
+ },
+ "extra_body_backend_form": {
+  "request_fields": {
+   "thinking": {
+    "type": "enabled"
+   },
+   "reasoning_effort": "high"
+  },
+  "reasoning_tokens": 55,
+  "ok": true
+ }
+}
+== 4_6_9_cancel_real (9.6s)
+{
+ "runs": [
+  {
+   "stream_closed_after_cancel_ms": -124.2,
+   "returned_after_ms": 0.1,
+   "stream_reached_eof": true,
+   "http_requests": 1,
+   "usage_after_cancel": "None"
+  },
+  {
+   "stream_closed_after_cancel_ms": -228.4,
+   "returned_after_ms": 0.1,
+   "stream_reached_eof": true,
+   "http_requests": 1,
+   "usage_after_cancel": "None"
+  },
+  {
+   "stream_closed_after_cancel_ms": -123.1,
+   "returned_after_ms": 0.1,
+   "stream_reached_eof": true,
+   "http_requests": 1,
+   "usage_after_cancel": "None"
+  }
+ ],
+ "close_ms_median": -124.2
+}
+== 12_guard_real (2.5s)
+{
+ "outcome": "all released",
+ "sentences_released": 1,
+ "problems": [],
+ "released_text": "The cheapest Paris to Sydney route is on the card, with transfers in Honolulu and Miami. Tell me if you'd like to book it."
+}
+== 14_deps_real (2.3s)
+{
+ "tool_calls": [],
+ "deps_user": "u_2bee9a3b05d6fd25",
+ "other_user": "u_9f0e5ab780b72cf9",
+ "reply": "I can't do that — the ticket lookup only works for the person I'm chatting with, and there's no way for me to look up tickets by another user's id. If you'd like, I can list the tickets booked in this"
+}
+== 15_history_from_app_db (4.7s)
+{
+ "turn1_backend_reply": "Here's the cheapest route from Paris to Sydney with transfers in Honolulu and Miami — the card shows the legs, distance and price. Would you like to book it?",
+ "history_messages_from_app_db": 4,
+ "converted_model_messages": [
+  "ModelRequest",
+  "ModelResponse",
+  "ModelRequest",
+  "ModelResponse"
+ ],
+ "reasoning_content_in_request": 1,
+ "assistant_msgs_in_request": 2,
+ "turn2_tool_calls": [
+  [
+   "request_booking",
+   {
+    "quote_id": "q_57b428f725779f4c"
+   }
+  ]
+ ],
+ "quote_id_from_history": [
+  "q_57b428f725779f4c"
+ ],
+ "turn2_codes": [
+  "ok"
+ ],
+ "turn2_reply": "Please check the route, distance and price on the confirmation card, then click \"Confirm booking\" to issue your ticket."
+}
+== outbound ["('192.168.1.13', 7890)"]

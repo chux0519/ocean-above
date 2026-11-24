@@ -1,0 +1,97 @@
+{
+  "model": "deepseek-flash",
+  "date": "2026-11-24",
+  "7_thinking": {
+    "high": {
+      "request_fields": {
+        "max_tokens": 4096,
+        "reasoning_effort": "high",
+        "temperature": 0
+      },
+      "thinking_parts": 1,
+      "thinking_chars": 549,
+      "thinking_part_id_provider": [
+        [
+          "reasoning_content",
+          "deepseek"
+        ]
+      ],
+      "reasoning_content_sent_back_on_tool_call_msg": true,
+      "reasoning_tokens": 142
+    },
+    "none": {
+      "request_fields": {
+        "max_tokens": 4096,
+        "reasoning_effort": "none",
+        "temperature": 0
+      },
+      "thinking_parts": 0,
+      "thinking_chars": 0,
+      "thinking_part_id_provider": [],
+      "reasoning_content_sent_back_on_tool_call_msg": false,
+      "reasoning_tokens": null
+    },
+    "max": {
+      "request_fields": {
+        "max_tokens": 4096,
+        "reasoning_effort": "max",
+        "temperature": 0
+      },
+      "thinking_parts": 1,
+      "thinking_chars": 911,
+      "thinking_part_id_provider": [
+        [
+          "reasoning_content",
+          "deepseek"
+        ]
+      ],
+      "reasoning_content_sent_back_on_tool_call_msg": false,
+      "reasoning_tokens": 209
+    },
+    "extra_body_backend_form": {
+      "request_fields": {
+        "thinking": {
+          "type": "enabled"
+        },
+        "reasoning_effort": "high"
+      },
+      "reasoning_tokens": 133,
+      "ok": true
+    }
+  },
+  "cost": {
+    "runs": [
+      {
+        "label": "7 thinking high",
+        "input": 1892,
+        "output": 243,
+        "cache_read": 1536,
+        "cost_usd": "0.000407616"
+      },
+      {
+        "label": "7 thinking none",
+        "input": 80,
+        "output": 55,
+        "cache_read": 0,
+        "cost_usd": "0.000090"
+      },
+      {
+        "label": "7 thinking max",
+        "input": 105,
+        "output": 220,
+        "cache_read": 0,
+        "cost_usd": "0.0002955"
+      },
+      {
+        "label": "7 thinking extra_body",
+        "input": 105,
+        "output": 151,
+        "cache_read": 0,
+        "cost_usd": "0.0002127"
+      }
+    ]
+  },
+  "outbound_hosts": [
+    "('192.168.1.13', 7890)"
+  ]
+}
