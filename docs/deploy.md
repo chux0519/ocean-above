@@ -55,6 +55,11 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   messages), then start the old image.
 
 ## Deploy log
+- 2026-11-24 `43a72de`: 09-stop — user Stop (#48), app.db schema v4 (migrated on start; backup in `/tmp` on the VPS);
+  api + web. Health 200 after 12 s (the retrying check). Public API e2e: a three-route request stopped after the first
+  card → cancel 200 `cancelling` → terminal `cancelled` 0.85 s later; stored reply `status: cancelled`, its three quote
+  cards not bookable (no nonce), booking one → 409 `not_presented`; repeated Stop 200 `cancelled`; unknown run 404; the
+  next message in the same conversation completes normally.
 - 2026-11-24 `963c9be`: 08-runtime — agent runtime on Pydantic AI Slim 2.71 (ADR-001, #49); api image only. The script's
   6 s health check hit the startup window (502), public health was 200 seconds later; the check now retries for up to
   60 s. Public API e2e (coordinator invite test code): "Book me a flight from Guangzhou to Lima" → quote + confirmation

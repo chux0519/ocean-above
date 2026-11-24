@@ -1,0 +1,403 @@
+## 4. Agent loop 设计
+
+### 4.1 状态机
+
+```mermaid
+stateDiagram-v2
+  [*] --> BuildContext: 收到用户消息（已落库）
+  BuildContext --> CallLLM
+  CallLLM --> ExecTools: 有 tool_calls
+  CallLLM --> StreamReply: 文本
+  CallLLM --> Fallback: LLM 错误且重试用尽
+  ExecTools --> CallLLM: 结果追加（step < MAX_STEPS）；卡片已推送
+  ExecTools --> Fallback: step = MAX_STEPS
+  ExecTools --> Fallback: 每轮工具调用用尽且有被拒调用
+  ExecTools --> Fallback: 本轮 token ≥ 软上限
+  StreamReply --> StreamReply: 一句通过校验 → 推送
+  StreamReply --> Fallback: 某句校验失败 → replace
+  StreamReply --> Persist: 文本结束
+  Fallback --> Persist: 代码模板回复（只用记录）
+  Persist --> [*]: 存 assistant 消息 + 卡片；quote → presented；done
+```
+
+### 4.2 伪代码
+
+```python
+def run_turn(conv, user_text, emit) -> AssistantMessage:
+    with conversation_lock(conv):                  # 同会话串行；出票接口也拿同一把锁
+        store.add_message(conv, role="user", text=user_text)
+        ctx = build_context(conv)                  # system + 历史（LLM 原文）+ 历史工具结果（精简）
+        produced = []                              # 本轮记录：quote / booking request / ticket list / city
+        for step in range(MAX_STEPS):              # MAX_STEPS = 6
+            stream = llm.chat_stream(ctx, tools=TOOL_SCHEMAS, temperature=0)
+            if stream.tool_calls():                # 分片的参数拼完整后再执行
+                for call in stream.tool_calls():
+                    emit("status", status_text(call))
+                    result = dispatch(call, conv)  # pydantic 校验 → airline → ToolCall 落库
+                    produced += result.records     # 校验失败也返回结构化错误，让 LLM 自行修正
+                    for card in cards_for(result.records):
+                        emit("card", card)         # 卡片立即推送，按钮在 done 前禁用
+                    ctx.append(tool_message(call.id, result.for_llm()))
+                store.add_llm_call(conv, ctx, stream.raw())
+                continue
+            guard = ReplyGuard(records=visible_records(conv, produced), user_text=user_text)
+            for sentence in stream.sentences():    # 按句缓冲
+                ok, problems = guard.check(sentence)
+                if not ok:
+                    emit("replace", fallback_reply(produced))
+                    return persist(conv, fallback_reply(produced), produced, guard_problems=problems)
+                emit("delta", sentence)
+            store.add_llm_call(conv, ctx, stream.raw())
+            return persist(conv, stream.text(), produced)
+        emit("replace", fallback_reply(produced))
+        return persist(conv, fallback_reply(produced), produced)
+```
+
+### 4.3 上下文
+- system prompt：角色；工具使用规则；「事实在卡片里，文字里不要自己算数，提到数字只能照抄工具结果的显示值」；
+  「用户要订票时调用 `request_booking`，告诉用户点击确认卡出票」；「城市名有歧义时先问用户」；当前日期。
+  **不放城市列表**（城市由工具解析）。
+- 历史：本会话全部消息，**用 LLM 原文**（与渲染后一致，因为文本不再做替换）；工具结果以精简 JSON 保留
+  （记录 id + 显示值），超过预算时从最早的轮次开始压缩成摘要，quote 和 ticket id 始终保留。
+- LLM 参数：`temperature=0`，`tool_choice=auto`；并行工具调用允许（按顺序执行）。由 Pydantic AI 的 `OpenAIChatModel`（DeepSeek
+  方言）发出；`max_tokens` 同 §4.8。
+
+### 4.4 工具
+
+| 工具 | 参数 | 返回的记录 | 为什么这样设计 |
+|---|---|---|---|
+| `find_city` | `name` | `CityRecord`：规范名、是否有服务、是否 hub、直连 hub；无服务时附最近的有服务城市（前 3 个）；找不到或有歧义时附候选 | 城市解析和「无服务 → 最近有服务城市」（要求 8）是确定性逻辑；歧义（如 `San Jose` / `San José`）返回 `ambiguous_city`，由用户选 |
+| `quote_route` | `origin`, `destination` | `Quote`：航段、中转、距离、价格（显示值 + 高精度值）、来源、库指纹、有效期；错误：`unknown_city` / `ambiguous_city` / `same_city` / `no_service`（附最近有服务城市，排除另一端）/ `unreachable` | 询价产生不可变记录；确认卡、出票都引用同一个 id |
+| `request_booking` | `quote_id` | `BookingRequest`：确认卡（完整航段、中转、距离、价格、有效期）；nonce 在本轮 `done` 时随消息下发，不进工具结果 | LLM 只能让确认卡出现，不能出票；出票的触发是用户点击（P4） |
+| `list_my_tickets` | 可选：`city`、`ticket_id`、`booked_after/before` | `TicketList`：票据记录 + `count` | 要求 9：票据只从 app.db 读；数量由代码给出（FSR 的计数教训） |
+
+工具设计取舍：
+- **少而粗**：4 个工具覆盖全部需求。工具越少，LLM 选错的机会越少，也更容易统计成功率。
+- 参数只收**名字和 id**，不收距离、价格等数字，LLM 没有机会把自己算的数传进来。
+- 返回给 LLM 的都是已格式化的显示值，LLM 不需要也不应该自己舍入或换算。
+- 错误也是结构化记录，LLM 据此组织语言，但事实来自记录；**无服务、歧义、找不到也各有一张卡片**，
+  即使 LLM 文字写错，卡片上的事实是对的。
+
+### 4.5 回复校验（ReplyGuard）
+- **数字按值溯源**：句子里每个数字（含金额、公里数、计数）规范化后必须等于本轮可见记录的某个显示值
+  （如 `$1,234.57`、`9,497.3 km`、`3`）。另外允许：用户本条消息里原样出现过的数字、Markdown 有序列表序号、
+  记录 id、日期。
+- **城市名按值溯源**：句子里出现的任何库内城市名，必须出现在本轮记录里或用户本条消息里（防止 LLM 用常识推荐
+  「附近的 Dubai」——库里 Abu Dhabi 最近的有服务城市是 Tirana）。
+- 失败：流式下已推出的句子无法撤回，所以**不重写**，直接 `replace` 成代码模板回复（模板只用记录拼句子）。
+  失败原因落库，计入评测指标。
+- 已知漏洞：文字写出的数（「两千多公里」「three tickets」）看不出来 → prompt 禁止 + 评测检查 + 写入已知限制。
+- 03 开工第一步：用约 20 个用例在 DeepSeek flash 上实测校验通过率和回退率，再定 prompt；如回退率过高，改为
+  「文字不写任何数字，事实全在卡片」。
+
+- **实现细化（T3，2026-11-23）**：
+  - 可见记录 = 上下文里全部工具结果 + 出票事件（不只本轮）；工具只回显 LLM 自己参数的内容（query、filter、错误信息）
+    不算记录；
+  - 城市名：用户在本会话任何一条消息里提到的库内城市都可出现；prompt 要求城市名一律用记录里的英文原名
+    （回复是中文也一样）；被翻译成其他文字的城市名 guard 查不到，写入已知限制；
+  - 数字带单位核对（`$` ↔ 价格、`km` ↔ 距离；英里、小时、百分比等一律不放行）；计数只来自代码给的
+    `count` / `leg_count` / `transfer_count`；有序列表序号只认 1、2、3… 连续序列；
+  - **出票声明规则**：本轮记录里没有用户点击出票或非空的查票结果时，「已出票 / booked / confirmed」类说法回退模板；
+    `request_booking` 成功的轮次由代码在末尾追加固定的点击提示；
+  - LLM 不可用且本轮没有任何产出 → SSE `error`，只保留用户消息；`finish_reason` 不是 `stop` → 模板；
+  - 整轮总时限 90 s、会话锁等待 10 s（超时 `conversation_busy`，消息不保存）；内联 `<think>` 块剥离；
+    给 LLM 的高精度值去掉，只给显示值。
+  - 真模型实测（deepseek-flash，effort high，31 场景 / 50 轮）：50/50 原样放行，0 回退，0 虚假出票声明；费用约 $0.016。
+
+### 4.6 失败处理
+| 情况 | 处理 |
+|---|---|
+| LLM 超时 / 5xx | 指数退避重试 2 次 → 回复「服务暂时不可用」，用户消息保留，可重发 |
+| 工具参数不合法 | 结构化错误回给 LLM，计入工具调用成功率的失败 |
+| 超过 MAX_STEPS | 模板回复，附本轮已产生的记录 |
+| 用户在回复完成前又发消息 / 点按钮 | 同会话串行（每会话一把锁，聊天和出票接口共用）；uvicorn 单 worker |
+| 超出限额 | 明确提示（每用户每日消息上限、全站每日预算） |
+| 本轮工具调用或 token 超出预算 | 超出的工具调用不执行并回结构化拒绝；需要结束时模板回复（`tool_budget` / `token_budget`），见 §4.8 |
+| 全站对话轮次已满 | 最多等 5 s；仍满 → `server_busy`，消息不保存，额度退还，前端保留输入 |
+| app.db 锁等待 / 操作超时 | 回滚；HTTP 503 `data_unavailable`（出票可用同一 nonce 重试）；对话里走模板 / `internal_error` |
+| 同一用户已有 2 个轮次在跑 | `conversation_busy`（其他会话忙），什么都不存 |
+| 用户消息没能存入 app.db | `internal_error`（没有保存），额度退还 |
+
+### 4.7 流式输出
+- 传输：`POST /api/conversations/{id}/messages` 返回 SSE（`text/event-stream`），前端用 fetch 逐段读取。
+- 事件：
+  | 事件 | 内容 | 时机 |
+  |---|---|---|
+  | `status` | 「正在查询航线…」等进度 | 每次工具调用前 |
+  | `card` | 行程卡 / 确认卡 / 票卡 / 无服务卡 / 歧义卡（完全由记录渲染） | 工具返回后立即推 |
+  | `delta` | 通过校验的一句文本 | LLM 流式输出时，按句 |
+  | `replace` | 整条文本替换为代码模板 | 某句校验失败 |
+  | `ping` | 心跳 | 每 15 秒（防止 Cloudflare 断开空闲连接） |
+  | `done` / `error` | 消息 id、各卡片的服务端状态 | 结束 |
+- 卡片按钮在 `done` 之前禁用；之后的按钮状态（可订 / 已出票 / 已过期）一律以服务端当前 quote 状态为准，
+  包括断线重连后拉到的历史卡片。
+- 断线：后端照常跑完一轮并落库，前端重连后拉会话即可看到完整结果。
+
+### 4.8 每轮预算（06 P0a，#32）
+集中在 `agent/budget.py`：`AgentBudget`（配置）+ `BudgetTracker`（一轮的计数）。loop 只在两处问它：每次调 LLM 前
+（`stop_before_step`）和每个工具调用前（`admit_tool_call`）。
+
+| 预算 | 默认 | 环境变量（范围） | 超出时 |
+|---|---|---|---|
+| LLM 步数 | 6 | `AGENT_MAX_STEPS`（1–20） | 模板回复，`max_steps` |
+| 每步工具调用 | 4 | `AGENT_MAX_TOOL_CALLS_PER_STEP`（1–16） | 多出的不执行，回结构化拒绝，本轮继续 |
+| 每轮工具调用 | 12 | `AGENT_MAX_TOOL_CALLS_PER_TURN`（1–64） | 多出的不执行，回结构化拒绝，本步结束后模板回复，`tool_budget` |
+| 单次输出 token（含思考） | 4096 | `AGENT_MAX_OUTPUT_TOKENS_PER_CALL`（256–32768） | 请求的 `max_tokens`；截断 → 模板（`truncated`） |
+| 每轮总 token（软上限） | 60000（原 20000；06 P1 实测长会话中三步轮次约 27k） | `AGENT_MAX_TOTAL_TOKENS_PER_TURN`（1000–1000000） | 不再开始下一步，模板回复，`token_budget` |
+| 每轮总时长 | 90 s | `AGENT_MAX_TURN_SECONDS`（5–600） | 模板回复（`turn_timeout`）；没有产出 → `llm_unavailable` |
+
+环境变量不合法（非数字、越界、非整数）时应用启动失败，不会带着错误的预算运行。
+
+- **工具调用逐个计数**，不是按 LLM 步计数。一次 completion 里超出的调用**不执行**（不发 `status`、不碰 airline），
+  每个都得到一条 `{"code":"tool_budget_exceeded","message":…,"limit":"per_step"|"per_turn"}` 工具结果，
+  所以每个 `tool_call_id` 都有回应，协议有效；拒绝也像普通调用一样存入 `tool_calls`（`error = "budget: …"`），
+  下一轮重建的上下文与记录的 completion 对齐。拒绝不是记录：不进 ReplyGuard，模板也不引用它。
+- 一次 completion 的工具调用超过 `每步上限 × 4`（默认 16）时视为异常：一个都不执行、不逐条落拒绝，本轮以模板结束
+  （`tool_budget`，值为调用数）；该 completion 在 `llm_calls` 里标 `tool_calls_not_run`，重建上下文时跳过它。
+- 工具返回后，结果、卡片和给 LLM 的消息立即登记到本轮，再写 `tool_calls` 行；时限落在写行上时，模板回复仍带这张卡。
+- **token 软上限**：在两次 LLM 请求之间、以及每次重试之前检查（正在进行的那一步会跑完，超出后不再开始下一步，也不再重试）。
+  每次调用按以下规则计费：服务商回报的用量取 `max(total_tokens, prompt_tokens + completion_tokens)`（0 不算回报）；
+  **没读到任何响应体的失败**（HTTP 错误状态、连接 / 握手失败）计 0；其余没有可用回报的调用（流中途断开、
+  completion 没带 usage）按估算计：`ceil(请求 JSON 字符数 / 2) + ceil(已收到的输出字符数 / 2)`（输出含文本、思考、
+  工具调用，最多到单次输出上限）；输出量不可知时（本次调用超时、ReplyGuard 截断、整轮时限打断）按整个单次输出上限计。
+  整轮时限打断的调用也落一条 `llm_calls`（`aborted: "turn_timeout"`）。每次计费写在 `llm_calls.response.budget`；
+  `llm_calls.tokens` 存同一个计费值（服务商原始回报仍在 `response.usage`），全站每日预算（§8.2）按它累计，
+  所以两者口径一致。**这不是严格的费用上限**：单次调用最多可以超出剩余额度一整步，价格也按模型而异。
+- **预算停止永远不出票、不改 quote 状态**：agent 本来就没有出票路径；被拒的 `request_booking` 不执行，所以不会出现确认卡。
+  已执行的工具结果和卡片照常保留，assistant 消息照常存储（模板），会话保持良构。
+- 停止时记一条 warning 日志（步数、已执行/被拒调用数、token、估计次数）。
+
+### 4.9 并发与阻塞调用（06 P0b，#33）
+- **全站并发上限**：同时运行的对话轮次最多 `AGENT_MAX_ACTIVE_TURNS`（默认 8，1–256），在每会话锁之外。先拿会话锁，再拿名额
+  （先来先得），最多等 `AGENT_TURN_QUEUE_SECONDS`（默认 5 s，0–60）；等不到 → SSE `error server_busy`，在 `user_message`
+  之前发出，什么都不存，并退还当天的消息额度。等待是 `await`，不阻塞事件循环。
+- **线程不能强制中止**：工具和 app.db 调用在工作线程里跑（`asyncio.to_thread`）；超时只能停止等待，线程会跑完。所以本轮
+  在时限内启动的线程都登记下来；整轮超时或出错后，先等它们结束（最多 30 s）再落 assistant 消息、释放会话锁和名额——
+  否则线程可能在锁释放后还在写 quote。超过 30 s 记 error 日志后照常结束。线程占着名额，因此线程数有上限。
+- **app.db 时限**：每条语句等锁最多 10 s（busy timeout），每个连接（一次读或写事务）从打开起 10 s 后中断正在跑的 SQL；
+  两者都回滚并抛 `StoreUnavailable`。HTTP 一律 503 `data_unavailable`（出票：没写入任何东西，quote 和 nonce 不变，可重试）；
+  对话轮次里走现有的 `internal_error` / 模板回退。
+- **每用户上限**：同一用户同时运行的轮次最多 `AGENT_MAX_TURNS_PER_USER`（默认 2，1–256），在会话锁之后、名额之前检查；
+  超出 → SSE `error conversation_busy`（文案说明是其他会话在忙），什么都不存，不退额度。
+- **出票点击不占线程等锁**：`book_async` 在事件循环上等会话锁（`hold_async`），拿到锁后才在工作线程里跑出票事务；请求被取消时
+  也等事务线程结束再释放锁。每用户同时进行的点击最多 2 个，超出 → 409 `conversation_busy`（可重试，什么都没改）。
+  出票事务开始前先加载已变化的 locations.db，事务内的 B6 严格复核只需重新哈希文件。
+- **线程池大小**：启动时显式设置事件循环默认线程池为 `2 × AGENT_MAX_ACTIVE_TURNS + 16`（默认 32）：每个运行中的轮次
+  同时最多用一个线程，被打断的轮次最多两个（未结束的工具线程 + 被打断调用的记录），余量给出票事务和路由的短读取。
+- **消息没存上**：保存用户消息时 app.db 出错 → SSE `internal_error`（“没有保存”），在 `user_message` 之前，退还当天额度。
+  app.db 超时的 HTTP 503 文案改为 “服务繁忙，没有做任何改动”。
+- 未覆盖（替换原句）：读 locations.db 没有操作时限；出票事务里的严格复核仍在 app.db 写锁内哈希 locations.db，文件系统卡住时
+  写锁被一直占着，其他写入 10 s 后 `StoreUnavailable`。CPU 计算（路由毫秒级）。等名额时持有会话锁：全站满载时，
+  同会话的点击最多等 5 s（在事件循环上，不占线程）后得到 `conversation_busy`。
+
+
+### 4.10 运行时（ADR-001，#49）
+每轮一个 Pydantic AI run：`Agent.iter(message_history=…)`，loop 在 `ModelRequestNode` 上流式读事件（文本 → SentenceBuffer →
+ReplyGuard → `delta`），在 `CallToolsNode` 上执行工具。§4.2 的伪代码不变。
+- 工具：`Tool.from_schema(TOOL_SCHEMAS)`，串行、按调用顺序，`strict` 关；执行体是 `Toolbox.run`，用户和会话来自 run 的 `deps`，
+  阻塞部分走 `Threads`。参数不是 JSON 对象时原串交给 `Toolbox.run`（`invalid_arguments`）；未知工具名由 loop 记为 `unknown_tool`；
+  同一响应里重复的 `tool_call_id` 改成 `id~2`… 后照常执行。
+- 请求：每次请求的消息都是 loop 自己的上下文（`before_model_request`：app.db 历史 + 本轮步骤，工具调用为 wire-safe 形式，会话中途的
+  system 消息保持 system 角色）；thinking 字段经 `extra_body` 发出，与迁移前相同；不加 SDK 的说明文字和 openai 客户端指纹头。
+  唯一保留的 SDK 附加：用户文字里出现仿冒 `<system>` 的标签时，SDK 在后面加一条说明（只到模型）。
+- 重试：provider SDK 自身不重试（`max_retries=0`）；loop 在一步还没放出文字时按 §4.6 重试，每一步各有 2 次，每次尝试都记 `llm_calls`
+  并计费，从上下文重开 run。模型流里的任何异常都算一次失败的调用；模型调用之外的异常仍是 `internal_error`。
+- 结束原因：读服务商原始 `finish_reason`；没有时当作断流（可重试），不当作 `stop`。
+- 取消：`Agent.cancel(user, conversation)` 取消本轮步骤任务；模型流立即关闭，不再有新的请求和工具调用；已开始的工具线程跑完、drain
+  后才落库（模板，`cancelled`）并释放锁和名额。Stop 接口和界面、被打断的工具结果是否结算见 #48。
+- Tracing：默认不装 instrumentation、无 exporter、无 logfire；`Agent(tracer_provider=…)` 给 #35 用（不带消息内容）。
+
+## 5. 路线、距离、价格
+
+- 图：hub–hub 边来自 `hub_links`，非 hub–hub 边来自 `connected_hubs`；双向。非 hub 城市只能当端点（只在 hub 换乘）。
+- 价格和距离成正比 ⇒ 最便宜 = 最短；欧氏距离满足三角不等式 ⇒ 有直飞时直飞最便宜（要求 5 自然满足）。
+- **规范计价函数**（全系统唯一，报价、出票复核、参考比对都只用它）：给定城市序列，在固定的 Decimal 上下文
+  （prec=50, ROUND_HALF_EVEN）里按航段顺序计算 `sqrt(dx²+dy²)`、求和、乘 `Decimal("0.13")`，量化为 30 位小数的字符串。
+  坐标是整数，只有完全平方数的航段距离是精确值，其余是 50 位精度近似；文档和界面都称「高精度值」。
+- 选路：加载（或库指纹变化）时，对每个 hub 对用 networkx `shortest_simple_paths`（Yen）取出「整数边权最优 + 很小容差」
+  内的全部简单路径作为候选（边权 = 规范单段距离量化到 1e-30 后的整数，整数运算无误差；容差只会多收候选，
+  保证 √2+√8 对 √18 这类无理数平手不被漏掉）。查询时枚举「起点直连 hub × 终点直连 hub」拼出候选路线，全部交给规范函数
+  计价，按（价格，航段数，城市名序列）取最小。**networkx 只用来产生候选，不使用它返回的长度。**
+  实测：真实库每个 hub 对恰好 1 条候选，加载约 0.12 s；全部 490,700 个有服务城市对与参考实现比对一致，用时约 28 s。
+- 存储值上「各段之和」与「总距离」可能相差 ≤ 航段数 × 1e-30（先对未舍入值求和再量化一次，避免把舍入值喂回计算）；
+  「计算依据」以总距离字段为准。
+- 显示：距离 1 位小数（km），价格到分（ROUND_HALF_UP）；舍入只在渲染层。「计算依据」显示每段高精度距离、求和、
+  × 0.13，并注明「价格按未舍入的距离计算，所以显示距离 × 0.13 可能和显示价格差 1 分」。
+- 城市解析：先按原样（NFC）精确匹配；不中再做大小写 + 去重音折叠匹配，折叠后命中多个（库里唯一的一组是
+  `San Jose` 与 `San José`）→ `ambiguous_city`，绝不自动选；仍不中 → difflib 候选。命中的城市如有折叠同名的兄弟，
+  记录里带 `similar_names`，卡片显示区分信息（直连 hub）。
+- 最近有服务城市：在有服务城市中按距离取前 3 个，可排除指定城市（避免建议的城市就是另一端）。
+- 正确性保证：
+  1. 独立参考实现（逐对 Bellman-Ford，不共享代码）与生产实现在**全部有服务城市对**上比对路线成本；
+  2. hypothesis 随机图（不连通、平手、共线）；
+  3. 结构性检查：中间城市都是 hub、每段都是真实航线、总距离 = 各段之和、价格 = 距离 × 0.13；
+  4. 线程一致性：默认上下文的新线程里算出的报价字符串与主线程逐字节相同；
+  5. 呈现侧：卡片只由记录渲染；文本经 ReplyGuard（§4.5）；评测再查一遍「回复中每个数字、城市都能在记录里找到」。
+
+### 5.1 溯源记录（Quote 示例）
+
+```json
+{
+  "id": "q_7f3a",
+  "origin": "Guangzhou", "destination": "Lima",
+  "legs": [
+    {"from": "Guangzhou", "to": "Johannesburg",
+     "from_coord": [-9278, 3445], "to_coord": [...],
+     "source": "locations.connected_hubs(Guangzhou)",
+     "distance": "…(30 位小数)…"},
+    {"from": "Johannesburg", "to": "…", "source": "hub_links(…,…)", "distance": "…"}
+  ],
+  "transfers": ["Johannesburg", "…"],
+  "distance": "Σ legs",
+  "price": "distance × 0.13",
+  "display": {"distance": "…km", "price": "$…"},
+  "formula": "price = Σ sqrt(dx²+dy²) × 0.13 USD; Decimal prec 50, stored to 30 dp",
+  "network_fingerprint": "sha256:…",
+  "algorithm": "hub all-pairs (networkx) + endpoint enumeration; tie-break: legs, names",
+  "status": "quoted | presented | booked | expired | stale",
+  "created_at": "…", "expires_at": "+15 min"
+}
+```
+（示例中的城市和数字仅示意，非真实结果。）
+
+## 6. 确认与出票（要求 7）
+
+```mermaid
+stateDiagram-v2
+  [*] --> quoted: quote_route
+  quoted --> presented: 卡片随 done 发给用户
+  presented --> booked: 用户点击确认 且 B1–B7 通过
+  presented --> expired: 超过 15 分钟
+  presented --> stale: 出票复核发现数据变化
+  booked --> [*]
+  expired --> [*]
+  stale --> [*]
+```
+
+没有「取代」：同一会话可以同时存在多张有效报价（比较两条航线、往返各一张都正常）。
+
+出票条件（全部满足才出票；编号规则在 `docs/design/state_invariants.md`，用模型测试覆盖）：
+- **B1 归属**：quote 属于当前登录用户。
+- **B2 已展示**：quote 状态为 `presented`，即带完整航段、中转、距离、价格的卡片已随 `done` 发给用户。
+- **B3 用户点击**：请求来自出票接口，携带该卡片签发的一次性 nonce（nonce 绑定 quote、用户、卡片所在消息；用一次即失效）。
+  LLM 没有调用出票接口的路径。
+- **B4 有效期**：未超过 15 分钟。
+- **B5 幂等**：同一 quote 最多一张票（`tickets.quote_id` UNIQUE）。
+- **B6 复核**：用当前 locations.db（指纹检查，必要时重载）重算同一城市序列：每段两端城市和坐标与 quote 一致、
+  该航段仍存在，规范函数算出的距离和价格与存档字符串相等；起终点的最便宜路线仍是这条。否则 quote → `stale`，
+  提示重新报价，用户需重新确认。
+- **B7 原子性**：`BEGIN IMMEDIATE` 事务内完成检查、写票、改 quote 状态；聊天和出票接口共用会话锁；uvicorn 单 worker。
+
+如何回答 take-home 的「怎么保证未经确认不出票」：出票只有一个接口，只接受用户点击带来的 nonce，而 nonce 只在
+完整路线 / 距离 / 价格的卡片发给用户之后才签发；LLM 能做的只是让这张卡片出现。自然语言里的「好的，订吧」
+会让确认卡出现，但不会出票。
+
+## 7. 数据模型（app.db）
+
+```mermaid
+erDiagram
+  users ||--o{ conversations : has
+- 实测请求头：`user-agent: pydantic-ai/2.71.0`、`x-stainless-os: MacOS`、`x-stainless-arch`、`x-stainless-runtime-version: 3.12.8`、
+  `x-stainless-package-version` 等。只发给 LLM 服务商，不是 tracing，也没有别的出站连接（`test_a_turn_opens_no_outbound_connection` 有效）。
+- 影响小：服务商本来就收到全部对话。要保持"与迁移前相同的请求"，可以在 provider 的 openai 客户端上去掉这些默认头；否则在 design 里记一句。
+
+### P2-7 留给 #48 决定的取消语义（不是 bug）
+- `loop.py:367-371,391`：取消后走 `_finish(turn, fallback)`，本轮已完成工具的卡片照常 `presented`，可以点击。
+  与整轮超时一致，B2 / B3 不受影响（仍然只有点击出票）。但"用户按了 Stop 之后出现一张可点的确认卡"要不要，请在 #48 定。
+- 被取消打断的那个工具：线程跑完，quote 已建，结果不进本轮、不出卡、不落 `tool_calls`（报告已写）。
+- `Agent.cancel` 目前没有路由调用，只有测试覆盖。
+
+### P2-8 测试改写（STATE 表）逐条看过，两处变弱
+- `test_agent_llm.py::test_unexpected_stream_content_is_a_failed_call_not_a_crash`：原来三种坏流都要求可重试的 `LLMError`；
+  现在接受 `internal_error`，也不再断言重试次数和 `llm_calls`。名字说"not a crash"，其中一种实际是未处理异常（P2-2）。
+  修了 P2-2 后恢复成"3 次请求 + 每次有记录"。
+- `test_runtime_review.py::test_p1_2_the_client_reports…`：`usage == {"total_tokens": 0}` 的断言没了，改成"按估算计费"，意图保留。
+- 其余改写意图保留：`content` 为 `null`、`reasoning_content` 为 `""`、effort 默认值显式化、`total_tokens` 单独出现时走估算
+  （保守方向）、无工具请求不存在。`test_reasoning_effort_from_config_and_per_request` 改测 `settings()`，
+  线上字段由 `test_the_per_request_effort_reaches_the_wire` 和 `test_text_stream_and_request_shape` 补上。
+- 缺的用例：P1-1（两步各自重试）、P2-1（重复 id）、连续未知工具、含 `<system>` 的用户消息。
+
+### P2-9 可删 / 重复 / 文档不符
+- `app/agent/model.py:204-206`：两个分支完全相同；最后一个在现有调用方下走不到（见 P2-2，修了之后才有用）。
+- `app/agent/model.py:214-231`：`provider="openai"` 方言没有调用方也没有测试（`test_an_inline_think_block…` 的说明提到它，
+  但 `Wire` 用的是默认方言）。删掉，或加一个用例。
+- `app/agent/model.py:4`：文件头说 SDK 负责 inline `<think>`，实际是本文件的 `ThinkSplitter`（报告第 4 条）。
+- `app/agent/loop.py:459-461`：`is_end_node` 分支和末尾的 `return None` 走不到，可以合成一句断言。
+- `app/agent/loop.py:473-474`：工具函数用关键字默认值 `_name=name` 传名字，模型参数里的 `_name` 会盖掉它。
+  实测无害（`_tool_call` 用的是 completion 里的名字，Toolbox 回 `unknown argument(s): _name`），但换成闭包工厂或
+  `functools.partial` 更稳，`_tool_call` 的 `name` 参数也可以只留给未知工具那条路。
+- `app/agent/loop.py:580-582,598-600` 与 `model.py:67-71`：已收到字符数算了两遍（`got()` 和 `Completion.output_chars`）。
+- `app/agent/scripted.py:80-81`：`except Exception: raise` 没有作用。`scripted.py` 放在 `app/agent/` 里随镜像发布，
+55:| **P2-7** 取消语义 | 不改，留给 #48（见"开放决定"） | — |
+56-| **P2-8** 两处改弱的测试 | 坏流测试恢复成"3 次请求，每次都有记录，`llm_unavailable`"；`test_p1_2` 保持按估算计费的断言（`{"total_tokens": 0}` 不算有效回报，这个由 `test_p2_1_a_reported_total_of_zero_is_not_free` 覆盖） | 见 P2-2；评审列出缺少的四个用例都已补上（P1-1、P2-1、连续未知工具、`<system>` 文字） |
+57-| **P2-9** 可删 / 重复 / 文档不符 | `llm_error` 去掉重复分支；删除没有调用方的 `provider="openai"` 方言（`OpenAIProvider` 也不再 import）；`model.py` 文件头改正（`<think>` 由 `ThinkSplitter` 处理）；`is_end_node` 分支和末尾 `return None` 合成一条断言；工具函数改成闭包工厂（模型参数里的 `_name` 不会再覆盖工具名）；`scripted.py` 去掉无用的 `except: raise`，模块头写明生产路径不会构造它；"离开就关流"的注释注明"真实连接上"。`got()` 和 `output_chars` 两处计数保留：前者用于中途失败的调用，后者用于完整调用的最终响应，已加注释 | 全量测试 |
+58-
+59-改写的两个测试（补充到上表"改写的测试"）：
+60-| 测试 | 旧断言 | 新断言 | 为什么 |
+61-|---|---|---|---|
+62-| `test_a_plain_exception_mid_stream_after_output_falls_back_and_keeps_the_card` | 模板，问题 `internal_error / AttributeError` | 模板，问题 `llm_error`（含 `AttributeError`），失败调用有记录、按估算计费 | P2-2：模型流里的任何异常都算失败的调用 |
+63-| `test_a_plain_exception_before_any_output_is_an_internal_error` → `…_is_a_failed_call` | `error internal_error`，只存用户消息 | 重试 2 次（3 条记录，退避 0.5 / 1.0），然后 `llm_unavailable`，只存用户消息 | 同上；模型调用之外的 bug 仍是 `internal_error`，见新测试 `test_a_bug_outside_the_model_call_is_an_internal_error` |
+64-
+65:### 留给 #48（P2-7）
+66-- 取消后走模板 `_finish`：本轮已完成工具的卡片照常 `presented`，可以点击（与整轮超时相同，B2 / B3 不受影响）。用户按了 Stop
+67-  之后是否还应出现可点的确认卡，由 #48 决定。
+68-- 被取消打断的那个工具：线程跑完，quote 已建，但结果不进本轮、不出卡、不落 `tool_calls`。是否结算，由 #48 决定。
+69-- `Agent.cancel` 目前只有测试调用，没有路由。
+70-
+71-### ADR-001 修改草稿（协调者合并）
+72-**Decision** 一节第一句改为：
+73-> Adopt **Pydantic AI Slim** (`pydantic-ai-slim`, pinned) for the generic runtime: the model client (HTTP stream, chunk
+74-> parsing, tool-call assembly, provider request fields), tool dispatch and run cancellation.
+75-
+76-（去掉 "per-call retry / timeout"。）
+77-
+78-**Boundaries** 一节加两条：
+79-> - **Retries and per-call time limits:** ours. The SDK retries a streamed request only before any output reaches the
+80->   consumer; we retry while none of the call's text has been *released*, and log and charge every attempt (design §4.6,
+81->   §4.8). The provider SDK's own retries are off (`max_retries=0`); a retried step restarts the run from our context.
+82-> - **What goes on the wire:** ours. Every request is rebuilt from the loop's context (`before_model_request`): wire-safe
+83->   tool calls, our JSON tool results, mid-conversation system messages kept as system messages, reasoning passed back
+84->   verbatim, no SDK announcement text, no SDK fingerprint headers. The one SDK addition we keep is its note after user
+85->   text that imitates a `<system>` frame (it reaches only the model).
+86-
+87-**Consequences** 一节把 "Settings that must be explicit…" 那条换成 SDK 依赖清单和升级检查：
+88-> - SDK hooks and settings we depend on (all public API): `Agent.iter` + `node.stream(run.ctx)`; `Tool.from_schema`
+89->   (`sequential=True`, `strict=False`); capabilities `before_model_request` (wire context) and `before_tool_validate`
+90->   (raw arguments); `ModelProfile.supports_inline_system_prompts=True`; settings `framing_announcement="never"`,
+91->   `max_retries=0`, `extra_body` (DeepSeek thinking fields); `end_strategy="graceful"`; `UsageLimits(request_limit=None)`;
+92->   `retries` high enough that the SDK never ends a turn (unknown tool names); `DeepSeekProvider` for every base URL;
+93->   `provider_details["finish_reason"]` (raw), `ModelResponse.usage` (+ `details`); `PYDANTIC_AI_NO_BANNER=1`.
+94-> - Upgrade check: pin the new version, run the full suite (the tests that pin the above are in
+95->   `tests/test_agent_runtime.py`, `test_agent_llm.py`, `test_agent_loop.py`; tests touching private SDK attributes say so),
+--
+107:- #48：见上"留给 #48（P2-7）"。
+108-- ADR-001 修改：见上"ADR-001 修改草稿"。
+109-
+110-## 文档草稿（协调者合并）
+111-
+112-### design.md §2 架构图
+113-把 `agent/ (自写)` 子图改为：
+114-```
+115-    subgraph Agent["agent/"]
+116-      Loop["agent loop（自写）<br/>预算 · 重试 · guard · 卡片 · 落库 · 取消"]
+117-      Runtime["Pydantic AI Slim（ADR-001）<br/>Agent.iter · 工具分发 · OpenAIChatModel"]
+118-      Tools["tools<br/>参数校验 + 分发"]
+119-      Guard["reply guard<br/>数字 / 城市名按值溯源"]
+120-    end
+121-```
+122-连线 `Loop <--> LLMC <--> LLM` 改为 `Loop <--> Runtime <--> LLM`，`Loop --> Tools` 改为 `Runtime --> Tools`。
+123-模块边界加一条：
+124-- `agent/` 的通用运行时（模型流、chunk 解析、工具分发、取消、OpenTelemetry span）是 Pydantic AI Slim（钉 2.71.0）；出票、
+125-  ReplyGuard、app.db 历史、SSE 契约、预算和并发仍是我们的代码（ADR-001）。
+126-
+127-### design.md §4 新增 §4.10 运行时（替换 §4.2 伪代码前的说明，伪代码不变）
+128-> **§4.10 运行时（ADR-001，#49）** 每轮一个 Pydantic AI run：`Agent.iter(message_history=…)`，loop 在 `ModelRequestNode` 上
+129-> 流式读事件（文本 → SentenceBuffer → ReplyGuard → `delta`），在 `CallToolsNode` 上执行工具。
+130-> - 工具：`Tool.from_schema(TOOL_SCHEMAS)`，串行、按调用顺序，`strict` 关；执行体是 `Toolbox.run`，用户和会话来自 run 的
+131->   `deps`，阻塞部分走 `Threads`。参数不是 JSON 对象时原串交给 `Toolbox.run`（`invalid_arguments`）；未知工具名由 loop 记为
+132->   `unknown_tool`。
+133-> - 请求：每次请求的消息都是 loop 自己的上下文（app.db 历史 + 本轮步骤，工具调用为 wire-safe 形式），会话中途的 system 消息
+134->   保持 system 角色；thinking 字段经 `extra_body` 发出，与迁移前相同；不加 SDK 的说明文字。
+135-> - 重试：provider SDK 自身不重试；loop 在一步还没放出文字时按 §4.6 重试（每次尝试都记 `llm_calls` 并计费），从上下文重开 run。
+136-> - 结束原因：读服务商原始 `finish_reason`；没有时当作断流（可重试），不当作 `stop`。
+137-> - 取消：`Agent.cancel(user, conversation)` 取消本轮步骤任务；模型流立即关闭，不再有新的请求和工具调用；已开始的工具线程跑完、
