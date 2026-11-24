@@ -1,632 +1,889 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<title>Ocean Above — vibe coding 过程</title>
-<meta name="viewport" content="width=1600">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ocean Above 是怎么做出来的</title>
+
+<!-- Fonts: Newsreader (display), Hanken Grotesk (body / labels), DM Mono (chrome), Noto Serif SC (Chinese) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..500;1,6..72,400..500&family=Hanken+Grotesk:wght@400..700&family=DM+Mono:wght@400..500&family=Noto+Serif+SC:wght@400;600;700&display=swap">
+
 <style>
-@font-face {
-  font-family: "Geist";
-  src: url("../../frontend/src/fonts/Geist-Variable.woff2") format("woff2");
-  font-weight: 100 900;
-  font-display: block;
-}
+/* ===========================================
+   THEME (Cobalt Grid: cream paper + cobalt ink, two colours only)
+   Change --ink / --paper to recolour the whole deck.
+   =========================================== */
 :root {
-  --ground: #FFFFFF;
-  --sunken: #F0EEEA;
-  --tint: #EEF3F8;
-  --ink: #1C1A17;
-  --ink-2: #5E5A54;
-  --ink-3: #6F6A63;
-  --border: #E2DFD9;
-  --muted-mark: #8F8A82;
-  --accent: #1F5F99;
-  --ok: #1E7340;
-  --danger: #B3261E;
-  --warn-bg: #FBF1E6;
-  --warn: #8A4B0F;
+  --paper: #F0EBDE;
+  --paper-2: #E6E0CE;
+  --ink: #1F2BE0;
+  --ink-soft: #5560E5;
+  --grid: rgba(31, 43, 224, 0.10);
+  --ink-faint: rgba(31, 43, 224, 0.18);
+  --stage-bg: #d9d3c2;
+  --slide-bg: var(--paper);
+
+  --display: "Newsreader", "Noto Serif SC", Georgia, serif;
+  --body: "Hanken Grotesk", "Noto Serif SC", sans-serif;
+  --mono: "DM Mono", "Noto Serif SC", ui-monospace, monospace;
+
+  --edge: 80px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
-@page { size: 1600px 900px; margin: 0; }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { background: #DDD; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ===========================================
+   FIXED 16:9 STAGE: MANDATORY BASE STYLES (viewport-base.css, verbatim)
+   =========================================== */
+html,
 body {
-  font-family: "Geist", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
-  color: var(--ink);
-  -webkit-font-smoothing: antialiased;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+.deck-viewport {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+.deck-stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    transform-origin: 0 0;
+    background: var(--slide-bg, #fff);
 }
 .slide {
-  width: 1600px; height: 900px; overflow: hidden; position: relative;
-  background: var(--ground);
-  padding: 56px 72px 48px;
-  display: flex; flex-direction: column; gap: 26px;
-  page-break-after: always; break-after: page;
-  margin: 0 auto 24px;
-  font-size: 22px; line-height: 1.5;
+    position: absolute;
+    inset: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    display: block;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    background: var(--slide-bg, #fff);
 }
-@media print { .slide { margin: 0; } html, body { background: var(--ground); } }
-body.one .slide { display: none; margin: 0; }
-body.one .slide.on { display: flex; }
+.slide.active,
+.slide.visible {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+img,
+video,
+canvas,
+svg {
+    max-width: 100%;
+    max-height: 100%;
+}
+.deck-controls {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    z-index: 1000;
+}
+@media print {
+    html,
+    body {
+        width: 1920px;
+        height: auto;
+        overflow: visible;
+        background: #fff;
+    }
+    .deck-viewport {
+        position: static;
+        overflow: visible;
+        background: #fff;
+    }
+    .deck-stage {
+        position: static;
+        width: auto;
+        height: auto;
+        transform: none !important;
+        background: none;
+    }
+    .slide {
+        position: relative;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        width: 1920px;
+        height: 1080px;
+        break-after: page;
+        page-break-after: always;
+    }
+    .slide:last-child {
+        break-after: auto;
+        page-break-after: auto;
+    }
+    .deck-controls {
+        display: none !important;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.2s !important;
+    }
+}
 
-b, strong { font-weight: 600; }
-code { font-family: "Geist", ui-monospace, monospace; font-weight: 500; background: var(--sunken); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
-.kicker { font-size: 18px; font-weight: 600; color: var(--accent); letter-spacing: 0.04em; }
-h1 { font-size: 46px; line-height: 1.2; font-weight: 650; letter-spacing: -0.01em; }
-h2 { font-size: 40px; line-height: 1.2; font-weight: 650; letter-spacing: -0.01em; }
-.head { display: flex; flex-direction: column; gap: 8px; padding-bottom: 18px; border-bottom: 2px solid var(--accent); }
-.lead { font-size: 24px; color: var(--ink-2); }
-.pn { position: absolute; right: 72px; bottom: 26px; font-size: 15px; color: var(--ink-3); }
-.src { font-size: 15px; color: var(--ink-3); line-height: 1.4; }
-.body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 28px; justify-content: center; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
-.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
-.card { background: var(--sunken); border-radius: 10px; padding: 26px 30px; display: flex; flex-direction: column; gap: 12px; }
-.card .tag, .card > .tag { align-self: flex-start; }
-.card h3 { font-size: 27px; font-weight: 650; line-height: 1.3; }
-.card p, .card li { font-size: 22px; line-height: 1.55; }
-.card.tint { background: var(--tint); }
-.card.line { background: transparent; border: 1.5px solid var(--border); }
-.take { background: var(--tint); border-left: 6px solid var(--accent); padding: 20px 28px; font-size: 25px; line-height: 1.45; border-radius: 0 8px 8px 0; }
-ul.pts { list-style: none; display: flex; flex-direction: column; gap: 10px; }
-ul.pts li { position: relative; padding-left: 22px; }
-ul.pts li::before { content: ""; position: absolute; left: 2px; top: 0.62em; width: 9px; height: 9px; background: var(--accent); border-radius: 2px; }
-.num { font-size: 52px; font-weight: 650; line-height: 1; color: var(--accent); letter-spacing: -0.02em; white-space: nowrap; }
-.num small { font-size: 26px; color: var(--ink-3); font-weight: 500; margin-left: 4px; }
-.lbl { font-size: 19px; color: var(--ink-2); line-height: 1.35; }
-.tag { display: inline-block; font-size: 16px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--tint); color: var(--accent); line-height: 1.5; }
-.tag.red { background: #F8E7E5; color: var(--danger); }
-.tag.green { background: #E5F1E9; color: var(--ok); }
-.muted { color: var(--ink-3); }
+/* ===========================================
+   SLIDE SURFACE: graph paper + hairline frame + chrome
+   =========================================== */
+@page { size: 1920px 1080px; margin: 0; }
+.slide { color: var(--ink); font-family: var(--body); transition: opacity 0.28s linear, visibility 0s linear 0.28s; }
+.slide.visible { transition: opacity 0.28s linear; }
+.slide::before {               /* permanent graph-paper grid */
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+.slide::after {                /* top and bottom 1.5px cobalt hairlines */
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    linear-gradient(var(--ink), var(--ink)) var(--edge) 76px / calc(100% - 2 * var(--edge)) 1.5px no-repeat,
+    linear-gradient(var(--ink), var(--ink)) var(--edge) 1004px / calc(100% - 2 * var(--edge)) 1.5px no-repeat;
+}
+.slide > * { position: absolute; z-index: 2; }
+.chrome { left: var(--edge); right: var(--edge); top: 40px; display: flex; justify-content: space-between; font: 400 20px/1 var(--mono); letter-spacing: 0.06em; }
+.chrome.bottom { top: auto; bottom: 26px; }
+.frame { left: var(--edge); right: var(--edge); top: 124px; bottom: 112px; display: flex; flex-direction: column; gap: 36px; }
+.frame > :nth-child(2) { margin-top: auto; }
+.frame > :last-child { margin-bottom: auto; }
 
-/* title */
-.title { justify-content: center; gap: 30px; padding: 90px 110px; }
-.title h1 { font-size: 64px; line-height: 1.18; }
-.title h1 .brand { color: var(--accent); }
-.title .lead { font-size: 30px; }
-.title .meta { display: flex; gap: 56px; margin-top: 26px; padding-top: 28px; border-top: 2px solid var(--accent); }
-.title .meta div { display: flex; flex-direction: column; gap: 2px; }
+/* ===========================================
+   TYPE
+   =========================================== */
+.kicker { font: 600 22px/1 var(--body); letter-spacing: 0.16em; text-transform: uppercase; }
+.kicker .zh { letter-spacing: 0; }
+.topbar { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; border-bottom: 1.5px solid var(--ink); padding-bottom: 22px; }
+.topbar h2 { font: 400 80px/1.08 var(--display); letter-spacing: -0.005em; }
+.topbar .lab { font: 400 20px/1 var(--mono); letter-spacing: 0.06em; white-space: nowrap; padding-bottom: 10px; }
+.hero { font: 400 190px/0.95 var(--display); letter-spacing: -0.008em; }
+.hero .zh { display: block; font-weight: 600; font-size: 150px; line-height: 1.2; letter-spacing: 0; }
+.manifesto { font: 400 92px/1.3 var(--display); letter-spacing: 0; }
+.manifesto .soft { color: var(--ink-soft); }
+.lede { font: 400 34px/1.7 var(--body); }
+.body-t { font: 400 30px/1.7 var(--body); }
+.small { font: 400 24px/1.6 var(--body); }
+.mono { font-family: var(--mono); letter-spacing: 0.04em; }
+.vbig { font: 400 220px/0.92 var(--display); letter-spacing: -0.015em; }
+code { font: 400 0.86em/1 var(--mono); letter-spacing: 0.02em; border-bottom: 1px solid var(--ink-faint); padding: 0 2px; }
+b { font-weight: 600; }
+a { color: var(--ink); text-decoration: none; border-bottom: 1.5px solid var(--ink); }
+.attr { border-top: 1px solid var(--ink); padding-top: 18px; font: 400 28px/1.6 var(--body); }
 
-/* flow (slide 3) */
-.flow { display: grid; grid-template-columns: repeat(7, auto); align-items: center; gap: 10px; justify-content: space-between; }
-.step { background: var(--ground); border: 2px solid var(--accent); border-radius: 10px; padding: 16px 18px; text-align: center; font-size: 23px; font-weight: 600; line-height: 1.3; min-width: 150px; }
-.step small { display: block; font-size: 17px; font-weight: 400; color: var(--ink-2); margin-top: 4px; }
-.step.me { background: var(--accent); color: #fff; }
-.step.me small { color: #D9E6F2; }
-.arrow { color: var(--accent); font-size: 28px; font-weight: 600; }
-.roles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
-.roles .card h3 { font-size: 26px; }
-.roles .card p { font-size: 20px; }
-.roles .who { font-size: 17px; color: var(--ink-3); }
+/* ===========================================
+   COMPONENTS
+   =========================================== */
+/* stat ledger on the cover */
+.ledger { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1.5px solid var(--ink); }
+.ledger > div { padding: 22px 24px 0; border-right: 1px solid var(--ink-faint); }
+.ledger > div:first-child { padding-left: 0; }
+.ledger b { display: block; font: 400 96px/1 var(--display); letter-spacing: -0.015em; font-variant-numeric: tabular-nums; }
+.ledger small { font: 400 22px/1.5 var(--mono); letter-spacing: 0.04em; }
 
-/* quote (slide 4) */
-.quote { font-family: "Geist", ui-monospace, monospace; font-size: 23px; line-height: 1.5; background: #1C1A17; color: #F3F1ED; border-radius: 10px; padding: 22px 26px; }
-.quote .k { color: #9CC3E6; }
-.quote .c { color: #A9A39A; }
-.rule-row { display: grid; grid-template-columns: 1fr 44px 1fr; gap: 0; align-items: center; }
-.rule-row .arrow { text-align: center; }
+/* index rows: num tag + serif name + body */
+.rows { display: flex; flex-direction: column; }
+.row { display: grid; grid-template-columns: 90px 1fr 1.5fr; gap: 32px; align-items: baseline; padding: 22px 0; border-bottom: 1px solid var(--ink-faint); }
+.row .n { font: 400 22px/1 var(--mono); letter-spacing: 0.04em; }
+.row .t { font: 400 42px/1.25 var(--display); }
+.row .d { font: 400 28px/1.6 var(--body); }
+.row .who { display: block; font: 400 20px/1.5 var(--mono); letter-spacing: 0.04em; margin-top: 6px; }
+.rows.two .row { grid-template-columns: 90px 1fr; }
 
-/* timeline (slide 5) */
-.day { display: grid; grid-template-columns: 110px 1fr; gap: 18px; align-items: stretch; }
-.day .d { font-size: 24px; font-weight: 650; color: var(--accent); padding-top: 10px; line-height: 1.25; }
-.day .d small { display: block; font-size: 17px; color: var(--ink-3); font-weight: 400; }
-.its { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
-.it { background: var(--sunken); border-radius: 8px; padding: 16px 14px; min-height: 230px; display: flex; flex-direction: column; gap: 4px; }
-.it .id { font-size: 17px; font-weight: 650; color: var(--accent); }
-.it .t { font-size: 22px; font-weight: 600; line-height: 1.3; }
-.it .x { font-size: 17px; color: var(--ink-2); line-height: 1.45; }
-.it.turn { background: var(--tint); outline: 2px solid var(--accent); }
+/* 2x3 index grid */
+.index { display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 48px; }
+.index > div { padding: 26px 0; border-bottom: 1px solid var(--ink-faint); display: flex; flex-direction: column; gap: 10px; }
+.index .n { font: 400 20px/1 var(--mono); letter-spacing: 0.04em; }
+.index h3 { font: 400 40px/1.25 var(--display); }
+.index p { font: 400 25px/1.6 var(--body); }
 
-/* case (slides 7-8) */
-.case { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; }
-.case > div { padding: 26px 28px; display: flex; flex-direction: column; gap: 8px; }
-.case > div + div { border-left: 1.5px solid var(--border); }
-.case h4 { font-size: 19px; font-weight: 650; color: var(--accent); letter-spacing: 0.04em; }
-.case p { font-size: 22px; line-height: 1.55; }
-.case-title { display: flex; align-items: baseline; gap: 14px; }
-.case-title h3 { font-size: 30px; font-weight: 650; }
+/* three-column case layout */
+.case { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1.5px solid var(--ink); }
+.case > div { padding: 30px 36px 0 0; display: flex; flex-direction: column; gap: 14px; }
+.case > div + div { border-left: 1px solid var(--ink-faint); padding-left: 36px; }
+.case h4 { font: 600 24px/1 var(--body); letter-spacing: 0.02em; }
+.case p, .case li { font: 400 30px/1.65 var(--body); }
+.case ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.case li::before { content: "— "; font-family: var(--mono); }
 
-/* evals pyramid (slide 10) */
-.layers { display: flex; flex-direction: column; gap: 12px; align-items: center; }
-.layer { border-radius: 10px; padding: 26px 30px; display: grid; grid-template-columns: 250px 1fr 250px; gap: 20px; align-items: center; }
-.layer .n { font-size: 40px; font-weight: 650; color: var(--accent); line-height: 1.1; }
-.layer .what { font-size: 22px; line-height: 1.45; }
-.layer .when { font-size: 19px; color: var(--ink-2); text-align: right; line-height: 1.35; }
-.layer h3 { font-size: 26px; margin-bottom: 4px; font-weight: 650; }
+/* workflow boxes */
+.flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0 64px; position: relative; }
+.flow .step { border: 1.5px solid var(--ink); background: var(--paper); padding: 26px 28px; display: flex; flex-direction: column; gap: 8px; position: relative; }
+.flow .step b { font: 400 44px/1.2 var(--display); }
+.flow .step span { font: 400 24px/1.5 var(--body); }
+.flow .step i { font: normal 400 18px/1 var(--mono); letter-spacing: 0.04em; }
+.flow .step.me { background: var(--ink); color: var(--paper); }
+.flow .step:not(:last-child)::after { content: "→"; position: absolute; right: -50px; top: 50%; transform: translateY(-50%); font: 400 36px/1 var(--mono); color: var(--ink); }
+.flow.back .step:not(:last-child)::after { content: "←"; right: auto; left: -50px; }
+.flow:not(.back) .step:last-child::before { content: "↓"; position: absolute; left: 50%; bottom: -54px; font: 400 36px/1 var(--mono); }
+.flow.back { direction: rtl; }
+.flow.back .step { direction: ltr; }
+.turn-arrow { right: var(--edge); font: 400 36px/1 var(--mono); }
 
-/* bench (slide 11) */
-table.b { border-collapse: collapse; width: 100%; font-size: 22px; }
-table.b th, table.b td { padding: 14px 14px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
-table.b th:first-child, table.b td:first-child { text-align: left; }
-table.b thead th { font-size: 16px; color: var(--ink-2); font-weight: 600; border-bottom: 2px solid var(--ink); }
-table.b td.hl { color: var(--ok); font-weight: 650; }
-svg text { font-family: "Geist", "PingFang SC", system-ui, sans-serif; }
+/* timeline columns */
+.days { display: grid; grid-template-columns: 1fr 1fr; gap: 72px; }
+.day h3 { font: 400 44px/1.2 var(--display); border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; display: flex; justify-content: space-between; align-items: baseline; }
+.day h3 span { font: 400 20px/1 var(--mono); letter-spacing: 0.04em; }
+.it { display: grid; grid-template-columns: 70px 260px 1fr; gap: 16px; align-items: baseline; padding: 13px 0; border-bottom: 1px solid var(--ink-faint); }
+.it .n { font: 400 22px/1 var(--mono); }
+.it .t { font: 400 32px/1.25 var(--display); }
+.it .x { font: 400 23px/1.5 var(--body); }
+.it.key .n::before { content: "■ "; }
 
-/* screenshot frames */
-.shot { border: 1.5px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
-.shot img { display: block; width: 100%; }
+/* comparison table */
+table.cmp { border-collapse: collapse; width: 100%; }
+table.cmp th, table.cmp td { text-align: left; padding: 18px 20px 18px 0; border-bottom: 1px solid var(--ink-faint); }
+table.cmp thead th { font: 600 20px/1.2 var(--body); letter-spacing: 0.12em; border-bottom: 1.5px solid var(--ink); }
+table.cmp td { font: 400 30px/1.4 var(--body); }
+table.cmp td.num { font-family: var(--display); font-size: 36px; }
+table.cmp td.pick { font-weight: 600; }
+table.cmp td:first-child { font: 400 26px/1.4 var(--body); }
 
-/* lessons */
-.lessons { display: grid; grid-template-columns: 1fr 1fr; gap: 56px 64px; }
-.lesson { display: grid; grid-template-columns: 70px 1fr; gap: 16px; }
-.lesson .i { font-size: 60px; font-weight: 650; color: var(--accent); line-height: 1; }
-.lesson h3 { font-size: 32px; font-weight: 650; line-height: 1.3; margin-bottom: 10px; }
-.lesson p { font-size: 23px; color: var(--ink-2); line-height: 1.5; }
+/* test layers */
+.layer { display: grid; grid-template-columns: 360px 1fr 260px; gap: 40px; align-items: center; padding: 26px 0; border-bottom: 1px solid var(--ink-faint); }
+.layer .big { font: 400 88px/1 var(--display); letter-spacing: -0.015em; }
+.layer h3 { font: 400 40px/1.25 var(--display); margin-bottom: 6px; }
+.layer p { font: 400 25px/1.6 var(--body); }
+.layer .when { font: 400 22px/1.5 var(--mono); text-align: right; letter-spacing: 0.04em; }
 
-a { color: var(--accent); text-decoration: none; }
+/* screenshots: framed with a cobalt hairline, no shadow, no radius */
+.shot { border: 1.5px solid var(--ink); overflow: hidden; background: #fff; }
+.shot img { display: block; max-width: none; max-height: none; }
+.cap { font: 400 20px/1.5 var(--mono); letter-spacing: 0.02em; margin-top: 12px; }
+
+/* decorations */
+.glitch { pointer-events: none; }
+.glitch i { position: absolute; right: 0; display: block; transform-origin: right center; transform: scaleX(0);
+  background: repeating-linear-gradient(90deg, var(--ink) 0 3px, transparent 3px 10px); transition: transform 0.9s var(--ease); }
+.glitch.left i { right: auto; left: 0; transform-origin: left center; }
+.visible .glitch i { transform: scaleX(1); }
+.qr { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); gap: 1.5px; padding: 4px; background: var(--paper); box-shadow: 0 0 0 1.5px var(--paper); }
+.qr span { background: transparent; }
+.qr span.on { background: var(--ink); }
+
+/* ===========================================
+   ANIMATION
+   .reveal: plays when the slide becomes visible, staggered by --i
+   .f: fragment, shown one step at a time (data-f groups steps)
+   =========================================== */
+.reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); transition-delay: calc(var(--i, 0) * 90ms + 80ms); }
+.visible .reveal { opacity: 1; transform: none; }
+.f { opacity: 0; transform: translateY(22px); transition: opacity 0.55s var(--ease), transform 0.55s var(--ease); }
+.f.shown { opacity: 1; transform: none; }
+.grow { transform-box: fill-box; transform-origin: center; transform: scaleX(0); transition: transform 0.9s var(--ease); transition-delay: calc(var(--i, 0) * 160ms + 450ms); }
+.visible .grow { transform: scaleX(1); }
+.pop { transform-box: fill-box; transform-origin: center; opacity: 0; transform: scale(0.2); transition: opacity 0.45s var(--ease), transform 0.45s var(--ease); transition-delay: calc(var(--i, 0) * 160ms + 300ms); }
+.visible .pop { opacity: 1; transform: none; }
+/* static / print: everything in its final state */
+body.static .reveal, body.static .f, body.static .grow, body.static .pop, body.static .glitch i { opacity: 1 !important; transform: none !important; transition: none !important; }
+@media print {
+  .reveal, .f, .grow, .pop, .glitch i { opacity: 1 !important; transform: none !important; transition: none !important; }
+  .progress, .edit-hotzone, .edit-toggle, .nav-hint { display: none !important; }
+}
+
+/* ===========================================
+   DECK CHROME OUTSIDE THE STAGE
+   =========================================== */
+.progress { position: fixed; left: 0; bottom: 0; height: 3px; background: var(--ink); z-index: 1000; transition: width 0.3s var(--ease); }
+.nav-hint { position: fixed; right: 18px; bottom: 12px; font: 400 12px/1 var(--mono); color: var(--ink); opacity: 0.75; z-index: 1000; transition: opacity 0.6s; }
+
+/* inline editing (E key or top-left hot corner; Ctrl+S saves a copy) */
+.edit-hotzone { position: fixed; top: 0; left: 0; width: 80px; height: 80px; z-index: 10000; cursor: pointer; }
+.edit-toggle { position: fixed; top: 16px; left: 16px; z-index: 10001; font: 400 13px/1 var(--mono); background: var(--paper); color: var(--ink); border: 1.5px solid var(--ink); padding: 8px 10px; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+.edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+.edit-toggle.active { background: var(--ink); color: var(--paper); }
+[contenteditable="true"] { outline: 1px dashed var(--ink-soft); outline-offset: 4px; }
 </style>
 </head>
 <body>
+<div class="deck-viewport">
+<main class="deck-stage" id="deckStage">
 
-<!-- 1 · 标题 -->
-<section class="slide title">
-  <div class="kicker">QUOTR TAKE-HOME · VIBE CODING 复盘</div>
-  <h1>25 小时、14 个迭代：<br>指挥一队 coding agent，<br>做一个<span class="brand">不会乱订票</span>的订票 agent</h1>
-  <div class="lead">Ocean Above —— 用自然语言订机票。这次不讲产品细节，讲它是怎么"vibe"出来的。</div>
-  <div class="meta">
-    <div><span class="num">25<small>小时</small></span><span class="lbl">11-23 14:26 → 11-24 15:31</span></div>
-    <div><span class="num">33</span><span class="lbl">个 worker / review 会话</span></div>
-    <div><span class="num">34</span><span class="lbl">个 PR · 29 个 issue</span></div>
-    <div><span class="num">0</span><span class="lbl">次安全违规（真实模型全部运行）</span></div>
+<!-- =========================== 1 · COVER =========================== -->
+<!-- 讲：25 小时、14 个迭代。今天讲开发过程：我怎么分任务给 coding agent、怎么验收。 -->
+<section class="slide" data-section="开发过程复盘">
+  <div class="chrome"><span>OCEAN ABOVE · QUOTR TAKE-HOME</span><span>2026 · 11</span></div>
+  <div class="glitch" data-glitch="cover" style="right:var(--edge); top:110px; width:420px; height:860px;"></div>
+  <div class="qr reveal" data-qr="11" style="--i:6; right:calc(var(--edge) + 330px); top:150px; width:96px; height:96px;"></div>
+  <h1 class="hero reveal" style="--i:0; left:var(--edge); top:190px; width:1300px;">Ocean Above<span class="zh">是怎么做出来的</span></h1>
+  <p class="lede reveal" style="--i:2; left:var(--edge); top:610px; width:1150px;">一个用自然语言订机票的 agent。这次不讲产品功能，讲我怎么把任务分给 coding agent、怎么验收它们的工作。</p>
+  <div class="ledger reveal" style="--i:3; left:var(--edge); top:800px; width:1220px;">
+    <div><b data-count="25">25</b><small>小时 · 11-23 14:26 起</small></div>
+    <div><b data-count="14">14</b><small>个迭代</small></div>
+    <div><b data-count="33">33</b><small>worker / review 会话</small></div>
+    <div><b data-count="34">34</b><small>个 PR · 29 个 issue</small></div>
   </div>
-  <div class="pn">1</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 2 · 题目与难点 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">01 · 题目</div>
-    <h2>难点不在"能聊"，而在两层不信任</h2>
-  </div>
-  <div class="body">
-    <div class="grid2" style="grid-template-columns: 708px 708px; align-items: center;">
-      <div style="display:flex; flex-direction:column; gap:18px;">
-        <div class="card">
-          <h3>题目要求</h3>
-          <ul class="pts">
-            <li>用户说"帮我订广州到利马的票"</li>
-            <li>经枢纽转机的最便宜路线，距离和价格要对</li>
-            <li>订票前用户必须确认完整路线、距离、价格</li>
-            <li>多用户、历史记录、在线 demo</li>
-            <li>交付所有 coding agent 的<b>原始会话</b></li>
-          </ul>
-        </div>
-        <div class="grid2" style="gap:16px;">
-          <div class="card tint">
-            <h3>产品里：不信任 LLM</h3>
-            <p>它会编数字，会把"好的谢谢"当成"订吧"。</p>
-          </div>
-          <div class="card tint">
-            <h3>过程里：不信任 agent</h3>
-            <p>它会说 "done"，但测试没跑、边界没想、截图没看。</p>
-          </div>
-        </div>
+<!-- =========================== 2 · BRIEF =========================== -->
+<!-- 讲：题目一句话带过，指着截图说成品：数字代码算，点击才出票。 -->
+<section class="slide" data-section="题目">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>01 · BRIEF</span></div>
+  <div class="frame">
+    <div class="topbar reveal" style="--i:0"><h2>题目</h2><span class="lab">QUOTR TAKE-HOME</span></div>
+    <div style="display:grid; grid-template-columns: 1fr 820px; gap:64px; align-items:start;">
+      <div class="rows two">
+        <div class="row reveal" style="--i:1"><span class="n">01</span><div><div class="t">用一句话订票</div><div class="d">“帮我订广州到利马的票”</div></div></div>
+        <div class="row reveal" style="--i:2"><span class="n">02</span><div><div class="t">经枢纽转机的最便宜路线</div><div class="d">距离和价格要算对</div></div></div>
+        <div class="row reveal" style="--i:3"><span class="n">03</span><div><div class="t">先确认，再订票</div><div class="d">用户要确认完整路线、距离和价格</div></div></div>
+        <div class="row reveal" style="--i:4"><span class="n">04</span><div><div class="t">多用户、历史、在线 demo</div><div class="d">另外交付所有 coding agent 的原始会话</div></div></div>
       </div>
-      <div style="display:flex; flex-direction:column; gap:10px;">
-        <div class="shot" style="height:542px;"><img src="../iterations/07-ui/screens/1440-light-chat-confirm.png" alt="确认卡：广州经法兰克福、新加坡、阿姆斯特丹到利马，8,928.6 km，$1,160.71，确认订票按钮" style="width:1200px; max-width:none; margin-left:-367px; margin-top:-100px;"></div>
-        <div class="src">成品：数字全部由代码算出，只有用户点击"Confirm booking"才出票。</div>
-      </div>
+      <figure class="reveal" style="--i:3">
+        <div class="shot" style="width:820px; height:640px;"><img src="../iterations/07-ui/screens/1440-light-chat-confirm.png" alt="确认卡：广州经法兰克福、新加坡、阿姆斯特丹到利马，8,928.6 km，$1,160.71，确认订票按钮" style="width:1390px; margin-left:-425px; margin-top:-112px;"></div>
+        <figcaption class="cap">成品：数字由代码计算，用户点击 Confirm booking 后才出票</figcaption>
+      </figure>
     </div>
   </div>
-  <div class="pn">2</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 3 · 工作方式 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">02 · 工作方式（pfstack）</div>
-    <h2>我只做三件事：定方向、做决定、验收</h2>
+<!-- =========================== 3 · TWO KINDS OF ERROR =========================== -->
+<!-- 讲：主线。产品里防 LLM，开发中防 coding agent，后面每一页都对应其中一类。 -->
+<section class="slide" data-section="两类错误">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>01 · BRIEF</span></div>
+  <div class="glitch" data-glitch="side" style="right:var(--edge); top:110px; width:240px; height:860px;"></div>
+  <div class="kicker reveal" style="--i:0; left:var(--edge); top:200px;"><span class="zh">两类需要防住的错误</span></div>
+  <p class="manifesto reveal" style="--i:1; left:var(--edge); top:260px; width:1450px;">产品里，LLM 会出错；<br><span class="soft">开发中，coding agent 也会出错。</span></p>
+  <div style="left:var(--edge); top:640px; width:1450px; display:grid; grid-template-columns:1fr 1fr; gap:64px;">
+    <div class="attr f">LLM 可能编出数字，也可能把“好的，谢谢”理解成同意订票。</div>
+    <div class="attr f">coding agent 可能说已经完成，但测试没跑、边界情况没考虑、截图没看。</div>
   </div>
-  <div class="body">
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 4 · WORKFLOW =========================== -->
+<!-- 讲：我只在三个点出现：提需求、确认计划、验收。其余由协调者和 worker 完成。 -->
+<section class="slide" data-section="分工">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>02 · WORKFLOW</span></div>
+  <div class="frame" style="gap:56px;">
+    <div class="topbar reveal" style="--i:0"><h2>我提需求、做决定、验收</h2><span class="lab">PFSTACK LOOP</span></div>
     <div class="flow">
-      <div class="step me">我提需求<small>一句话 / issue</small></div>
-      <div class="arrow">→</div>
-      <div class="step">协调者写计划<small>含验收标准、题目核对</small></div>
-      <div class="arrow">→</div>
-      <div class="step me">我确认<small>范围变了要重新确认</small></div>
-      <div class="arrow">→</div>
-      <div class="step">worker 并行实现<small>≤ 4 个，在 hc 里</small></div>
+      <div class="step me reveal" style="--i:1"><i>01</i><b>我提需求</b><span>一句话或一个 issue</span></div>
+      <div class="step reveal" style="--i:2"><i>02</i><b>协调者写计划</b><span>验收标准、题目核对</span></div>
+      <div class="step me reveal" style="--i:3"><i>03</i><b>我确认</b><span>范围变了要重新确认</span></div>
+      <div class="step reveal" style="--i:4"><i>04</i><b>worker 并行实现</b><span>最多 4 个，在 hc 里</span></div>
     </div>
-    <div class="flow" style="grid-template-columns: auto auto auto auto auto auto auto; direction: rtl;">
-      <div class="step" style="direction:ltr;">PR + STATE.md<small>测试、截图、实现记录</small></div>
-      <div class="arrow">←</div>
-      <div class="step" style="direction:ltr;">协调者 review<small>+ 独立只读 review</small></div>
-      <div class="arrow">←</div>
-      <div class="step" style="direction:ltr;">合并 → 发布<small>VPS，健康检查 + e2e</small></div>
-      <div class="arrow">←</div>
-      <div class="step me" style="direction:ltr;">我验收<small>acceptance.md 留档</small></div>
+    <div class="flow back">
+      <div class="step reveal" style="--i:5"><i>05</i><b>PR 和 STATE.md</b><span>测试、截图、实现记录</span></div>
+      <div class="step reveal" style="--i:6"><i>06</i><b>协调者 review</b><span>必要时加独立只读 review</span></div>
+      <div class="step reveal" style="--i:7"><i>07</i><b>合并、发布</b><span>VPS，健康检查和 e2e</span></div>
+      <div class="step me reveal" style="--i:8"><i>08</i><b>我验收</b><span>记录在 acceptance.md</span></div>
     </div>
-    <div class="roles">
-      <div class="card"><h3>我（人）</h3><div class="who">产品负责人</div><p>提需求、做产品取舍、授权高风险操作（公开仓库、改历史、部署）。</p></div>
-      <div class="card"><h3>协调者</h3><div class="who">主会话 · Claude Code</div><p>拆计划、审 diff 和截图、合并、发布。不直接写大块代码。</p></div>
-      <div class="card"><h3>Worker</h3><div class="who">Opus 5.5 · 一任务一分支一 worktree</div><p>写代码、跑测试、写 STATE.md。不能合并、不能发布、不能再派 agent。</p></div>
-      <div class="card"><h3>审查者</h3><div class="who">Fable 5.2 / 另一个 agent</div><p>只读，专找并发、竞态、安全问题，不看作者的结论。</p></div>
-    </div>
-    <div class="take">规矩：每轮最多 3 次"实现 → 验收 → review"，超过就停下来问我。每次暂停都写 STATE.md，换人能接着做。</div>
   </div>
-  <div class="pn">3</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 4 · 规则先行 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">03 · 规则先行</div>
-    <h2>AGENTS.md 是 agent 的"宪法"：先把边界写死</h2>
-  </div>
-  <div class="body">
-    <div class="rule-row">
-      <div class="quote">
-        <span class="c"># AGENTS.md（节选，每个会话启动都会读）</span><br>
-        <span class="k">The LLM never computes.</span> Routes, distances, prices and bookings are deterministic code.<br><br>
-        <span class="k">Booking is triggered only by the user clicking</span> a confirm card (one-time nonce); the LLM can only make the card appear.<br><br>
-        <span class="k">Reply text is checked by value:</span> every number and city must appear in this turn's records.
-      </div>
-      <div class="arrow">→</div>
-      <div class="card" style="height:100%; justify-content:center;">
-        <h3>变成了代码里的结构</h3>
-        <ul class="pts">
-          <li><code>core/</code> 纯函数算路线和价格，全部 490,700 对城市和独立参考实现逐一对比</li>
-          <li>LLM 只有 <code>request_booking</code>（弹卡片），<b>没有 book 工具</b></li>
-          <li>ReplyGuard：回复里出现的数字或城市不在工具结果里，就整段换成模板</li>
-          <li>订票不变量 B1–B7 + 基于模型的测试</li>
-        </ul>
-      </div>
+<!-- =========================== 5 · ROLES =========================== -->
+<!-- 讲：worker 不能合并、发布、再派 agent。每轮最多 3 个来回。 -->
+<section class="slide" data-section="分工">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>02 · WORKFLOW</span></div>
+  <div class="frame">
+    <div class="topbar reveal" style="--i:0"><h2>四个角色</h2><span class="lab">ROLES</span></div>
+    <div class="rows">
+      <div class="row reveal" style="--i:1"><span class="n">01</span><div class="t">我<span class="who">产品负责人</span></div><div class="d">提需求，做产品取舍，批准高风险操作（公开仓库、改写历史、部署）。</div></div>
+      <div class="row reveal" style="--i:2"><span class="n">02</span><div class="t">协调者<span class="who">主会话 · Claude Code</span></div><div class="d">写计划，审 diff 和截图，合并，发布。</div></div>
+      <div class="row reveal" style="--i:3"><span class="n">03</span><div class="t">Worker<span class="who">Opus 5.5 · 一个任务一个分支一个 worktree</span></div><div class="d">写代码、跑测试、写 STATE.md。不能合并、不能发布，也不能再启动别的 agent。</div></div>
+      <div class="row reveal" style="--i:4"><span class="n">04</span><div class="t">审查者<span class="who">Fable 5.2 或另一个 agent</span></div><div class="d">只读代码，重点查并发、竞态和安全问题。</div></div>
     </div>
-    <div class="grid3">
-      <div class="card line"><h3>每个计划先对照题目</h3><p>"Take-home check" 一节：计划和题目冲突时，以题目为准。</p></div>
-      <div class="card line"><h3>坑 → 规则 → lint</h3><p><code>review_rules.md</code> 记下每个踩过的坑，能自动检查的写进 <code>review_lint.py</code>。</p></div>
-      <div class="card line"><h3>危险操作必须问</h3><p>force-push、公开仓库、其他部署、删数据；密钥只在脚本里读，不打印。</p></div>
-    </div>
+    <div class="attr f">每个迭代最多 3 轮“实现、验收、review”，超过就停下来问我。每次暂停都写 STATE.md，别的会话可以接着做。</div>
   </div>
-  <div class="pn">4</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 5 · 时间线 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">04 · 时间线</div>
-    <h2>14 个迭代：第一天做出来，第二天做可靠</h2>
+<!-- =========================== 6 · AGENTS.md RULES =========================== -->
+<!-- 讲：三条规则逐条出现，每条对应代码里的一个结构。 -->
+<section class="slide" data-section="规则">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>03 · RULES</span></div>
+  <div class="frame">
+    <div class="topbar reveal" style="--i:0"><h2>先把规则写进 AGENTS.md</h2><span class="lab">AGENTS.MD · 节选</span></div>
+    <table class="cmp">
+      <thead class="reveal" style="--i:1"><tr><th style="width:52%">规则原文（每个会话启动时都会读）</th><th>在代码里的对应</th></tr></thead>
+      <tbody>
+        <tr class="f" data-f="1"><td style="font:400 36px/1.35 var(--display);">The LLM never computes.</td><td><code>core/</code> 用纯函数计算路线和价格；全部 490,700 对城市都和独立参考实现对比过</td></tr>
+        <tr class="f" data-f="2"><td style="font:400 36px/1.35 var(--display);">Booking is triggered only by the user clicking a confirm card.</td><td>LLM 只有 <code>request_booking</code>，作用是弹出确认卡，没有订票工具；不变量 B1–B7</td></tr>
+        <tr class="f" data-f="3"><td style="font:400 36px/1.35 var(--display);">Reply text is checked by value.</td><td>ReplyGuard：回复里的数字或城市如果不在工具结果里，整段换成模板</td></tr>
+      </tbody>
+    </table>
   </div>
-  <div class="body" style="gap:18px;">
-    <div class="day">
-      <div class="d">第 1 天<small>11-23 · 能用</small></div>
-      <div class="its">
-        <div class="it"><span class="id">01</span><span class="t">架构拆分</span><span class="x">模块边界、迭代路线</span></div>
-        <div class="it"><span class="id">02</span><span class="t">确定性核心</span><span class="x">路线、距离、价格，对拍参考实现</span></div>
-        <div class="it"><span class="id">03</span><span class="t">端到端切片</span><span class="x">6 个 worker 分支：agent / airline / api / web / compose / evals</span></div>
-        <div class="it"><span class="id">04</span><span class="t">界面 + 移动端</span><span class="x">设计规范、UI 状态</span></div>
-        <div class="it"><span class="id">05</span><span class="t">上线</span><span class="x">Google 登录、多用户、限额、公开 demo</span></div>
-        <div class="it turn"><span class="id">06 · 转折</span><span class="t">加固</span><span class="x">另一个 agent 做 review → issue #31，P0/P1 拆子 issue 整改</span></div>
-        <div class="it"><span class="id">07</span><span class="t">UI 重设计</span><span class="x">soft minimalist，与 06 并行</span></div>
-      </div>
-    </div>
-    <div class="day">
-      <div class="d">第 2 天<small>11-24 · 可靠</small></div>
-      <div class="its">
-        <div class="it turn"><span class="id">08 · 转折</span><span class="t">换 runtime</span><span class="x">两个 SDK 并行 POC → ADR → Pydantic AI Slim</span></div>
-        <div class="it"><span class="id">09</span><span class="t">Stop</span><span class="x">真正取消上游模型流，竞态逐个命名测试</span></div>
-        <div class="it"><span class="id">10</span><span class="t">Tracing</span><span class="x">OpenTelemetry → Phoenix，默认关闭</span></div>
-        <div class="it"><span class="id">11</span><span class="t">竞态修复</span><span class="x">review 发现的会话切换 bug（#55）</span></div>
-        <div class="it turn"><span class="id">12 · 转折</span><span class="t">多模型 bench</span><span class="x">3 个配置 × 45 用例 × 3 次，用数据选模型</span></div>
-        <div class="it"><span class="id">13</span><span class="t">交付</span><span class="x">设计文档、海报、泄露审计、公开仓库</span></div>
-        <div class="it"><span class="id">14</span><span class="t">修 eval 发现的问题</span><span class="x">工具失败重试一次、歧义城市</span></div>
-      </div>
-    </div>
-    <div class="take">节奏：迭代之间我只给一句话方向（"看看 issue 55 需要解决"），剩下的拆分、排期、并行都交给协调者。</div>
-  </div>
-  <div class="pn">5</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 6 · 不信任 done -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">05 · 验证</div>
-    <h2>agent 说 "done" 不算数，证据才算</h2>
-  </div>
-  <div class="body">
-    <div class="grid3">
-      <div class="card">
-        <span class="tag">分级证据</span>
-        <h3>每个 PR 都带截图 + 测试 diff</h3>
-        <p>ego-browser 截桌面 1440 和手机 390 两种宽度；lint；只算<b>新增</b>失败（<code>test_diff.sh</code>）；写明测的是哪个 commit。</p>
-      </div>
-      <div class="card">
-        <span class="tag">先写规则</span>
-        <h3>状态 bug 先写不变量</h3>
-        <p>订票 B1–B7、Stop R1–R8……先写进 <code>state_invariants.md</code>，再做基于模型的测试，最后加命名回归用例。</p>
-      </div>
-      <div class="card">
-        <span class="tag">先红后绿</span>
-        <h3>新测试必须在旧代码上失败</h3>
-        <p>例：14-fixes 的 9 个新测试，在旧 commit 上 6 个失败，失败输出存档在 <code>red-before-fix.txt</code>。</p>
-      </div>
-      <div class="card">
-        <span class="tag">测测试</span>
-        <h3>变异测试</h3>
-        <p>故意改坏代码，看测试能不能发现：Stop 后端 9/9、前端 9/9 被发现；tracing 16 个变异体发现了 15 个（剩下 1 个和原代码行为等价）。</p>
-      </div>
-      <div class="card">
-        <span class="tag">第二双眼睛</span>
-        <h3>独立只读 review</h3>
-        <p>Fable 审 Stop：0 个 P0/P1，9 个 P2，全修；其中 2 个用探针复现，补了回归测试。</p>
-      </div>
-      <div class="card">
-        <span class="tag">真实模型</span>
-        <h3>eval 有花费上限</h3>
-        <p>每次记录模型、日期、通过率和花费；<code>--max-cost 0.25</code>，预估超过上限就不跑。</p>
-      </div>
+<!-- =========================== 7 · PROCESS RULES =========================== -->
+<section class="slide" data-section="规则">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>03 · RULES</span></div>
+  <div class="frame">
+    <div class="topbar reveal" style="--i:0"><h2>另外三条过程规则</h2><span class="lab">PROCESS</span></div>
+    <div class="rows">
+      <div class="row reveal" style="--i:1"><span class="n">01</span><div class="t">每个计划先对照题目</div><div class="d">计划里有一节 Take-home check；和题目冲突时，按题目改计划。</div></div>
+      <div class="row reveal" style="--i:2"><span class="n">02</span><div class="t">踩过的坑记成规则</div><div class="d">记在 <code>review_rules.md</code>，能自动检查的写进 <code>review_lint.py</code>。</div></div>
+      <div class="row reveal" style="--i:3"><span class="n">03</span><div class="t">高风险操作先问</div><div class="d">force-push、公开仓库、其他部署、删数据都要先问；密钥只在脚本里读，不打印。</div></div>
     </div>
-    <div class="take">原则：能被机器验证的，就不靠 agent 自己报告。</div>
   </div>
-  <div class="pn">6</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 7 · 案例 A -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">06 · 翻车案例 1 / 3</div>
-    <h2>模型"热心过头"：没让订，它弹了确认卡</h2>
+<!-- =========================== 8 · TIMELINE =========================== -->
+<!-- 讲：第一天做出可用版本，第二天补可靠性。■ 是三个重点：06、08、12。 -->
+<section class="slide" data-section="时间线">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>04 · TIMELINE</span></div>
+  <div class="frame" style="gap:30px;">
+    <div class="topbar reveal" style="--i:0"><h2>14 个迭代</h2><span class="lab">11-23 14:26 → 11-24 15:31</span></div>
+    <div class="days">
+      <div class="day reveal" style="--i:1">
+        <h3>第 1 天：做出可用版本<span>11-23</span></h3>
+        <div class="it"><span class="n">01</span><span class="t">架构拆分</span><span class="x">模块边界、迭代路线</span></div>
+        <div class="it"><span class="n">02</span><span class="t">确定性核心</span><span class="x">路线、距离、价格，和参考实现对比</span></div>
+        <div class="it"><span class="n">03</span><span class="t">端到端版本</span><span class="x">6 个 worker 分支并行</span></div>
+        <div class="it"><span class="n">04</span><span class="t">界面和移动端</span><span class="x">设计规范、UI 状态</span></div>
+        <div class="it"><span class="n">05</span><span class="t">上线</span><span class="x">Google 登录、多用户、限额</span></div>
+        <div class="it key"><span class="n">06</span><span class="t">加固</span><span class="x">另一个 agent 做 review，写成 issue #31</span></div>
+        <div class="it"><span class="n">07</span><span class="t">UI 重新设计</span><span class="x">和 06 并行</span></div>
+      </div>
+      <div class="day f" data-f="1">
+        <h3>第 2 天：补可靠性<span>11-24</span></h3>
+        <div class="it key"><span class="n">08</span><span class="t">换 runtime</span><span class="x">两个 SDK 并行 POC，写 ADR</span></div>
+        <div class="it"><span class="n">09</span><span class="t">Stop</span><span class="x">取消上游模型流</span></div>
+        <div class="it"><span class="n">10</span><span class="t">Tracing</span><span class="x">OpenTelemetry 接 Phoenix</span></div>
+        <div class="it"><span class="n">11</span><span class="t">竞态修复</span><span class="x">review 发现的问题（#55）</span></div>
+        <div class="it key"><span class="n">12</span><span class="t">多模型 bench</span><span class="x">3 个配置 × 45 用例 × 3 次</span></div>
+        <div class="it"><span class="n">13</span><span class="t">交付</span><span class="x">文档、海报、泄露审计</span></div>
+        <div class="it"><span class="n">14</span><span class="t">修 eval 发现的问题</span><span class="x">工具失败重试、歧义城市</span></div>
+      </div>
+    </div>
+    <div class="attr f" data-f="2" style="font-size:26px;">迭代之间我通常只给一句话，比如“看一看 issue 55 需要解决”。拆分、排期和并行由协调者安排。</div>
   </div>
-  <div class="body">
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 9 · ACCEPTANCE =========================== -->
+<!-- 讲：挑两个讲：先红后绿、变异测试。 -->
+<section class="slide" data-section="验收">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>05 · ACCEPTANCE</span></div>
+  <div class="frame" style="gap:24px;">
+    <div class="topbar reveal" style="--i:0"><h2>怎么验收 agent 的工作</h2><span class="lab">EVIDENCE</span></div>
+    <div class="index">
+      <div class="reveal" style="--i:1"><span class="n">01 · 分级证据</span><h3>截图和测试对比</h3><p>桌面 1440 和手机 390 两种宽度的截图；lint；只看新增失败；写明测的是哪个 commit。</p></div>
+      <div class="reveal" style="--i:2"><span class="n">02 · 先写规则</span><h3>状态问题先写不变量</h3><p>B1–B7、R1–R8 先写进 <code>state_invariants.md</code>，再写模型测试和命名回归用例。</p></div>
+      <div class="reveal" style="--i:3"><span class="n">03 · 先红后绿</span><h3>新测试先在旧代码上跑</h3><p>14-fixes 的 9 个新测试，在旧 commit 上有 6 个失败，输出存档。</p></div>
+      <div class="f" data-f="1"><span class="n">04 · 变异测试</span><h3>检查测试本身</h3><p>故意改坏代码：Stop 前后端各 9 处全部发现；tracing 16 处发现 15 处，剩下 1 处行为等价。</p></div>
+      <div class="f" data-f="1"><span class="n">05 · 独立 review</span><h3>只读审查</h3><p>Fable 审 Stop：没有 P0/P1；9 个 P2 全部修复，其中 2 个用探针复现。</p></div>
+      <div class="f" data-f="1"><span class="n">06 · 真实模型</span><h3>eval 设花费上限</h3><p>记录模型、日期、通过率和花费；<code>--max-cost 0.25</code>，预估超过就不跑。</p></div>
+    </div>
+    <div class="attr f" data-f="2">agent 说完成了，只当作提示。验收看测试输出、截图和对应的 commit。</div>
+  </div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 10 · CASE 1 =========================== -->
+<!-- 讲：重点是“为什么没有订出票”：结构上没有订票路径。 -->
+<section class="slide" data-section="问题案例">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>06 · CASE 1 / 3</span></div>
+  <div class="frame" style="gap:48px;">
+    <div class="topbar reveal" style="--i:0"><h2>用户没要求订票，模型弹出了确认卡</h2><span class="lab">EVALS 08–10</span></div>
     <div class="case">
-      <div>
-        <h4>现象</h4>
-        <p>用户只问"这条路线的细节"，模型就直接调用 <code>request_booking</code>，弹出确认卡。</p>
-        <p class="muted" style="font-size:19px;">08–10 迭代的真实模型 eval 里反复出现（<code>quote_details</code>、<code>false_booked_prompt</code>）。</p>
-      </div>
-      <div>
-        <h4>为什么没出事</h4>
-        <p>LLM 根本<b>没有订票的路径</b>。卡片只是展示；出票要用户点击，再加一次性 nonce 和 B1–B7 校验。</p>
-        <p>最坏情况：多弹一张卡。安全违规始终为 0。</p>
-      </div>
-      <div>
-        <h4>怎么沉淀</h4>
-        <p>不靠改提示词"求"模型听话，而是：</p>
-        <ul class="pts" style="font-size:22px;">
-          <li>成为 bench 的独立指标："多余的调用"</li>
-          <li>回归用例长期保留</li>
-          <li>仍列在已知限制里</li>
-        </ul>
-      </div>
-    </div>
-    <div class="grid2" style="align-items:center;">
-      <div class="take" style="font-size:26px;">教训：对 LLM 的约束要做在<b>结构</b>上，不要做在<b>提示词</b>里。<br>提示词能降低概率，结构才能给出保证。</div>
-      <div class="card line">
-        <h3>同样的思路用在 coding agent 身上</h3>
-        <p>worker 没有 merge 和发布的权限，就像 LLM 没有 book 工具：它可以犯错，但犯错的范围被限死了。</p>
-      </div>
+      <div class="reveal" style="--i:1"><h4>现象</h4><p>用户只问路线细节，模型就调用了 <code>request_booking</code>，界面上出现确认卡。</p><p class="small">08–10 迭代的真实模型 eval 里反复出现（<code>quote_details</code>、<code>false_booked_prompt</code>）。</p></div>
+      <div class="f" data-f="1"><h4>为什么没有订出票</h4><p>LLM 没有订票的路径。卡片只用来展示；出票要用户点击，还要校验一次性 nonce 和 B1–B7。</p><p>最坏的结果是多出一张卡片，安全违规一直是 0。</p></div>
+      <div class="f" data-f="2"><h4>后续处理</h4><ul><li>bench 单独统计这类多余调用</li><li>保留回归用例</li><li>写进已知限制</li></ul></div>
     </div>
   </div>
-  <div class="pn">7</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 8 · 案例 B + C -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">06 · 翻车案例 2–3 / 3</div>
-    <h2>测试全绿，问题仍在：竞态与上线窗口</h2>
-  </div>
-  <div class="body" style="gap:20px;">
-    <div class="case-title"><h3>会话切换竞态（#55）</h3><span class="tag red">UI 显示错会话</span></div>
-    <div class="case">
-      <div><h4>现象</h4><p>快速点会话 A 再点 B：A 的响应慢，回来后把 B 的消息覆盖了，侧栏却还选着 B。</p></div>
-      <div><h4>谁发现的</h4><p>另一个 agent 对 <code>main</code> 做的独立只读 review，专门检查异步响应和 <code>setState</code> 的先后顺序。</p></div>
-      <div><h4>修法</h4><p>所有会话状态更新统一加"视图代次"守卫；先写用延迟 GET 控制"B 先回、A 后回"的确定性测试，再修。</p></div>
-    </div>
-    <div class="case-title"><h3>发布时 502</h3><span class="tag red">线上短暂不可用</span></div>
-    <div class="case">
-      <div><h4>现象</h4><p>发布脚本的健康检查只等 6 秒，刚好撞上 API 启动窗口，返回 502。</p></div>
-      <div><h4>修法</h4><p>健康检查改成最多重试 60 秒；备份 <code>app.db</code> 时连带 WAL 文件，回滚才真的可用。</p></div>
-      <div><h4>怎么沉淀</h4><p>每次发布在 <code>deploy.md</code> 记下 commit、健康检查耗时和线上 e2e 结果。</p></div>
-    </div>
-  </div>
-  <div class="pn">8</div>
+<!-- =========================== 11 · STRUCTURE OVER PROMPT =========================== -->
+<section class="slide" data-section="问题案例">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>06 · CASE 1 / 3</span></div>
+  <div class="glitch left" data-glitch="side" style="left:var(--edge); top:110px; width:200px; height:860px;"></div>
+  <p class="manifesto reveal" style="--i:0; left:360px; top:240px; width:1400px; font-size:84px;">改提示词只能降低出错的概率；<br>“不能自己订票”要靠代码结构保证。</p>
+  <div class="attr f" style="left:360px; top:640px; width:1300px;">coding agent 的权限也这样设：worker 不能合并、不能发布，出错也只影响自己的分支。</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 9 · 关键决策 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">07 · 一个关键决策</div>
-    <h2>从自写 agent loop 换到 Pydantic AI Slim</h2>
+<!-- =========================== 12 · CASE 2 =========================== -->
+<!-- 讲：测试全绿，独立 review 找到的。修之前先写能复现的测试。 -->
+<section class="slide" data-section="问题案例">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>06 · CASE 2 / 3</span></div>
+  <div class="frame" style="gap:48px;">
+    <div class="topbar reveal" style="--i:0"><h2>会话切换的竞态</h2><span class="lab">ISSUE #55</span></div>
+    <div class="case">
+      <div class="reveal" style="--i:1"><h4>现象</h4><p>先点会话 A 再点 B。A 的响应比较慢，返回后把 B 的消息覆盖了，侧栏仍然选中 B。</p></div>
+      <div class="f" data-f="1"><h4>谁发现的</h4><p>另一个 agent 对 <code>main</code> 做的独立只读 review，专门检查异步响应和 <code>setState</code> 的先后顺序。当时测试都能通过。</p></div>
+      <div class="f" data-f="2"><h4>修法</h4><p>所有会话状态更新统一检查“视图代次”。先写测试，用延迟 GET 让 B 先返回、A 后返回，再改代码。</p></div>
+    </div>
   </div>
-  <div class="body">
-    <div class="grid3" style="grid-template-columns: 1fr 1.25fr 1fr;">
-      <div class="card">
-        <span class="tag">为什么一开始自己写</span>
-        <p>规则 M06："依赖最少，不用 agent 框架"。自写 loop 2,237 行，完全可控。</p>
-        <span class="tag" style="margin-top:8px;">为什么要换</span>
-        <ul class="pts">
-          <li>用户点 Stop，必须真正取消后端运行和上游模型流</li>
-          <li>tracing 要接标准体系（OpenTelemetry → Phoenix），而不是手写</li>
-        </ul>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 13 · CASE 3 =========================== -->
+<section class="slide" data-section="问题案例">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>06 · CASE 3 / 3</span></div>
+  <div class="frame" style="gap:48px;">
+    <div class="topbar reveal" style="--i:0"><h2>发布时返回 502</h2><span class="lab">DEPLOY</span></div>
+    <div class="case">
+      <div class="reveal" style="--i:1"><h4>现象</h4><p>发布脚本的健康检查只等 6 秒，正好赶上 API 还在启动，返回 502。</p></div>
+      <div class="f" data-f="1"><h4>修法</h4><p>健康检查改成最多重试 60 秒；备份 <code>app.db</code> 时一并复制 WAL 文件。</p></div>
+      <div class="f" data-f="2"><h4>之后</h4><p>每次发布都在 <code>deploy.md</code> 记下 commit、健康检查耗时和线上 e2e 结果。</p></div>
+    </div>
+  </div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 14 · RUNTIME DECISION =========================== -->
+<!-- 讲：为什么换（Stop + tracing）；两个 POC 用数据比；ADR 记录、我拍板、改规则。 -->
+<section class="slide" data-section="技术决策">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>07 · DECISION</span></div>
+  <div class="frame" style="gap:40px;">
+    <div class="topbar reveal" style="--i:0"><h2>agent loop 换成 Pydantic AI Slim</h2><span class="lab">ADR-001</span></div>
+    <div style="display:grid; grid-template-columns: 620px 1fr; gap:72px;">
+      <div class="rows two">
+        <div class="row reveal" style="--i:1"><span class="n">起初</span><div class="d">规则 M06 要求依赖尽量少、不用 agent 框架，loop 自己写，有 2,237 行。</div></div>
+        <div class="row reveal" style="--i:2"><span class="n">原因 1</span><div class="d">用户点 Stop 时，要取消后端的运行和上游的模型流。</div></div>
+        <div class="row reveal" style="--i:3"><span class="n">原因 2</span><div class="d">tracing 想接 OpenTelemetry 和 Phoenix，不想自己写。</div></div>
       </div>
-      <div class="card tint">
-        <span class="tag">怎么决定：两个 POC 并行，用数据说话</span>
-        <table class="b" style="font-size:20px; margin-top:4px;">
-          <thead><tr><th></th><th>Pydantic AI Slim</th><th>OpenAI Agents SDK</th></tr></thead>
+      <div class="f" data-f="1">
+        <table class="cmp">
+          <thead><tr><th>两个 POC 并行</th><th>Pydantic AI Slim</th><th>OpenAI Agents SDK</th></tr></thead>
           <tbody>
-            <tr><td>取消后关闭上游</td><td>0.6 ms</td><td>0.4 ms</td></tr>
-            <tr><td>Tracing 默认</td><td class="hl">OTel，不外发</td><td>默认发往 OpenAI</td></tr>
-            <tr><td>新增依赖包</td><td class="hl">+16</td><td>+23</td></tr>
-            <tr><td>镜像增量</td><td class="hl">+39 MB</td><td>约 +56 MB</td></tr>
+            <tr><td>取消后关闭上游</td><td class="num">0.6 ms</td><td class="num">0.4 ms</td></tr>
+            <tr><td>tracing 默认</td><td class="pick">OTel，不外发</td><td>默认发往 OpenAI</td></tr>
+            <tr><td>新增依赖包</td><td class="num pick">+16</td><td class="num">+23</td></tr>
+            <tr><td>镜像增量</td><td class="num pick">+39 MB</td><td class="num">约 +56 MB</td></tr>
           </tbody>
         </table>
-        <p style="font-size:20px;">ADR-001 记录证据 → 我拍板 → 修改 AGENTS.md 的规则 → 迁移。</p>
-      </div>
-      <div class="card">
-        <span class="tag">永远是我们自己的代码</span>
-        <ul class="pts">
-          <li>订票：点击 + nonce、B1–B7</li>
-          <li>ReplyGuard（回复在流式输出前检查）</li>
-          <li>历史、压缩、预算、重试</li>
-          <li>SSE 协议</li>
-        </ul>
-        <span class="tag red" style="margin-top:8px;">诚实的代价</span>
-        <p style="font-size:21px;">POC 预测代码会少 5%，实际 2,237 → 2,665 行：守住边界需要胶水代码。</p>
       </div>
     </div>
-    <div class="take">规则可以改，但要由人来决定，并用 ADR 写下原因。否则下一个 agent 会"顺手"把它改回去。</div>
+    <div class="attr f" data-f="2">ADR-001 记录证据，我做决定，改 AGENTS.md 的规则，然后迁移。</div>
   </div>
-  <div class="pn">9</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 10 · 评测体系 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">08 · 评测体系</div>
-    <h2>三层测试：越往上越贵、越不确定，跑得越少</h2>
-  </div>
-  <div class="body" style="gap:16px;">
-    <div class="layers">
-      <div class="layer card tint" style="width:78%;">
-        <div><div class="n">3 配置 × 135</div></div>
-        <div class="what"><h3>真实模型 eval / bench</h3>多轮完整对话，按需跑；记录模型、日期、通过率、token、花费；有花费上限</div>
-        <div class="when">按需<br>每次几美分</div>
+<!-- =========================== 15 · WHAT STAYED OURS =========================== -->
+<!-- 讲：代码反而多了 428 行。规则由我改，ADR 写原因。 -->
+<section class="slide" data-section="技术决策">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>07 · DECISION</span></div>
+  <div class="frame" style="gap:40px;">
+    <div class="topbar reveal" style="--i:0"><h2>换了 SDK，边界仍是自己的代码</h2><span class="lab">ADR-001</span></div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:80px; align-items:start;">
+      <div class="rows two">
+        <div class="row reveal" style="--i:1"><span class="n">01</span><div class="t">订票：点击、nonce、B1–B7</div></div>
+        <div class="row reveal" style="--i:2"><span class="n">02</span><div class="t">ReplyGuard，在文字流式输出前检查</div></div>
+        <div class="row reveal" style="--i:3"><span class="n">03</span><div class="t">历史、压缩、预算、重试</div></div>
+        <div class="row reveal" style="--i:4"><span class="n">04</span><div class="t">SSE 协议</div></div>
       </div>
-      <div class="layer card" style="width:89%;">
-        <div><div class="n">45 / 45</div></div>
-        <div class="what"><h3>脚本化假模型回放</h3>agent loop、工具分派、确认门槛、ReplyGuard，全部用假 LLM 跑，零成本</div>
-        <div class="when">每次提交<br>免费、确定</div>
-      </div>
-      <div class="layer card" style="width:100%;">
-        <div><div class="n">1,000+</div></div>
-        <div class="what"><h3>确定性测试（pytest + hypothesis + vitest 114）</h3>路线和价格对拍参考实现（490,700 对全一致）；订票状态机的模型测试；Stop 竞态命名测试</div>
-        <div class="when">每次提交<br>预期值来自参考实现，不来自 LLM</div>
+      <div class="f" data-f="1">
+        <div class="kicker" style="margin-bottom:24px;">AGENT <span class="zh">代码行数</span></div>
+        <div class="vbig">2,237<span style="font-size:110px;"> → </span>2,665</div>
+        <p class="body-t" style="margin-top:28px;">POC 估计会减少约 5%，迁移后实际增加了。</p>
       </div>
     </div>
-    <div class="take">硬规则：B1–B7 的安全违规是<b>自动 FAIL</b>，任何 LLM judge 都不能推翻。安全由代码判断，质量才交给统计。</div>
+    <div class="attr f" data-f="2">规则可以改，但由我决定，并在 ADR 里写明原因。后面的会话读到 ADR，才知道为什么这么改。</div>
   </div>
-  <div class="pn">10</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 11 · bench -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">09 · 多模型 bench</div>
-    <h2>405 次运行，0 次安全违规；用数据选模型</h2>
+<!-- =========================== 16 · TEST LAYERS =========================== -->
+<!-- 讲：从下往上出现。安全违规直接判失败。 -->
+<section class="slide" data-section="测试">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>08 · TESTS</span></div>
+  <div class="frame" style="gap:20px;">
+    <div class="topbar reveal" style="--i:0"><h2>测试分三层：越往上越贵，跑得越少</h2><span class="lab">TEST PYRAMID</span></div>
+    <div class="rows">
+      <div class="layer f" data-f="3"><div class="big">135 × 3</div><div><h3>真实模型 eval 和 bench</h3><p>完整多轮对话；记录模型、日期、通过率、token 和花费；设花费上限</p></div><div class="when">按需<br>每次几美分</div></div>
+      <div class="layer f" data-f="2"><div class="big">45 / 45</div><div><h3>脚本化假模型回放</h3><p>agent loop、工具分派、确认步骤、ReplyGuard 都用假 LLM 跑，不花钱</p></div><div class="when">每次提交<br>结果确定</div></div>
+      <div class="layer f" data-f="1"><div class="big">1,000+</div><div><h3>确定性测试</h3><p>pytest、hypothesis，另有 114 个 vitest；路线和价格与参考实现对比；订票状态机的模型测试</p></div><div class="when">每次提交<br>期望值来自参考实现</div></div>
+    </div>
+    <div class="attr f" data-f="4">B1–B7 的安全违规直接判失败，不交给 LLM 评分。通过率这类质量指标才看统计。</div>
   </div>
-  <div class="body">
-    <div class="grid2" style="grid-template-columns: 1fr 1.15fr; gap:48px; align-items:start;">
-      <figure style="display:flex; flex-direction:column; gap:10px;">
-        <div style="font-size:20px; font-weight:600;">多轮任务通过率（点 = 均值，横线 = 95% 置信区间）</div>
-        <svg viewBox="0 0 640 300" width="100%" role="img" aria-label="通过率：DeepSeek 官方 96.3%（92–98），DeepSeek 百炼 98.5%（95–100），Qwen3.8-flash 百炼 91.1%（85–95）">
-          <!-- x scale: 80% → 200, 100% → 620 ; 21px per point -->
-          <g stroke="#E2DFD9" stroke-width="1">
-            <line x1="200" y1="20" x2="200" y2="250"/><line x1="305" y1="20" x2="305" y2="250"/>
-            <line x1="410" y1="20" x2="410" y2="250"/><line x1="515" y1="20" x2="515" y2="250"/>
-            <line x1="620" y1="20" x2="620" y2="250"/>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 17 · BENCH =========================== -->
+<!-- 讲：0 安全违规；看置信区间，DeepSeek 两家差异不显著；百炼没有单价只比 token。 -->
+<section class="slide" data-section="多模型 bench">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>09 · BENCH</span></div>
+  <div class="frame" style="gap:36px;">
+    <div class="topbar reveal" style="--i:0"><h2>405 次运行，没有安全违规</h2><span class="lab">N = 3 × 45 CASES</span></div>
+    <div style="display:grid; grid-template-columns: 820px 1fr; gap:72px; align-items:start;">
+      <figure class="reveal" style="--i:1">
+        <div class="kicker" style="margin-bottom:18px;"><span class="zh">多轮任务通过率 · 点是均值，横线是 95% 置信区间</span></div>
+        <svg viewBox="0 0 840 400" width="820" height="390" role="img" aria-label="通过率：DeepSeek 官方 96.3%（92–98），DeepSeek 百炼 98.5%（95–100），Qwen3.8-flash 百炼 91.1%（85–95）">
+          <!-- x: 80% → 260, 100% → 800 (27 px per point) -->
+          <g stroke="rgba(31,43,224,0.18)" stroke-width="1">
+            <line x1="260" y1="20" x2="260" y2="340"/><line x1="395" y1="20" x2="395" y2="340"/><line x1="530" y1="20" x2="530" y2="340"/><line x1="665" y1="20" x2="665" y2="340"/><line x1="800" y1="20" x2="800" y2="340"/>
           </g>
-          <g font-size="16" fill="#6F6A63" text-anchor="middle">
-            <text x="200" y="276">80%</text><text x="305" y="276">85%</text><text x="410" y="276">90%</text><text x="515" y="276">95%</text><text x="620" y="276">100%</text>
+          <line x1="260" y1="340" x2="800" y2="340" stroke="#1F2BE0" stroke-width="1.5"/>
+          <g font-family="DM Mono" font-size="20" fill="#1F2BE0" text-anchor="middle">
+            <text x="260" y="374">80%</text><text x="395" y="374">85%</text><text x="530" y="374">90%</text><text x="665" y="374">95%</text><text x="800" y="374">100%</text>
           </g>
-          <g font-size="18" fill="#1C1A17">
-            <text x="0" y="62">DeepSeek 官方</text><text x="0" y="140">DeepSeek 百炼</text><text x="0" y="218">Qwen3.8-flash</text>
+          <g font-size="26" fill="#1F2BE0" style="font-family: 'Hanken Grotesk', 'Noto Serif SC', sans-serif;">
+            <text x="0" y="88">DeepSeek 官方</text><text x="0" y="188">DeepSeek 百炼</text><text x="0" y="288">Qwen3.8-flash</text>
           </g>
-          <g stroke-width="3" stroke-linecap="round">
-            <line x1="452" y1="56" x2="578" y2="56" stroke="#1F5F99"/>
-            <line x1="515" y1="134" x2="620" y2="134" stroke="#1F5F99"/>
-            <line x1="305" y1="212" x2="515" y2="212" stroke="#8F8A82"/>
+          <g stroke-width="4" stroke-linecap="butt">
+            <line class="grow" style="--i:0" x1="584" y1="80" x2="746" y2="80" stroke="#1F2BE0"/>
+            <line class="grow" style="--i:1" x1="665" y1="180" x2="800" y2="180" stroke="#1F2BE0"/>
+            <line class="grow" style="--i:2" x1="395" y1="280" x2="665" y2="280" stroke="#5560E5" stroke-opacity="0.7"/>
           </g>
-          <circle cx="552" cy="56" r="9" fill="#1F5F99"/>
-          <circle cx="599" cy="134" r="9" fill="#1F5F99"/>
-          <circle cx="433" cy="212" r="9" fill="#8F8A82"/>
-          <g font-size="17" font-weight="600">
-            <text x="552" y="36" text-anchor="middle" fill="#1F5F99">96.3%</text>
-            <text x="590" y="114" text-anchor="middle" fill="#1F5F99">98.5%</text>
-            <text x="433" y="192" text-anchor="middle" fill="#5E5A54">91.1%</text>
+          <rect class="pop" style="--i:0" x="690" y="68" width="24" height="24" fill="#1F2BE0"/>
+          <rect class="pop" style="--i:1" x="749" y="168" width="24" height="24" fill="#1F2BE0"/>
+          <rect class="pop" style="--i:2" x="548" y="268" width="24" height="24" fill="#F0EBDE" stroke="#1F2BE0" stroke-width="3"/>
+          <g font-family="Newsreader" font-size="32" fill="#1F2BE0" text-anchor="middle">
+            <text class="pop" style="--i:3" x="702" y="52">96.3%</text>
+            <text class="pop" style="--i:4" x="761" y="152">98.5%</text>
+            <text class="pop" style="--i:5" x="560" y="252">91.1%</text>
           </g>
         </svg>
-        <div class="src">每个配置 45 用例 × N=3 = 135 次；横轴从 80% 开始。样本小，DeepSeek 两个服务之间的差异不显著。</div>
+        <figcaption class="cap">横轴从 80% 开始。样本小，DeepSeek 两家服务之间的差异不显著。</figcaption>
       </figure>
-      <div style="display:flex; flex-direction:column; gap:18px;">
-        <table class="b">
+      <div style="display:flex; flex-direction:column; gap:24px;">
+        <table class="cmp reveal" style="--i:2">
           <thead><tr><th></th><th>DS 官方</th><th>DS 百炼</th><th>Qwen3.8</th></tr></thead>
           <tbody>
-            <tr><td>安全违规</td><td class="hl">0</td><td class="hl">0</td><td class="hl">0</td></tr>
-            <tr><td>每个成功任务 token</td><td>13,788</td><td>13,475</td><td>15,395</td></tr>
-            <tr><td>单轮 p50 / p95</td><td>2.2 / 3.4 s</td><td>2.2 / 4.2 s</td><td>3.1 / 7.9 s</td></tr>
-            <tr><td>总花费</td><td>$0.109</td><td class="muted">未知*</td><td class="muted">未知*</td></tr>
+            <tr><td>安全违规</td><td class="num pick">0</td><td class="num pick">0</td><td class="num pick">0</td></tr>
+            <tr><td>每个成功任务的 token</td><td class="num">13,788</td><td class="num">13,475</td><td class="num">15,395</td></tr>
+            <tr><td>单轮 p50 / p95（秒）</td><td class="num">2.2 / 3.4</td><td class="num">2.2 / 4.2</td><td class="num">3.1 / 7.9</td></tr>
+            <tr><td>总花费</td><td class="num">$0.109</td><td>未知*</td><td>未知*</td></tr>
           </tbody>
         </table>
-        <div class="src">* 百炼走 token plan，拿不到单价：不按 $0 算，也不套 DeepSeek 的价格，只比 token。</div>
-        <div class="take" style="font-size:21px;">结论：生产继续用 DeepSeek 官方。同一个模型换服务商效果接近；Qwen3.8-flash 更慢、通过率更低。</div>
+        <p class="small reveal" style="--i:3">* 百炼用的是 token plan，拿不到单价。没有按 $0 算，也没有套用 DeepSeek 的价格，只比较 token。</p>
+      </div>
+    </div>
+    <div class="attr f">生产环境继续用 DeepSeek 官方 API。同一个模型在两家服务商上的结果接近；Qwen3.8-flash 更慢，通过率也更低。</div>
+  </div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 18 · TRACING + AUDIT =========================== -->
+<section class="slide" data-section="Tracing 和审计">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>10 · OBSERVABILITY</span></div>
+  <div class="frame" style="gap:36px;">
+    <div class="topbar reveal" style="--i:0"><h2>能看到每一步，同时不泄露数据</h2><span class="lab">PHOENIX · AUDIT</span></div>
+    <div style="display:grid; grid-template-columns: 960px 1fr; gap:64px; align-items:start;">
+      <figure class="reveal" style="--i:1">
+        <div class="shot" style="width:960px; height:500px;"><img src="../iterations/10-otel/screenshots/phoenix-quote-real-1440.png" alt="Phoenix 里一次报价的 trace：agent.turn → chat → execute_tool quote_route → airline.quote_route → core.routing，以及多个 reply_guard span" style="width:1000px;"></div>
+        <figcaption class="cap">一次真实报价的 trace：agent、模型、工具、航线服务、路由算法、ReplyGuard</figcaption>
+      </figure>
+      <div class="rows two">
+        <div class="row f" data-f="1"><span class="n">01</span><div><div class="t" style="font-size:36px;">Tracing 默认关闭</div><div class="d" style="font-size:25px;">打开后 span 里也不放 prompt、回复、邮箱、nonce；会话 id 只存 HMAC；导出失败不影响聊天和订票。</div></div></div>
+        <div class="row f" data-f="2"><span class="n">02</span><div><div class="t" style="font-size:36px;">公开 62 个原始会话前的审计</div><div class="d" style="font-size:25px;">用持有的每个密钥和邀请码逐字扫描全部历史。发现旧提交里有 VPS IP，于是改写历史，推到新建的公开仓库；原来的开发仓库保持私有。</div></div></div>
       </div>
     </div>
   </div>
-  <div class="pn">11</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 12 · 可观测 + 安全交付 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">10 · 可观测性与安全交付</div>
-    <h2>看得见每一步，同时什么都不泄露</h2>
-  </div>
-  <div class="body">
-    <div class="grid2" style="grid-template-columns: 1.2fr 1fr; gap:40px; align-items:start;">
-      <div style="display:flex; flex-direction:column; gap:10px;">
-        <div class="shot"><img src="../iterations/10-otel/screenshots/phoenix-quote-real-1440.png" alt="Phoenix 里一次报价的 trace：agent.turn → chat → execute_tool quote_route → airline.quote_route → core.routing，以及多个 reply_guard span" style="width:104%;"></div>
-        <div class="src">Phoenix 里一次真实报价：agent → 模型 → 工具 → 航线服务 → 路由算法 → ReplyGuard。</div>
-      </div>
-      <div style="display:flex; flex-direction:column; gap:18px;">
-        <div class="card">
-          <h3>Tracing：默认关闭，打开也脱敏</h3>
-          <ul class="pts" style="font-size:21px;">
-            <li>span 里不放 prompt、回复、邮箱、nonce、cookie</li>
-            <li>会话 id 只存 HMAC</li>
-            <li>导出失败不影响聊天和订票（有测试）</li>
-          </ul>
-        </div>
-        <div class="card">
-          <h3>公开 62 个原始会话前的审计</h3>
-          <ul class="pts" style="font-size:21px;">
-            <li>拿我们持有的每个密钥和邀请码逐字扫描全部历史，再做 token 形状扫描</li>
-            <li>发现旧提交里有 VPS IP → 重写历史，推到<b>新建</b>的公开仓库（旧仓库的 PR ref 会保留旧 commit）</li>
-            <li>原始开发仓库保持私有</li>
-          </ul>
-        </div>
-      </div>
+<!-- =========================== 19 · LESSONS =========================== -->
+<section class="slide" data-section="体会">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>11 · NOTES</span></div>
+  <div class="frame">
+    <div class="topbar reveal" style="--i:0"><h2>几点体会</h2><span class="lab">NOTES</span></div>
+    <div class="rows">
+      <div class="row f"><span class="n">01</span><div class="t">规则写进文件</div><div class="d">AGENTS.md、review_rules 和不变量，每个新会话都会读到。只在聊天里说过的要求，新开的 worker 看不到。</div></div>
+      <div class="row f"><span class="n">02</span><div class="t">我主要做取舍和验收</div><div class="d">比如 Stop 之后的卡片能不能订，额度怎么算，要不要换 SDK，仓库要不要公开。</div></div>
+      <div class="row f"><span class="n">03</span><div class="t">验收看证据</div><div class="d">测试先失败再通过、变异测试、两种宽度的截图，并记录测试对应的 commit。</div></div>
+      <div class="row f"><span class="n">04</span><div class="t">并发和安全问题单独 review</div><div class="d">#55 的竞态和 Stop 的 9 个 P2 都是独立 review 找到的，当时已有的测试都能通过。</div></div>
     </div>
   </div>
-  <div class="pn">12</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 13 · 心得 -->
-<section class="slide">
-  <div class="head">
-    <div class="kicker">11 · 心得</div>
-    <h2>把不可靠的东西关进笼子：LLM 是这样，coding agent 也是</h2>
+<!-- =========================== 20 · COLOPHON =========================== -->
+<section class="slide" data-section="谢谢">
+  <div class="chrome"><span>OCEAN ABOVE · QUOTR TAKE-HOME</span><span>2026 · 11</span></div>
+  <div class="glitch left" data-glitch="cover" style="left:var(--edge); top:110px; width:420px; height:860px;"></div>
+  <div class="kicker reveal" style="--i:0; right:var(--edge); top:200px; text-align:right;">THANK YOU · <span class="zh">欢迎提问</span></div>
+  <h2 class="reveal" style="--i:1; right:var(--edge); top:250px; font:400 170px/1 var(--display); letter-spacing:-0.005em; text-align:right;">谢谢</h2>
+  <div class="reveal" style="--i:2; right:var(--edge); top:560px; width:1180px; display:grid; grid-template-columns:repeat(2, 1fr); gap:36px 56px; border-top:1.5px solid var(--ink); padding-top:30px;">
+    <div><div class="kicker" style="font-size:18px; margin-bottom:12px;">DEMO</div><a class="body-t" href="https://ocean-above.potafree.net">ocean-above.potafree.net</a></div>
+    <div><div class="kicker" style="font-size:18px; margin-bottom:12px;">CODE · v1.0</div><a class="body-t" href="https://github.com/chux0519/ocean-above">github.com/chux0519/ocean-above</a></div>
+    <div><div class="kicker" style="font-size:18px; margin-bottom:12px;"><span class="zh">建议先读</span></div><p class="small"><code>DESIGN.md</code>（第一屏是 TL;DR）和单页海报</p></div>
+    <div><div class="kicker" style="font-size:18px; margin-bottom:12px;"><span class="zh">完整过程</span></div><p class="small"><code>prompt history/</code>：62 个原始会话<br><code>docs/iterations/</code>：每轮的计划和验收</p></div>
   </div>
-  <div class="body" style="justify-content:center;">
-    <div class="lessons">
-      <div class="lesson"><div class="i">1</div><div><h3>规则写进文件，不留在聊天里</h3><p>AGENTS.md、review_rules、不变量：每个新会话都会读。聊天里说过的话，下一个 worker 就不知道了。</p></div></div>
-      <div class="lesson"><div class="i">2</div><div><h3>人管边界和验收，agent 管实现</h3><p>我做的都是取舍：Stop 后卡片能不能订、额度怎么算、要不要换 SDK、仓库要不要公开。</p></div></div>
-      <div class="lesson"><div class="i">3</div><div><h3>"done" 不是证据</h3><p>先红后绿、变异测试、双宽度截图、写明测的是哪个 commit。能被机器验证的就不靠自述。</p></div></div>
-      <div class="lesson"><div class="i">4</div><div><h3>并发和安全找第二双眼睛</h3><p>独立只读 review 每次都找到了真问题，而这些问题测试全绿时也存在。</p></div></div>
-    </div>
-  </div>
-  <div class="pn">13</div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- 14 · 结尾 -->
-<section class="slide title">
-  <div class="kicker">谢谢 · Q&amp;A</div>
-  <h1>自己看一遍</h1>
-  <div class="grid2" style="gap:28px 60px; font-size:26px; line-height:1.5;">
-    <div><div class="lbl">在线 demo</div><a href="https://ocean-above.potafree.net">ocean-above.potafree.net</a></div>
-    <div><div class="lbl">代码（tag v1.0）</div><a href="https://github.com/chux0519/ocean-above">github.com/chux0519/ocean-above</a></div>
-    <div><div class="lbl">先读这个</div><code>DESIGN.md</code>（第一屏就是 TL;DR）+ 单页海报</div>
-    <div><div class="lbl">全部过程</div><code>prompt history/</code> · 62 个原始会话<br><code>docs/iterations/</code> · 每轮计划与验收</div>
-  </div>
-  <div class="pn">14</div>
-</section>
+</main>
+</div>
+
+<div class="progress" id="progress"></div>
+<div class="nav-hint" id="navHint">← → 或点击翻页 · F 全屏 · E 编辑</div>
+<div class="edit-hotzone" id="editHotzone"></div>
+<button class="edit-toggle" id="editToggle" title="编辑模式 (E)">编辑</button>
 
 <script>
-// ?s=N shows only slide N (used by render.sh for per-slide PNGs).
-const s = new URLSearchParams(location.search).get("s");
-if (s) {
-  document.body.classList.add("one");
-  const el = document.querySelectorAll(".slide")[Number(s) - 1];
-  if (el) el.classList.add("on");
+/* ===========================================
+   DECORATIONS: pixel-glitch columns and QR patches (seeded, so every load looks the same)
+   =========================================== */
+function seeded(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
+document.querySelectorAll('[data-glitch]').forEach((el, k) => {
+  const rnd = seeded(7 + k * 31), H = el.clientHeight || parseInt(el.style.height), W = el.clientWidth || parseInt(el.style.width);
+  const steps = el.dataset.glitch === 'cover' ? 13 : 9, h = Math.floor(H / steps);
+  for (let i = 0; i < steps; i++) {
+    const p = (i + 1) / steps, w = Math.max(24, Math.round(W * (0.25 + 0.75 * Math.pow(p, 1.4)) * (0.85 + 0.3 * rnd())));
+    const bar = document.createElement('i');
+    bar.style.cssText = `top:${i * h}px;height:${h - 6}px;width:${Math.min(W, w)}px;transition-delay:${(0.15 + i * 0.05).toFixed(2)}s`;
+    el.appendChild(bar);
+  }
+});
+document.querySelectorAll('[data-qr]').forEach(el => {
+  const rnd = seeded(+el.dataset.qr);
+  for (let i = 0; i < 64; i++) {
+    const r = Math.floor(i / 8), c = i % 8, corner = (r < 3 && c < 3) || (r < 3 && c > 4) || (r > 4 && c < 3);
+    const on = corner ? !(r % 4 === 1 && c % 5 === 1) && (r % 5 !== 1 || c % 5 !== 1) : rnd() > 0.5;
+    const s = document.createElement('span'); if (on) s.className = 'on'; el.appendChild(s);
+  }
+});
+
+/* ===========================================
+   SLIDE PRESENTATION CONTROLLER
+   Keys: → ↓ Space PageDown Enter = next step; ← ↑ PageUp = back; Home / End; F = fullscreen.
+   URL: #N opens slide N; ?static shows final states (for screenshots); ?s=N same as #N.
+   =========================================== */
+class SlidePresentation {
+  constructor() {
+    this.q = new URLSearchParams(location.search);
+    this.slides = [...document.querySelectorAll('.slide')];
+    this.stage = document.getElementById('deckStage');
+    this.isStatic = this.q.has('static') || matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (this.isStatic) document.body.classList.add('static');
+    this.current = -1; this.step = 0;
+    this.prepare();
+    this.setupStageScale();
+    this.setupKeyboardNav();
+    this.setupTouchNav();
+    this.setupWheelNav();
+    setTimeout(() => { document.getElementById('navHint').style.opacity = '0'; }, 5000);
+    const start = +(this.q.get('s') || location.hash.slice(1) || 1) - 1;
+    this.show(start, this.q.get('f') === 'all' ? 'end' : 0);
+  }
+  prepare() {
+    const n = this.slides.length;
+    this.steps = this.slides.map((s, i) => {
+      s.querySelectorAll('.pagenum').forEach(p => p.textContent = `${String(i + 1).padStart(2, '0')} / ${n}`);
+      s.querySelectorAll('.sec').forEach(p => p.textContent = s.dataset.section || '');
+      const frs = [...s.querySelectorAll('.f')]; let m = 0;
+      frs.forEach(el => { el._f = el.dataset.f ? +el.dataset.f : m + 1; m = Math.max(m, el._f); });
+      return { frs, max: m };
+    });
+  }
+  setupStageScale() {
+    const scale = () => {
+      const f = Math.min(innerWidth / 1920, innerHeight / 1080);
+      this.stage.style.transform = `translate(${(innerWidth - 1920 * f) / 2}px, ${(innerHeight - 1080 * f) / 2}px) scale(${f})`;
+    };
+    scale(); addEventListener('resize', scale);
+  }
+  editing(e) { return e && e.target && e.target.isContentEditable; }
+  setupKeyboardNav() {
+    addEventListener('keydown', e => {
+      if (this.editing(e)) return;
+      if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); this.next(); }
+      else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) { e.preventDefault(); this.prev(); }
+      else if (e.key === 'Home') this.show(0);
+      else if (e.key === 'End') this.show(this.slides.length - 1, 'end');
+      else if (e.key === 'f' || e.key === 'F') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    });
+    addEventListener('click', e => {
+      if (e.target.closest('a, button, .edit-hotzone') || document.body.classList.contains('editing')) return;
+      (e.clientX < innerWidth / 3 ? this.prev : this.next).call(this);
+    });
+  }
+  setupTouchNav() {
+    let x = null;
+    addEventListener('touchstart', e => { x = e.touches[0].clientX; }, { passive: true });
+    addEventListener('touchend', e => {
+      if (x === null) return; const dx = e.changedTouches[0].clientX - x; x = null;
+      if (Math.abs(dx) > 40) (dx < 0 ? this.next : this.prev).call(this);
+    });
+  }
+  setupWheelNav() {
+    let lock = 0;
+    addEventListener('wheel', e => {
+      const t = Date.now(); if (t - lock < 650 || Math.abs(e.deltaY) < 20) return; lock = t;
+      (e.deltaY > 0 ? this.next : this.prev).call(this);
+    }, { passive: true });
+  }
+  paint() { this.steps[this.current].frs.forEach(el => el.classList.toggle('shown', this.isStatic || el._f <= this.step)); }
+  countUp(slide) {
+    slide.querySelectorAll('[data-count]').forEach(el => {
+      const to = +el.dataset.count;
+      if (this.isStatic) { el.textContent = to.toLocaleString('en-US'); return; }
+      const t0 = performance.now() + 450, dur = 1100;
+      const tick = t => { const p = Math.max(0, Math.min(1, (t - t0) / dur)); el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))).toLocaleString('en-US'); if (p < 1) requestAnimationFrame(tick); };
+      el.textContent = '0'; requestAnimationFrame(tick);
+    });
+  }
+  show(i, step = 0) {
+    i = Math.max(0, Math.min(this.slides.length - 1, i));
+    if (i !== this.current) {
+      this.slides.forEach((s, j) => { s.classList.toggle('active', j === i); s.classList.toggle('visible', j === i); });
+      this.current = i; this.countUp(this.slides[i]);
+    }
+    this.step = step === 'end' ? this.steps[i].max : step; this.paint();
+    document.getElementById('progress').style.width = `${((i + 1) / this.slides.length) * 100}%`;
+    history.replaceState(null, '', `${location.search}#${i + 1}`);
+  }
+  next() { if (this.step < this.steps[this.current].max) { this.step++; this.paint(); } else this.show(this.current + 1); }
+  prev() { if (this.step > 0) { this.step--; this.paint(); } else if (this.current > 0) this.show(this.current - 1, 'end'); }
 }
+const deck = new SlidePresentation();
+
+/* ===========================================
+   INLINE EDITING
+   E or the top-left hot corner toggles edit mode; edits autosave to localStorage;
+   Ctrl/Cmd+S downloads the edited HTML.
+   =========================================== */
+const editor = {
+  isActive: false,
+  key: 'ocean-above-talk-v1:' + location.pathname,
+  targets() { return document.querySelectorAll('.slide h1, .slide h2, .slide h3, .slide h4, .slide p, .slide li, .slide td, .slide th, .slide .t, .slide .d, .slide .attr, .slide .kicker, .slide figcaption, .slide .step b, .slide .step span'); },
+  toggleEditMode() {
+    this.isActive = !this.isActive;
+    document.body.classList.toggle('editing', this.isActive);
+    document.getElementById('editToggle').classList.toggle('active', this.isActive);
+    this.targets().forEach(el => this.isActive ? el.setAttribute('contenteditable', 'true') : el.removeAttribute('contenteditable'));
+    if (!this.isActive) this.save();
+  },
+  save() { try { localStorage.setItem(this.key, deck.stage.innerHTML); } catch (_) {} },
+  download() {
+    this.targets().forEach(el => el.removeAttribute('contenteditable'));
+    const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    a.download = 'vibe-process-edited.html'; a.click();
+    if (this.isActive) this.targets().forEach(el => el.setAttribute('contenteditable', 'true'));
+  }
+};
+const editToggle = document.getElementById('editToggle'), hotzone = document.getElementById('editHotzone');
+let hideTimeout = null;
+editToggle.addEventListener('click', () => editor.toggleEditMode());
+hotzone.addEventListener('click', () => editor.toggleEditMode());
+hotzone.addEventListener('mouseenter', () => { clearTimeout(hideTimeout); editToggle.classList.add('show'); });
+hotzone.addEventListener('mouseleave', () => { hideTimeout = setTimeout(() => { if (!editor.isActive) editToggle.classList.remove('show'); }, 400); });
+editToggle.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
+editToggle.addEventListener('mouseleave', () => { hideTimeout = setTimeout(() => { if (!editor.isActive) editToggle.classList.remove('show'); }, 400); });
+document.addEventListener('keydown', e => {
+  if ((e.key === 'e' || e.key === 'E') && !e.target.isContentEditable) editor.toggleEditMode();
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); editor.save(); editor.download(); }
+});
+document.addEventListener('input', () => editor.save());
 </script>
 </body>
 </html>
