@@ -164,6 +164,12 @@ Running the backend on the host instead: start Phoenix (`docker compose --profil
 (`python -m evals`) honour the same variables. If the collector is down, spans are dropped; chat and booking are
 unaffected.
 
+## Issues and PRs
+
+References such as `#49` or `PR #53` in the docs point to the development repository, where the work was planned and
+reviewed; that repository is private. Its commit history is the same as this one, apart from the removed VPS address.
+The raw agent sessions in `prompt history/` show every issue, review and merge.
+
 ## Repository map
 
 | Path | What |

@@ -128,7 +128,9 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   releases of `ocean-above.potafree.net` to the production VPS (user, 2026-11-24): only merged `main` commits whose
   tests pass; build images off the VPS, ship, `up -d --no-build --pull never`, verify, and log commit + checks in
   docs/deploy.md.
-- Standing since 2026-11-23: push branches and `main` to the private repo `github.com/chux0519/ocean-above`.
+- Standing since 2026-11-23: push branches and `main` to `github.com/chux0519/ocean-above`. Since 2026-11-24 that repo is
+  **public** (user decision; history rewritten to drop the VPS origin IP). The earlier private repo with all issues and PRs
+  is `github.com/chux0519/ocean-above-dev` (archive; its history is unredacted, never make it public).
 - Always ask: force-push or history rewrites, making the repo public, opening PRs to other repos, any other deploy
   (other hosts/domains/services), deleting data, anything public or
   hard to undo.
