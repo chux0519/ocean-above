@@ -1,5 +1,7 @@
 # Ocean Above 订票助手 — 设计文档（草稿 v2，2026-11-23）
 
+> 英文交付版在仓库根目录 [DESIGN.md](../../DESIGN.md)；本文件是中文工作记录（全部决定的细节）。
+
 > 状态：v2 = v1 + 设计评审（Fable 5.2，2 P0 / 7 P1 / 9 P2）全部按推荐修改，用户已确认推荐方案。
 > 中文工作稿；最终交付版（英文）按 take-home 要求的 5 个标题组织。冲突时以 `Quotr Agent Dev Engineer take-home.md` 为准。
 
@@ -660,6 +662,17 @@ flowchart LR
 | API 测试 | httpx TestClient：完整流程、归属检查、限额 | 每次 |
 | LLM 评测 `backend/evals/` | 工具调用成功率（每用例 N 次，按工具统计，有阈值）；整段轨迹（工具序列 + 不变式：否定 / 疑问不请求下单、数字和城市都有出处、无服务给库内最近城市（选库内最近 ≠ 地理常识的城市：Abu Dhabi、Stuttgart、Austin）、歧义城市先问、查票走工具）；ReplyGuard 回退率 | 按需；单次估算 < $1 直接跑 |
 | UI | ego-browser 桌面 + 手机截图；Impeccable | 04 起每个 UI 改动 |
+
+### 10.1 多模型基准（#47）
+`backend/evals/bench.py` 按 `backend/evals/experiments/*.json` 的实验规格，在**同一组用例**上跑多个配置。配置 = `provider` + `model` + 方言 + 思考档位（同一模型在两个供应商算两个配置）；凭据只写环境变量名（`api_key_env` / `base_url_env`），值在启动时读取，绝不写入规格或报告。方言（`app/agent/model.py` 的 `DIALECTS`）决定思考字段怎么写：`deepseek`（生产默认，`thinking` + `reasoning_effort`）、`bailian`（`enable_thinking` + `reasoning_effort` 或 `thinking_budget`，二者不同时发）、`plain`（不发）；方言表达不了的档位标记为 unsupported，只报告不运行。
+
+运行按"第 i 轮所有用例 × 所有配置"交错，首个配置轮换，分散时段和限流影响。护栏：每个配置的真实 token 用量到 `--max-tokens`（默认 5M）、有价格的配置花费到 `--max-cost` 后不再开始新运行，剩余运行记为 skipped。
+
+价格来自版本化的 `backend/evals/pricing.json`（provider + model，含缓存命中 / 未命中、输出含推理）；价格未知（如 token plan）时成本为 unknown，不记 $0、不借用别家价格，只按 token 比较（输入 / 缓存输入 / 输出 / 推理，每次运行和每个成功任务）。
+
+判定只来自确定性检查和安全不变式（不出票、无虚假"已出票"、数字城市有出处、事件流、点击只出一张票），没有 LLM 评委；任何安全违规都判该配置 FAIL。报告：JSON + Markdown 对比矩阵（通过率及 Wilson 95% 区间、各工具准确率、多余调用、未请求的 `request_booking`、回退率、重试、预算停止、token、成本、轮次 p50/p95、首字延迟）、逐用例表、失败用例下钻，并注明小 N 差异不显著。
+
+2026-11-24 结果（N=3，45 用例）：三配置安全违规均为 0；通过率 DeepSeek 官方 96.3%、百炼同模型 98.5%、qwen3.8-flash 91.1%。同模型跨供应商在质量和 token 上无可见差异，百炼缓存命中较低、p95 延迟较长；Qwen 推理 token 约 2 倍、更慢。详见 `docs/iterations/12-bench/STATE.md`。
 
 ## 11. 已知限制与下一步（初稿）
 

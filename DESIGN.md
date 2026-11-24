@@ -1,55 +1,60 @@
 # Ocean Above — design doc
 
-The take-home design doc. Sections 1–5 answer the five required questions of
-`Quotr Agent Dev Engineer take-home.md`, §6 explains how the app was built and tested, and §7 is the optional
-"what would the real Ocean Above bot need".
+## TL;DR
 
-This file is meant to be read in one sitting. Details live in linked documents:
+Demo: https://ocean-above.potafree.net (Google or invite-code login). The five take-home questions in one line each:
+
+- **Architecture and data flow (§1):** Next.js chat → FastAPI → an LLM agent (Pydantic AI Slim runtime) with 4 tools →
+  deterministic `core/` on read-only `locations.db`; app.db (SQLite) stores users, chats, quotes and tickets.
+- **Tools (§2):** `find_city`, `quote_route`, `request_booking`, `list_my_tickets`. Inputs are names and ids, never
+  numbers. There is **no `book` tool**.
+- **Correct numbers (§3):** one canonical Decimal pricing function; cheapest route by graph search, transfers only at
+  hubs. Production equals an independent reference on all 490,700 served-city pairs. ReplyGuard blocks any number or
+  city in the LLM's text that no tool record contains.
+- **No booking without confirmation (§4):** a ticket exists only after the user clicks Confirm on a card that showed
+  every leg, transfer city, distance and price. The click carries a one-time nonce the LLM never sees. Rules B1–B7 are
+  model-tested; Stop never makes a card bookable.
+- **Limitations (§5):** one worker with in-process locks and SQLite; occasional unrequested confirmation cards;
+  translated city names escape ReplyGuard. Each has a next step.
+- **Key numbers:** 0 safety violations in every real-model run. Multi-model benchmark (N=3, 45 cases, §7.3):
+  DeepSeek flash passes 96.3% (official API) and 98.5% (Bailian); Qwen3.8-flash 91.1%, about 2× the reasoning tokens.
+  1,005 backend tests.
+
+Each section starts with an **In short** line; reading only those gives the whole picture.
+
+## Key numbers and where to check them
+
+| What | Value | Source |
+|---|---|---|
+| Backend tests | 1,005 (pytest + hypothesis, incl. model-based booking tests) | collected on `main` at `71a54b9` |
+| Frontend tests | 114 vitest | 11-followup acceptance |
+| Route cross-check | all 490,700 ordered served-city pairs identical to an independent reference (price, distance, cities) | 02-core acceptance |
+| Evals, scripted fake LLM (every run) | 45/45 cases | 12-bench STATE |
+| Evals, real model (deepseek-flash) | 96.3% of 135 runs (N=3 × 45 cases); earlier 31-case runs 28–31/31 | 12-bench `results/n3/bench.md`; 08–10 acceptance |
+| Safety violations, every real-model run (ticket without click, unsourced number or city, false "booked") | **0** (also 0 in all 405 benchmark runs) | 03–12 acceptance / STATE |
+| SQLite integrity under load | 0 double bookings, 0 mismatches, 0 BUSY / 5xx; bursts up to 300 simultaneous clicks | sqlite-concurrency.md §X.5 |
+
+Every real-model failure so far is a trajectory deviation that cannot book (§5.4).
+
+## Where the details live
 
 | Document | What it holds |
 |---|---|
-| [docs/design/design.md](docs/design/design.md) | Chinese working notes, the full record of every decision (§ numbers below refer to it as "notes §") |
-| [docs/design/adr-001-agent-runtime.md](docs/design/adr-001-agent-runtime.md) | ADR-001: why the agent runtime is Pydantic AI Slim, with measured evidence |
-| [docs/design/state_invariants.md](docs/design/state_invariants.md) | Numbered booking, quota, concurrency and Stop rules (B1–B7, Q1–Q3, U1–U2, S1, C1–C4, R1–R8) |
-| [docs/design/sqlite-concurrency.md](docs/design/sqlite-concurrency.md) | SQLite limits, benchmark, criteria for PostgreSQL |
+| [docs/design/design.md](docs/design/design.md) | Chinese working notes, the full decision record ("notes §" below) |
+| [docs/design/adr-001-agent-runtime.md](docs/design/adr-001-agent-runtime.md) | ADR-001: why the runtime is Pydantic AI Slim, with measurements |
+| [docs/design/state_invariants.md](docs/design/state_invariants.md) | numbered rules: booking B1–B7, quotes Q1–Q3, quota U, concurrency C, Stop R1–R8 |
+| [docs/design/sqlite-concurrency.md](docs/design/sqlite-concurrency.md) | SQLite limits, load benchmark, criteria for PostgreSQL |
 | [docs/api/contract.md](docs/api/contract.md) | HTTP + SSE + card contract (v1.7) |
-| [frontend/DESIGN.md](frontend/DESIGN.md) | UI design system (visual and interaction rules) |
-| `docs/iterations/<id>/acceptance.md` | What was accepted in each iteration, on which commit, with which numbers |
+| [frontend/DESIGN.md](frontend/DESIGN.md) | UI design system |
+| [docs/iterations/12-bench/](docs/iterations/12-bench/STATE.md) | multi-model benchmark method and results |
+| `docs/iterations/<id>/acceptance.md` | what was accepted per iteration, on which commit, with which numbers |
 
-Numbers in this document are measured values copied from those records; each one names its source.
-
-## 0. Summary
-
-- **Demo:** https://ocean-above.potafree.net (sign in with Google or with an invite code; reviewers get their code
-  privately). Local run: `docker compose up` (see [README.md](README.md)).
-- **What it is:** a chat web app. The user writes "Book me a flight from Guangzhou to Lima"; an LLM agent reads the
-  intent and calls tools; deterministic code computes the cheapest route on `locations.db`, its distance and
-  price; the app shows an itinerary card with every leg, transfer city, distance and price; the user books by
-  clicking **Confirm booking** on that card. Tickets and all past conversations are listed in the app and can be
-  asked about in natural language.
-- **Two rules carry the design:**
-  1. **The LLM never computes.** Routes, distances, prices, counts and the nearest served city come from code. The
-     LLM picks tools and phrases their results. Every number and every city name in its text is checked against
-     this turn's tool records before the text is streamed (ReplyGuard, §3.5).
-  2. **The LLM cannot book.** There is no `book` tool. A ticket is created only by the user's click on a
-     confirmation card that was shown in full, carrying a one-time nonce. Natural-language "yes, book it" makes
-     the card appear; it never books (§4).
-- **Key numbers:**
-
-  | What | Value | Source |
-  |---|---|---|
-  | Backend tests | 955 (pytest + hypothesis, incl. model-based booking tests) | 10-otel acceptance; 955 collected on `main` at `0756ebc` |
-  | Frontend tests | 114 vitest | 11-followup acceptance |
-  | Route cross-check | all 490,700 ordered pairs of served cities identical to an independent reference implementation (price, distance, city sequence) | 02-core acceptance |
-  | Evals, scripted fake LLM (every CI run) | 31/31 cases | 09–11 acceptance |
-  | Evals, real model (deepseek-flash, reasoning high) | 92/93 and 30/31 after the runtime migration; 31/31 after Stop; 30/31 and 28/31 with tracing on | 08, 09, 10 acceptance |
-  | Safety violations in every real-model run (booking without a click, a number or city with no source) | **0** | 03–10 acceptance |
-  | SQLite integrity under load (double bookings, ticket/quote mismatches, BUSY, 5xx) | 0 over the whole sweep, bursts up to 300 simultaneous clicks | sqlite-concurrency.md §X.5 |
-
-  The real-model failures are trajectory deviations that can never book: an extra confirmation card nobody asked for,
-  or a Chinese city name sent to a tool before the model retried in English (§5.4).
+Sections 1–5 follow the five required questions of `Quotr Agent Dev Engineer take-home.md`; §6 is how it was built and
+tested; §7 is the optional "what would the real bot need". Numbers are measured values copied from the records above.
 
 ## 1. Architecture and data flow
+
+*In short:* browser → FastAPI → agent loop (Pydantic AI Slim) → 4 tools → `airline/` → pure `core/` on `locations.db`; facts reach the user as cards rendered from records, text only after ReplyGuard.
 
 ### 1.1 Components
 
@@ -208,6 +213,8 @@ and debugging read.
 
 ## 2. The agent's tools, and why
 
+*In short:* four coarse tools that take names and ids and return records with display-ready values; no tool can book, and the loop adds budgets, retries and ReplyGuard.
+
 ### 2.1 The four tools
 
 | Tool | Input | Output (a record) | Why it is shaped this way |
@@ -272,6 +279,8 @@ Measured on the real model: 50/50 turns passed unchanged and 0 fallbacks on the 
 1.5% fallback in the 03-slice evals (27 cases × 3). Known gaps are in §5.
 
 ## 3. Routes, distances, prices, and how the numbers stay correct
+
+*In short:* one canonical high-precision pricing function, cheapest route with transfers only at hubs, checked against an independent implementation on every served pair; rounding only for display.
 
 ### 3.1 One source of truth
 
@@ -354,6 +363,8 @@ Expected numbers in tests come from the reference implementation, never from an 
 
 ## 4. Nothing is booked without the user's confirmation
 
+*In short:* only a user click with a one-time nonce on a fully shown card books; the LLM can only make the card appear; B1–B7 are enforced in one transaction and model-tested.
+
 ### 4.1 The mechanism
 
 1. A quote reaches status `presented` only when its full card — every leg, every transfer city, total distance and
@@ -412,6 +423,8 @@ turn. Stop also never cancels or changes an existing ticket.
 
 ## 5. Known limitations, failure modes, and next steps
 
+*In short:* single worker + SQLite + in-process locks, a few ReplyGuard blind spots, and model trajectory noise that can show an extra card but never book; each has a planned next step.
+
 Each item says what happens today and what we would do next.
 
 ### 5.1 Scale and deployment
@@ -444,7 +457,7 @@ Each item says what happens today and what we would do next.
   names. Next: an alias table per language, generated from the database names and reviewed.
 - **False positives.** A number the user mentioned in an earlier message, or a legitimate number with an unusual
   format, can trigger the template. The fallback is safe (records only) but less natural; the rate is measured in the
-  evals (1.5% in 03-slice; 0 in the first 31-scenario run).
+  evals (1.5% in 03-slice; 0.3% for DeepSeek flash in the 12-bench run).
 
 ### 5.4 Model trajectory
 
@@ -456,9 +469,14 @@ All real-model failures so far are of two kinds, neither of which can book (08�
   gets `unknown_city`, and retries in English — one extra step.
 - **A one-message booking** ("book me X to Y") shows both the itinerary card and the confirmation card for the same
   quote (07-ui backlog).
+- **Benchmark findings** (12-bench, N=3): after a tool failure the model asks the user instead of retrying; a duplicate
+  `request_booking` shows two identical cards. One app gap: when a Chinese reply names the other city of an ambiguous
+  query (user wrote 利马, model wrote Lima), ReplyGuard finds no record for it and the fallback template is English
+  only.
 
-Next: prompt work and the multi-model benchmark (#47, §7.3) to pick the model and prompt with the fewest spurious
-calls; an alias table for city names; show only the confirmation card in a one-message booking.
+Next: prompt work measured with the multi-model benchmark (§7.3); add the resolved other city to the ambiguous
+result and localise the fallback template; an alias table for city names; show only the confirmation card in a
+one-message booking.
 
 ### 5.5 Product scope (not required by the take-home)
 
@@ -468,6 +486,8 @@ does not invent it. One ticket is one passenger with no date. The `airline/` int
 per-user daily message limit and a site-wide daily token budget.
 
 ## 6. How it was built and tested
+
+*In short:* plan → one worker per task → PR → independent review → acceptance on the exact commit; tests from unit and property tests to model-based tests, replayed agent runs and real-model evals.
 
 ### 6.1 Process (pfstack)
 
@@ -493,7 +513,7 @@ tracing → 11 review follow-ups → 12 benchmark → 13 delivery. The raw agent
 | Agent replay | the real loop, tools, ReplyGuard, templates, SSE order, budgets, Stop races — against a scripted fake LLM (Pydantic AI `FunctionModel`) | every run |
 | API | full HTTP flows, ownership (404 for other users' objects), limits, refunds, login | every run |
 | Frontend | vitest: cards, Stop, stale responses after switching conversations, retry paths | every run |
-| Evals, fake | `python -m evals --mode fake`: 31 multi-turn cases through the whole stack, scripted model | every run |
+| Evals, fake | `python -m evals --mode fake`: 45 multi-turn cases through the whole stack, scripted model | every run |
 | Evals, real model | same cases against the configured model, N runs, report with pass rate, tool accuracy, fallback rate, cost | on demand; model, date, pass rate and cost recorded in the acceptance notes |
 | UI | ego-browser screenshots at desktop and phone widths, light and dark; Impeccable critique / audit | every UI change |
 | Load | `python -m bench` (app.db concurrency, no LLM cost) | on demand |
@@ -511,8 +531,10 @@ database's nearest served city — are hard failures that no other score can off
 | 08-runtime | 93 / 31 | 92/93, 30/31 | 0 | about $0.09 total | 08 acceptance |
 | 09-stop | 31 × 2 | 31/31, 31/31 | 0 | $0.0219 / $0.0223 | 09 acceptance |
 | 10-otel (tracing on) | 31 × 2 | 30/31, 28/31 | 0 | $0.0223 / $0.0228 | 10 acceptance |
+| 12-bench (45 cases) | 45 × 3 | 130/135 (96.3%) | 0 | $0.1089 | 12-bench `results/n3/bench.md` |
 
-All with deepseek-flash, reasoning effort high. Small N: differences of one or two cases are within run-to-run noise.
+All with deepseek-flash, reasoning effort high (other models: §7.3). Small N: differences of one or two cases are
+within run-to-run noise.
 
 ### 6.4 Tracing
 
@@ -526,6 +548,8 @@ enforces it, and a scan of the stored Phoenix data found 0 such values (10-otel 
 spans are dropped and chat and booking are unaffected. Production runs with tracing off.
 
 ## 7. If this were the real Ocean Above bot
+
+*In short:* keep the shape (LLM parses, code computes, the user's click books); replace the static network and price formula with real schedules, inventory, fares, payment and PNRs; move to PostgreSQL and shared locks when one process is not enough.
 
 ### 7.1 What we already chose, and why
 
@@ -578,7 +602,25 @@ A model-neutral benchmark (#47) compares models and providers on the same multi-
 violations (must be 0), trajectory pass rate, tool accuracy, spurious calls such as an unrequested `request_booking`,
 fallback rate, tokens, cost per successful task and latency. An unknown price is reported as unknown, never as $0.
 
-<!-- BENCH -->
+Result (2026-11-24, N=3 runs × 45 cases = 135 runs per configuration, reasoning effort high, interleaved order;
+source: [results/n3/bench.md](docs/iterations/12-bench/results/n3/bench.md) and
+[12-bench STATE](docs/iterations/12-bench/STATE.md)):
+
+| Metric | DeepSeek flash, official API | same model on Bailian | Qwen3.8-flash on Bailian |
+|---|---|---|---|
+| Strict safety violations | **0** | **0** | **0** |
+| Trajectory pass | 130/135 (96.3%) | 133/135 (98.5%) | 123/135 (91.1%) |
+| 95% interval (Wilson) | 92–98% | 95–100% | 85–95% |
+| Tokens per successful task | 13,788 | 13,475 | 15,395 |
+| Cost per successful task | $0.0008 | unknown (token plan) | unknown (token plan) |
+| Chat turn p50 / p95 | 2.19 / 3.40 s | 2.17 / 4.23 s | 3.08 / 7.85 s |
+
+**Small sample.** With N=3, compare the intervals, not the point values; the differences are indications, not
+significant results.
+
+Reading: the same model on two providers is indistinguishable in quality and tokens; Bailian has a lower cache-hit
+share and a longer p95. Qwen3.8-flash passes fewer runs, uses about 2× the reasoning tokens and is slower. Production
+keeps DeepSeek flash on the official API. Failures are analysed in the STATE file; none was a safety violation.
 
 ### 7.4 Architecture changes
 

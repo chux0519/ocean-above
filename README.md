@@ -1,13 +1,14 @@
 # Ocean Above
 
-Natural-language flight booking for the airline Ocean Above (take-home: `Quotr Agent Dev Engineer take-home.md`).
-Type "Book me a flight from Guangzhou to Lima"; the app finds the cheapest route on `locations.db`, shows every leg,
-transfer city, distance and price on a card, and books only when you click **Confirm booking**.
+> **TL;DR**
+> - **What:** a chat app that books Ocean Above flights from natural language; code (not the LLM) computes routes and prices, and only your click books.
+> - **Demo:** https://ocean-above.potafree.net — sign in with Google or an invite code (reviewers get theirs privately).
+> - **Run locally:** `cp .env.example .env` (add an LLM key), `mkdir -p locations && cp locations.db locations/`, `docker compose up -d --build` → http://localhost:3000 ([details](#run-locally)).
+> - **Design doc:** [DESIGN.md](DESIGN.md) (its TL;DR fits on one screen). Raw agent sessions: [`prompt history/`](prompt%20history/).
 
-- **Design doc:** [DESIGN.md](DESIGN.md) — architecture, tools, how the numbers stay correct, the booking gate,
-  limitations, and what a real Ocean Above bot would need.
-- **Prompt history:** [`prompt history/`](prompt%20history/) — the raw agent sessions (secrets removed, see its
-  `REDACTIONS.md`).
+Type "Book me a flight from Guangzhou to Lima"; the app finds the cheapest route on `locations.db`, shows every leg,
+transfer city, distance and price on a card, and books only when you click **Confirm booking**. The take-home brief is
+`Quotr Agent Dev Engineer take-home.md`.
 
 ## Try the demo
 
@@ -79,7 +80,7 @@ bash tool/test_diff.sh                  # only new failures count (HYPOTHESIS_PR
 python3 tool/review_lint.py             # review rules
 
 # LLM evals (from backend/)
-uv run python -m evals --mode fake                    # 31 multi-turn cases against a scripted model; free, deterministic
+uv run python -m evals --mode fake                    # 45 multi-turn cases against a scripted model; free, deterministic
 uv run python -m evals --mode real --estimate         # cost estimate for the real model
 uv run python -m evals --mode real --n 1 --out /tmp/evals   # real model from .env; refuses above --max-cost (default $1)
 
@@ -87,7 +88,26 @@ uv run python -m evals --mode real --n 1 --out /tmp/evals   # real model from .e
 nice -n 10 uv run python -m bench                     # --quick for a smoke run
 ```
 
-<!-- BENCH: multi-model benchmark command (#47) goes here once merged -->
+### Multi-model benchmark (optional, costs money)
+
+Compare models and providers on the same eval cases. A spec in `backend/evals/experiments/` lists configurations
+(provider, model, dialect, reasoning effort; credentials as environment variable names only). Prices come from
+`backend/evals/pricing.json`; a model without a known price (e.g. a token plan) is compared by tokens and its cost is
+reported as `unknown`.
+
+```bash
+cd backend
+PYTHONPATH=. uv run python -m evals.bench --spec 12-bench.json --fake --n 1          # harness check, no network
+OCEAN_ENV_FILE=/path/to/.env PYTHONPATH=. uv run python -m evals.bench --spec 12-bench.json --estimate
+OCEAN_ENV_FILE=/path/to/.env PYTHONPATH=. uv run python -m evals.bench --spec 12-bench.json --smoke   # 3 cases, n=1
+OCEAN_ENV_FILE=/path/to/.env PYTHONPATH=. uv run python -m evals.bench --spec 12-bench.json --n 3 \
+    --max-cost 0.30 --max-tokens 5000000 --out ../docs/iterations/12-bench/results/n3
+```
+
+Output: `bench.md` (comparison matrix, per-case table, failed-case drill-down), `bench.json` (every run) and one
+full eval report per configuration. Pass/fail comes from the deterministic checks and the safety invariants only;
+with small N, compare the confidence intervals, not the point values. Production is unaffected: it keeps
+`deepseek-flash` with the DeepSeek dialect (`LLM_DIALECT` unset).
 
 What the tests cover, how the route numbers are cross-checked against an independent reference implementation on
 all 490,700 served-city pairs, and the real-model results so far: [DESIGN.md §3.5 and §6](DESIGN.md#6-how-it-was-built-and-tested).
