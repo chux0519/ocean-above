@@ -153,10 +153,12 @@ async def call_api(prompt: str, options: dict[str, Any], context: dict[str, Any]
             spent["runs"] += 1
     out: dict[str, Any] = {
         "output": transcript(case, result) + SEPARATOR + json.dumps(verdict(case, result, cost), ensure_ascii=False),
+        # no "cached" here: Promptfoo reads it as its own response cache and labels the run "(cached)";
+        # the provider's prompt-cache hits go in the metadata
         "tokenUsage": {"total": result.tokens, "prompt": result.usage["input"], "completion": result.usage["output"],
-                       "cached": result.usage["cached"], "numRequests": result.llm_calls},
+                       "numRequests": result.llm_calls},
         "metadata": {"config": conf.id, "provider": conf.provider, "model": conf.model, "mode": mode,
-                     "reasoning_tokens": result.usage["reasoning"]},
+                     "cached_input_tokens": result.usage["cached"], "reasoning_tokens": result.usage["reasoning"]},
     }
     if cost is not None:
         out["cost"] = cost
