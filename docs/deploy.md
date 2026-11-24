@@ -55,6 +55,14 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   messages), then start the old image.
 
 ## Deploy log
+- 2026-11-24 `00c072d`: talk slides at `/talk/` (#3, #4): Caddy serves `docs/talk` read-only from the `proxy` service
+  (`X-Robots-Tag: noindex, nofollow`; `tools/`, `png/`, `*.py`, `*.sh`, `*.md` → 404). `release_vps.sh` failed at the image
+  build on the homelab (Docker Hub `docker/dockerfile:1` token fetch timed out over IPv6, twice); api and web had no change
+  since `3d9fc29`, so only the script's later steps ran: git bundle → app.db + WAL backup to `/tmp/*.pre-00c072d` →
+  `up -d --no-build --pull never` (proxy recreated; api, web kept running) → health 200 after 2×2 s. Public checks:
+  `/talk` 308, `/talk/` 200 with noindex, `bench.html` / `trace.html` / data 200, `notes.md` and `tools/` 404,
+  `/api/health` 200; ego-browser: the embedded bench loads all 405 cells. Open item: the homelab's Docker Hub access
+  must work again before the next release that changes api or web.
 - 2026-11-24 `3d9fc29` (tag `v1.0`): repository made public as `github.com/chux0519/ocean-above` with history rewritten
   (the VPS origin IP replaced in old prompt-history blobs; full-history secret scan clean). The private repo with
   issues and PRs is now `ocean-above-dev`. Build host and VPS checkouts were reset to the rewritten `main` (no
