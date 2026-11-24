@@ -35,9 +35,13 @@ Design context: `docs/design/design.md` §6.
 
 ## U. Usage limits
 - **U1 Daily cap.** For every user and UTC day, messages let through ≤ `DAILY_MESSAGES_PER_USER`; counting and the
-  reservation happen in one write transaction; a refused message stores nothing. (Model test:
-  `test_reservations_match_a_reference_count`.) Known: the site token budget is checked at message start, so turns
-  already running may overshoot it by their own cost; a `conversation_busy` message has already used its slot.
+  reservation happen in one write transaction; a refused message stores nothing. The cap counts **stored user
+  messages** (#55): every refusal that stores nothing and starts no LLM or tool work — `conversation_busy` (lock
+  timeout or the per-user turn cap), `server_busy`, Stop while queued, the message failing to store, bad text — gives
+  back exactly its own reservation, at most once; from the moment it refunds, a Stop is too late (`finishing`). So
+  after any run, `messages_today` = the user's stored user messages of the day. (Model test:
+  `test_reservations_match_a_reference_count`; HTTP: `tests/test_busy_quota.py`.) Known: the site token budget is
+  checked at message start, so turns already running may overshoot it by their own cost.
 - **U2 One account per invite code.** An invite code maps to exactly one account, independent of the order of
   `INVITE_CODES`; the name is a display name only.
 

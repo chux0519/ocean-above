@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { cn } from "@/lib/utils";
 import { LimitNotice, type Limited } from "@/components/limit-notice";
-import { ArrowDownIcon, NewChatIcon, SendUpIcon, StopIcon } from "@/components/icons";
+import { ArrowDownIcon, NewChatIcon, RetryIcon, SendUpIcon, StopIcon } from "@/components/icons";
 import { StoppedMarker } from "@/components/message-list";
 
 /** Errors sent before user_message: nothing was stored and the slot is refunded, so the input keeps its text
@@ -31,9 +31,14 @@ export const SETTLE_POLL_MS = 1000;
 export const SETTLE_MAX_MS = 35000;
 const SETTLED = new Set(["cancelled", "completed", "failed"]);
 
-/** The reply being streamed: its conversation, run id (from the response headers), reader and Stop state. */
+/** Stop pressed but no cancel acknowledgement and no terminal event arrived (e.g. the response headers with the run id
+ * were late): the server may still finish the reply (a closed stream does not cancel a run, contract v1.6). */
+export const STOP_UNKNOWN = "Stop may not have reached the server — the reply may still finish. Reload to see it.";
+
+/** The reply being streamed: its conversation, run id (from the response headers), reader and Stop state.
+ * `acked`: the cancel endpoint answered for this run, so the server knows about the Stop. */
 type Live = { conv: string | null; runId: string | null; abort: AbortController; stop: boolean; cancelSent: boolean;
-  grace: ReturnType<typeof setTimeout> | null };
+  acked: boolean; grace: ReturnType<typeof setTimeout> | null };
 
 /** Stop pressed while a new chat was still being created: the message is not sent. */
 class StoppedBeforeSend extends Error {}
@@ -89,10 +94,14 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
   const [retry, setRetry] = useState<(() => void) | null>(null);
   const [stopping, setStopping] = useState(false);
   const [notSent, setNotSent] = useState(false); // stopped before the server stored the message
+  const [stopUnknown, setStopUnknown] = useState(false); // Stop without an acknowledgement: outcome unknown (#55)
   const [announce, setAnnounce] = useState(""); // screen-reader message after a Stop (review P2-5)
   const live = useRef<Live | null>(null);
   const action = useRef<HTMLButtonElement>(null); // the Send / Stop button
-  // Bumped whenever the view leaves the conversation of a running stream: that stream no longer updates the view.
+  // The view generation (#55): bumped whenever the view moves to another conversation (select, new chat, the first
+  // load). Every async write of conversation state — a load, a stream, the reload after it, a booking refresh —
+  // captures it when it starts and applies only while it is unchanged, so a late response never replaces the chat on
+  // screen, whatever order the responses arrive in.
   const view = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
   const streaming = state.draft !== null || sending;
@@ -103,32 +112,48 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
     view.current += 1;
     live.current?.abort.abort();
     live.current = null;
-    setSending(false); setStopping(false); setNotSent(false); setAnnounce("");
+    setSending(false); setStopping(false); setNotSent(false); setStopUnknown(false); setAnnounce("");
   }, []);
 
-  const load = useCallback(async (id: string, follow = false) => {
+  /** Show conversation `id`: a new view generation; the previous chat's messages leave the screen at once. */
+  const enter = useCallback((id: string | null) => {
+    detach();
+    setActiveId(id); setState({ messages: [], draft: null }); setError(null); setRetry(null);
+    return view.current;
+  }, [detach]);
+
+  /** Load conversation `id` into the view of generation `gen`. False (nothing changed) when the view has moved on
+   * since `gen` was taken. Throws the request's error only while `gen` is still current. */
+  const load = useCallback(async (id: string, gen: number, follow = false) => {
+    let c;
+    try { c = await api.conversation(id); } catch (e) { if (view.current === gen) throw e; return false; }
+    if (view.current !== gen) return false;
     if (follow) stick.current = true;
-    const c = await api.conversation(id);
     setState({ messages: c.messages, draft: null });
+    return true;
   }, []);
 
   const refreshList = useCallback(async () => { setList(await api.conversations()); }, []);
 
   const init = useCallback(async () => {
     setListState("loading"); setError(null); setRetry(null);
+    // a chat the user opens or starts meanwhile (New chat, a first message) wins over the first conversation
+    let mine = view.current;
     try {
       const items = await api.conversations();
-      setList(items); setListState("ready");
-      if (items[0]) {
-        setActiveId(items[0].id); setLoadingConv(true);
-        try { await load(items[0].id, true); } finally { setLoadingConv(false); }
+      // keep a chat created while the list was loading (New chat): the list may predate it
+      setList((prev) => [...prev.filter((p) => !items.some((i) => i.id === p.id)), ...items]); setListState("ready");
+      if (items[0] && view.current === mine && !live.current) {
+        const gen = mine = enter(items[0].id); setLoadingConv(true);
+        try { await load(items[0].id, gen, true); } finally { if (view.current === gen) setLoadingConv(false); }
       }
     } catch (e) {
+      if (view.current !== mine) return;
       setListState("error");
       setError(e instanceof Error ? e.message : "Could not load your conversations");
       setRetry(() => init);
     }
-  }, [load]);
+  }, [load, enter]);
 
   useEffect(() => { init(); }, [init]);
 
@@ -150,30 +175,41 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
   useEffect(() => { if (stick.current) bottom.current?.scrollIntoView?.({ block: "end" }); }, [state]);
 
   async function select(id: string) {
-    detach();
-    closeNav(); setActiveId(id); setError(null); setRetry(null); setLoadingConv(true);
-    try { await load(id, true); } catch (e) {
-      setState({ messages: [], draft: null });
+    const gen = enter(id);
+    closeNav(); setLoadingConv(true);
+    try { await load(id, gen, true); } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load this conversation");
       setRetry(() => () => select(id));
-    } finally { setLoadingConv(false); }
+    } finally { if (view.current === gen) setLoadingConv(false); }
   }
   async function newChat() {
-    detach();
+    const gen = enter(null); // leave the chat on screen (or one still loading) now: nothing selected, empty view
+    setLoadingConv(false);
     try {
       const c = await api.createConversation();
-      setList((l) => [c, ...l]); setActiveId(c.id); setState({ messages: [], draft: null }); closeNav(); setError(null); setRetry(null);
-    } catch (e) { setError(e instanceof Error ? e.message : "Could not start a new chat"); setRetry(() => newChat); }
+      setList((l) => [c, ...l]);
+      if (view.current !== gen) return; // the user opened another chat meanwhile: stay there
+      enter(c.id); closeNav();
+    } catch (e) {
+      if (view.current !== gen) return;
+      setError(e instanceof Error ? e.message : "Could not start a new chat"); setRetry(() => newChat);
+    }
+  }
+  /** After a booking click: the stored conversation, unless the view moved on or a new reply is streaming (its own
+   * reload follows). */
+  function refreshAfterBooking() {
+    if (!activeId || live.current) return;
+    load(activeId, view.current).catch(() => {});
   }
 
   /** Send a message. `fromInput`: the text came from the input box (cleared once the server stores it). */
   async function submit(t: string, fromInput = false) {
     t = t.trim();
     if (!t || streaming) return;
-    setError(null); setRetry(null); setLimited(null); setNotSent(false); setAnnounce(""); setSending(true); toBottom();
+    setError(null); setRetry(null); setLimited(null); setNotSent(false); setStopUnknown(false); setAnnounce(""); setSending(true); toBottom();
     const mine = view.current;
     const here = () => view.current === mine; // still the conversation this stream belongs to
-    const run: Live = { conv: activeId, runId: null, abort: new AbortController(), stop: false, cancelSent: false, grace: null };
+    const run: Live = { conv: activeId, runId: null, abort: new AbortController(), stop: false, cancelSent: false, acked: false, grace: null };
     live.current = run;
     let id = activeId;
     let stoppedEarly = false;    // `cancelled` before user_message: nothing stored, keep the input
@@ -214,13 +250,16 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
     // Stopped, but the reader was closed before the run ended (a slow tool or database step): wait until the server
     // says the run is over, so the reload shows the stopped reply and the conversation lock is free (review P2-3).
     if (run.stop && !ended && !stoppedEarly && here()) await settle(run, here);
+    // Stop without any acknowledgement (no run id in time, or the cancel request failed) and no terminal event: the
+    // server may never have heard of the Stop, so say the outcome is unknown, never "Stopped" (#55).
+    const unknown = run.stop && !ended && !stoppedEarly && !run.acked;
     if (run.grace) clearTimeout(run.grace);
     if (live.current === run) live.current = null;
     if (!here()) return; // another conversation is on screen; its own state is untouched
     const hadFocus = typeof document !== "undefined" && document.activeElement === action.current;
     setSending(false); setStopping(false);
     if (run.stop && hadFocus) box.current?.focus(); // keyboard users continue in the input (review P2-5)
-    if (run.stop) setAnnounce(stoppedEarly ? "Stopped. Your message was not sent." : "Reply stopped.");
+    if (run.stop) setAnnounce(unknown ? STOP_UNKNOWN : stoppedEarly ? "Stopped. Your message was not sent." : "Reply stopped.");
     if (stoppedEarly) {
       setState((s) => ({ ...s, draft: null }));
       setNotSent(true);
@@ -250,6 +289,7 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
         .catch(() => { reloaded = false; if (here()) setState((s) => ({ ...s, draft: null })); });
     }
     if (!here()) return;
+    if (unknown) setStopUnknown(true);
     if (run.stop) { refreshList().catch(() => {}); onUsage?.(); return; } // a stopped reply is not an error
     if (lost) {
       setError(reloaded ? "Connection lost. Showing the saved conversation." : "Connection lost and the conversation could not be reloaded.");
@@ -263,7 +303,7 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
   async function requestCancel(run: Live) {
     if (!run.conv || !run.runId || run.cancelSent) return; // no run id yet: sent when the headers arrive
     run.cancelSent = true;
-    try { await api.cancelRun(run.conv, run.runId); } catch { /* unknown or ended run: the reload shows the truth */ }
+    try { await api.cancelRun(run.conv, run.runId); run.acked = true; } catch { /* unknown or ended run: the reload shows the truth */ }
   }
 
   /** Poll the cancel endpoint (idempotent) until the run has ended, the run is unknown, or SETTLE_MAX_MS passed. */
@@ -272,7 +312,9 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
     const until = Date.now() + SETTLE_MAX_MS;
     while (here() && Date.now() < until) {
       try {
-        if (SETTLED.has((await api.cancelRun(run.conv, run.runId)).status)) return;
+        const { status } = await api.cancelRun(run.conv, run.runId);
+        run.acked = true;
+        if (SETTLED.has(status)) return;
       } catch { return; } // 404 (forgotten) or offline: the reload shows what is stored
       await new Promise((r) => setTimeout(r, SETTLE_POLL_MS));
     }
@@ -315,7 +357,7 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
             </div>
           </EmptyState>
         )}
-        <MessageList messages={state.messages} draft={state.draft} onBooked={() => activeId && load(activeId).catch(() => {})} onAsk={(t) => void submit(t)} />
+        <MessageList messages={state.messages} draft={state.draft} onBooked={refreshAfterBooking} onAsk={(t) => void submit(t)} />
         {error && <div className="mx-auto mt-4 max-w-3xl"><ErrorState message={error} onRetry={retry ?? undefined} /></div>}
         <div ref={bottom} />
       </div>
@@ -341,6 +383,12 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
         </div>
         <p className="sr-only" aria-live="polite" data-testid="stop-announce">{stopping ? "Stopping the reply…" : announce}</p>
         {notSent && <div className="mx-auto mt-2 flex max-w-3xl justify-center" role="status"><StoppedMarker label="Stopped — your message was not sent" /></div>}
+        {stopUnknown && (
+          <div className="mx-auto mt-2 flex max-w-3xl flex-wrap items-center justify-center gap-x-2 text-sm text-ink-2" role="status" data-testid="stop-unknown">
+            <span className="text-center">{STOP_UNKNOWN}</span>
+            {activeId && <Button type="button" variant="ghost" className="min-h-11" onClick={() => { const id = activeId; setStopUnknown(false); void select(id); }}><RetryIcon size={16} />Reload</Button>}
+          </div>
+        )}
         <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-ink-3">Nothing is booked until you press <span className="font-medium text-ink-2">Confirm booking</span> on a quote.</p>
       </form>
     </section>
