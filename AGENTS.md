@@ -60,7 +60,8 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 - Web only, no dedicated devices. Tier A screenshots come from a local browser against the dev server.
 
 ## Design
-- [DESIGN.md](DESIGN.md) is the single source of truth; only the coordinator edits it.
+- [frontend/DESIGN.md](frontend/DESIGN.md) (the UI design system) is the single source of truth for visual and
+  interaction rules; only the coordinator edits it. The root [DESIGN.md](DESIGN.md) is the take-home design doc.
 - UI reviews use **Impeccable** (https://github.com/pbakaus/impeccable): `/impeccable critique <target>` (UX,
   scored) and `/impeccable audit <target>` (a11y, performance, theming, responsive; P0–P3) on narrow targets,
   plus `npx impeccable detect` on `frontend/` sources and on the running dev-server URL (rendered-only rules
@@ -71,7 +72,7 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 - Mobile first-class: every screen works at phone width (≥ 360 px), touch targets ≥ 44×44, no horizontal
   scroll; each UI acceptance includes mobile screenshots.
 - Every screenshot gets a review; obvious defects are fixed in the same round; advice that conflicts with
-  DESIGN.md goes to the user as a "design conflicts" table.
+  frontend/DESIGN.md goes to the user as a "design conflicts" table.
 
 ## Rules, invariants, numbers
 - New pitfall → a rule in [docs/review_rules.md](docs/review_rules.md), and in `tool/review_lint.py` if it can
