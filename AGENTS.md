@@ -105,8 +105,14 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
   model-based test.
 
 ## Dependencies and prior art
-- Minimal dependencies; no big frameworks (UI component libraries such as shadcn/ui + Tailwind are allowed). The LLM agent loop (messages, tool schemas, tool dispatch,
-  confirmation gate) is our own code over a plain OpenAI-compatible HTTP client — no LangChain, no agent SDKs.
+- Minimal dependencies; no big frameworks (UI component libraries such as shadcn/ui + Tailwind are allowed).
+- Agent runtime (user, 2026-11-24, issue #49): a mainstream agent SDK may run the generic loop (model streaming, tool
+  dispatch, run lifecycle, cancellation, tracing spans). Why: user Stop must cancel the backend run and the upstream
+  model stream, and tracing should feed a standard system (OpenTelemetry → Phoenix) instead of hand-written code.
+  Which SDK is decided by evidence in `docs/design/adr-001-agent-runtime.md`. Always our own code, never the SDK's:
+  booking (user click + nonce, B1–B7, no `book` tool), ReplyGuard before any text is streamed, app.db history and
+  compaction, the SSE contract, per-turn budgets and concurrency limits. No remote trace export by default; no
+  LangChain. See [docs/roadmap.md](docs/roadmap.md).
 - For well-defined deterministic algorithms (shortest path etc.), prefer a stable, fast, well-known library
   if it fits (e.g. `networkx` / `scipy.sparse.csgraph`) over a hand-rolled one; it must still be covered by
   our reference tests. State the choice and why in the plan.

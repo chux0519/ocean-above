@@ -6,7 +6,7 @@ Multi-model benchmarks + optional Promptfoo. #41 may proceed independently. For 
 design docs, preserve B1–B7, run tests and evals, update documentation and prompt history, and do not start dependent
 work before prerequisites are accepted."
 
-本迭代只做 #49 和 #41。#48 → 09-stop，#35 → 10-otel，#47 → 11-bench，各自在前一项验收后再写计划开工。
+本迭代只做 #49 和 #41（顺序和决定原因见 docs/roadmap.md）。#48 → 09-stop，#35 → 10-otel，#47 → 11-bench，各自在前一项验收后再写计划开工。
 
 ## Take-home check（2026-11-24）
 | 要求 | 本迭代影响 | 结论 |
@@ -17,9 +17,7 @@ work before prerequisites are accepted."
 | Prompt history 原始会话 | POC 失败、放弃的方案都留在会话里，照常导出 | 一致 |
 | 没有对框架的限制 | — | 无冲突 |
 
-**与 AGENTS.md 的冲突：** AGENTS.md 写了"不用 agent SDK，自己写 agent loop"。#49 由用户提出，明确说手写 loop 不是永久约束，
-SDK 能减少维护代码就优先用。用户的新决定优先：若 ADR 选定 SDK，协调者同步改 AGENTS.md "Dependencies" 一节
-（写明 SDK 只负责通用运行时，出票、校验、存储仍是我们的代码）。
+**与 AGENTS.md 的冲突（已解决）：** 用户 2026-11-24 确认改 AGENTS.md：通用 agent 运行时可用 SDK（为了流式输出的取消和体系化的 tracing），出票、ReplyGuard、存储、预算仍是我们的代码。
 
 ## #49 阶段 1：POC + ADR（现在开始）
 两个独立 POC 并行，各自是 `spikes/<name>/` 下的独立 uv 项目（自己的 pyproject + lock，不改 `backend/` 的依赖），
