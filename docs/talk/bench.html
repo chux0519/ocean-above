@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Bench 明细：405 次运行</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..500&family=Hanken+Grotesk:wght@400..700&family=DM+Mono:wght@400..500&family=Noto+Serif+SC:wght@400;600&display=swap">
+<style>
+/* === THEME: Cobalt Grid (same tokens as the deck) === */
+:root {
+  --paper: #F0EBDE; --ink: #1F2BE0; --ink-soft: #5560E5;
+  --grid: rgba(31, 43, 224, 0.10); --ink-faint: rgba(31, 43, 224, 0.18);
+  --display: "Newsreader", "Noto Serif SC", Georgia, serif;
+  --body: "Hanken Grotesk", "Noto Serif SC", sans-serif;
+  --mono: "DM Mono", ui-monospace, monospace;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: var(--paper); color: var(--ink); font-family: var(--body); }
+body { min-height: 100vh; padding: 28px 36px; background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px); background-size: 44px 44px; }
+
+/* === HEADER: summaries + filter === */
+header { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; }
+h1 { font: 400 40px/1.1 var(--display); }
+.sums { display: flex; gap: 28px; }
+.sum { display: flex; flex-direction: column; gap: 2px; }
+.sum b { font: 400 34px/1 var(--display); }
+.sum span { font: 400 14px/1.3 var(--mono); letter-spacing: 0.04em; }
+.controls { display: flex; gap: 10px; align-items: center; font: 400 14px/1 var(--mono); }
+.controls button { font: inherit; color: var(--ink); background: var(--paper); border: 1.5px solid var(--ink); padding: 8px 12px; cursor: pointer; }
+.controls button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+/* === MATRIX: columns = cases, rows = configuration x run === */
+.matrix { margin-top: 18px; display: grid; grid-template-columns: 170px 1fr; gap: 0 12px; }
+.rowlab { font: 400 14px/26px var(--mono); letter-spacing: 0.02em; white-space: nowrap; }
+.rowlab.first { font: 600 15px/26px var(--body); }
+.cells { display: grid; grid-auto-flow: column; gap: 3px; }
+.cell { width: 100%; height: 23px; border: 1.5px solid var(--ink); background: var(--ink); cursor: pointer; opacity: 0; transform: scale(0.4); transition: opacity 0.4s var(--ease), transform 0.4s var(--ease); position: relative; }
+.on .cell { opacity: 1; transform: none; }
+.cell.fail { background: var(--paper); }
+.cell.fail::after { content: ""; position: absolute; inset: 3px; background: linear-gradient(45deg, transparent 45%, var(--ink) 45% 55%, transparent 55%), linear-gradient(-45deg, transparent 45%, var(--ink) 45% 55%, transparent 55%); }
+.cell.sel { outline: 3px solid var(--ink-soft); outline-offset: 2px; }
+.dim .cell.pass { opacity: 0.15; }
+.sep { height: 10px; }
+.groups { display: grid; grid-auto-flow: column; gap: 3px; margin-bottom: 4px; }
+.groups div { font: 400 12px/1.2 var(--mono); border-top: 1.5px solid var(--ink); padding-top: 4px; overflow: hidden; white-space: nowrap; text-overflow: clip; }
+.legend { font: 400 13px/1.5 var(--mono); margin-top: 10px; display: flex; gap: 24px; align-items: center; }
+.legend i { display: inline-block; width: 16px; height: 16px; border: 1.5px solid var(--ink); vertical-align: -3px; margin-right: 6px; }
+.legend i.p { background: var(--ink); }
+
+/* === DETAIL: transcript of the selected run === */
+.detail { margin-top: 16px; border-top: 1.5px solid var(--ink); padding-top: 14px; display: grid; grid-template-columns: 330px 1fr; gap: 28px; min-height: 280px; }
+.detail h2 { font: 400 30px/1.15 var(--display); word-break: break-word; }
+.meta { font: 400 14px/1.7 var(--mono); margin-top: 8px; }
+.why { margin-top: 10px; font: 600 15px/1.5 var(--body); }
+.turns { display: flex; flex-direction: column; gap: 10px; max-height: 330px; overflow: auto; padding-right: 8px; }
+.turn { border-bottom: 1px solid var(--ink-faint); padding-bottom: 10px; display: grid; grid-template-columns: 70px 1fr; gap: 4px 14px; font: 400 16px/1.55 var(--body); }
+.turn .k { font: 400 13px/1.9 var(--mono); }
+.turn .tool { font: 400 14px/1.6 var(--mono); }
+.turn .bad { font-weight: 600; }
+.hint { font: 400 15px/1.6 var(--body); opacity: 0.8; }
+/* inside the deck the slide already carries the title */
+.embedded h1 { display: none; }
+@media (prefers-reduced-motion: reduce) { .cell { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Bench 明细：405 次运行</h1>
+    <div class="meta" id="meta"></div>
+  </div>
+  <div class="sums" id="sums"></div>
+  <div class="controls">
+    <button id="all" aria-pressed="true">全部</button>
+    <button id="fails" aria-pressed="false">只看失败</button>
+  </div>
+</header>
+
+<section class="matrix" id="matrix"></section>
+<div class="legend"><span><i class="p"></i>通过</span><span><i></i>失败（点格子看原因和对话）</span><span>每列一个用例，每个配置 3 行 = 3 次运行</span></div>
+
+<section class="detail" id="detail">
+  <div><h2>点一个格子</h2><p class="hint" style="margin-top:8px;">显示这次运行每一轮的用户输入、工具调用和结果码、回复，以及没通过的检查。</p></div>
+  <div></div>
+</section>
+
+<script src="data/bench.js"></script>
+<script>
+if (window.parent !== window) document.body.classList.add('embedded');
+/* === RENDER === */
+const B = window.BENCH, matrix = document.getElementById('matrix');
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+document.getElementById('meta').textContent = `${B.meta.date} · N = ${B.meta.n} · 45 个用例 · 安全违规在每个配置都是 0`;
+document.getElementById('sums').innerHTML = B.configs.map(c =>
+  `<div class="sum"><b>${(c.pass * 100).toFixed(1)}%</b><span>${esc(c.label)} · 违规 ${c.violations}</span></div>`).join('');
+
+const cases = B.cases, cols = `repeat(${cases.length}, 1fr)`;
+// group header row: one label per run of equal groups
+let gh = '<div></div><div class="groups" style="grid-template-columns:' + cols + '">';
+for (let i = 0; i < cases.length;) {
+  let j = i; while (j < cases.length && cases[j].group === cases[i].group) j++;
+  gh += `<div style="grid-column:${i + 1} / ${j + 1}" title="${esc(cases[i].group)}">${esc(cases[i].group)}</div>`; i = j;
+}
+let html = gh + '</div>';
+const index = {};
+B.configs.forEach((c, ci) => {
+  for (const r of B.runs[c.id]) index[`${c.id}|${r.case}|${r.i}`] = r;
+  for (let run = 0; run < B.meta.n; run++) {
+    html += `<div class="rowlab ${run === 0 ? 'first' : ''}">${run === 0 ? esc(c.label) : `run ${run + 1}`}</div><div class="cells" style="grid-template-columns:${cols}">`;
+    cases.forEach((k, xi) => {
+      const r = index[`${c.id}|${k.name}|${run}`];
+      html += `<button class="cell ${r.pass ? 'pass' : 'fail'}" data-k="${c.id}|${k.name}|${run}" style="transition-delay:${(xi * 12 + ci * 60 + run * 20)}ms" aria-label="${esc(c.label)} ${esc(k.name)} run ${run + 1}: ${r.pass ? '通过' : '失败'}" title="${esc(k.name)}"></button>`;
+    });
+    html += '</div>';
+  }
+  if (ci < B.configs.length - 1) html += '<div class="sep"></div><div class="sep"></div>';
+});
+matrix.innerHTML = html;
+
+/* === DETAIL === */
+function show(key) {
+  document.querySelectorAll('.cell.sel').forEach(x => x.classList.remove('sel'));
+  document.querySelector(`[data-k="${key}"]`)?.classList.add('sel');
+  const [cid, name, run] = key.split('|'), r = index[key], c = B.configs.find(x => x.id === cid);
+  const turns = r.turns.map((t, i) => `
+    <div class="turn">
+      <span class="k">轮 ${i + 1}</span><div><b>用户</b>　${esc(t.user)}</div>
+      <span class="k">工具</span><div class="tool">${t.tools.length ? t.tools.map(x => `${esc(x.tool)}(${esc(Object.values(x.args || {}).join(', '))}) → ${esc(x.code)}`).join('<br>') : '—'}${t.cards.length ? `<br>卡片：${esc(t.cards.join(', '))}` : ''}</div>
+      <span class="k">回复</span><div>${esc(t.text || t.error || '')}</div>
+      ${t.problems.length ? `<span class="k">问题</span><div class="bad">${esc(t.problems.map(p => typeof p === 'string' ? p : JSON.stringify(p)).join('；'))}</div>` : ''}
+      <span class="k"></span><div class="tool">${t.latency_s ?? '–'} s · ${t.tokens ?? '–'} tokens · 票 ${t.tickets[0]} → ${t.tickets[1]}</div>
+    </div>`).join('');
+  document.getElementById('detail').innerHTML = `
+    <div><h2>${esc(name)}</h2>
+      <div class="meta">${esc(c.label)} · run ${+run + 1}<br>${r.tokens.toLocaleString('en-US')} tokens</div>
+      <div class="why">${r.pass ? '通过' : '未通过：' + esc(r.why.join('、'))}</div></div>
+    <div class="turns">${turns}</div>`;
+}
+matrix.addEventListener('click', e => { const b = e.target.closest('.cell'); if (b) show(b.dataset.k); });
+
+/* === FILTER === */
+const setMode = fails => {
+  document.body.classList.toggle('dim', fails);
+  document.getElementById('all').setAttribute('aria-pressed', !fails);
+  document.getElementById('fails').setAttribute('aria-pressed', fails);
+};
+document.getElementById('all').onclick = () => setMode(false);
+document.getElementById('fails').onclick = () => setMode(true);
+
+/* === ENTRANCE + DECK BRIDGE ===
+   Inside the deck the cells appear when the slide is shown (message "deck-visible");
+   standalone they appear on load. Arrow keys are passed to the deck so it keeps working after a click here. */
+const play = () => { matrix.classList.remove('on'); void matrix.offsetWidth; matrix.classList.add('on'); };
+if (window.parent === window || new URLSearchParams(location.search).has('static')) play();
+addEventListener('message', e => { if (e.data === 'deck-visible') play(); });
+addEventListener('keydown', e => {
+  if (window.parent !== window && ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' ', 'Enter', 'Home', 'End', 'f', 'F'].includes(e.key)) {
+    e.preventDefault(); window.parent.postMessage({ deckKey: e.key }, '*');
+  }
+});
+// open on the first failure of the first configuration, so the panel is never empty in the talk
+const firstFail = B.runs[B.configs[0].id].find(r => !r.pass);
+if (firstFail) show(`${B.configs[0].id}|${firstFail.case}|${firstFail.i}`);
+</script>
+</body>
+</html>

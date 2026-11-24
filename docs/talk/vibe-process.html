@@ -270,6 +270,9 @@ table.cmp td:first-child { font: 400 26px/1.4 var(--body); }
 .shot img { display: block; max-width: none; max-height: none; }
 .cap { font: 400 20px/1.5 var(--mono); letter-spacing: 0.02em; margin-top: 12px; }
 
+/* embedded pages (bench explorer, trace replay) */
+.embed { border: 1.5px solid var(--ink); background: var(--paper); display: block; }
+
 /* decorations */
 .glitch { pointer-events: none; }
 .glitch i { position: absolute; right: 0; display: block; transform-origin: right center; transform: scaleX(0);
@@ -349,7 +352,7 @@ body.static .reveal, body.static .f, body.static .grow, body.static .pop, body.s
         <div class="row reveal" style="--i:4"><span class="n">04</span><div><div class="t">多用户、历史、在线 demo</div><div class="d">另外交付所有 coding agent 的原始会话</div></div></div>
       </div>
       <figure class="reveal" style="--i:3">
-        <div class="shot" style="width:820px; height:640px;"><img src="../iterations/07-ui/screens/1440-light-chat-confirm.png" alt="确认卡：广州经法兰克福、新加坡、阿姆斯特丹到利马，8,928.6 km，$1,160.71，确认订票按钮" style="width:1390px; margin-left:-425px; margin-top:-112px;"></div>
+        <div class="shot" style="width:820px; height:640px;"><img src="assets/confirm-card.png" alt="确认卡：广州经法兰克福、新加坡、阿姆斯特丹到利马，8,928.6 km，$1,160.71，确认订票按钮" style="width:1390px; margin-left:-425px; margin-top:-112px;"></div>
         <figcaption class="cap">成品：数字由代码计算，用户点击 Confirm booking 后才出票</figcaption>
       </figure>
     </div>
@@ -671,26 +674,43 @@ body.static .reveal, body.static .f, body.static .grow, body.static .pop, body.s
   <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- =========================== 18 · TRACING + AUDIT =========================== -->
+<!-- =========================== 18 · BENCH EXPLORER (embedded) =========================== -->
+<!-- 讲：点一个失败的格子，看是哪一轮、哪个工具、哪条检查没过。 -->
+<section class="slide" data-section="多模型 bench">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>09 · BENCH</span></div>
+  <div class="frame" style="gap:24px;">
+    <div class="topbar reveal" style="--i:0"><h2>每一次运行都能点开看</h2><span class="lab"><a href="bench.html" target="_blank" rel="noopener" style="border:0;">BENCH.HTML ↗</a></span></div>
+    <iframe class="embed reveal" style="--i:1" data-src="bench.html" title="Bench 明细：405 次运行" width="1760" height="760"></iframe>
+  </div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 19 · TRACE REPLAY (embedded) =========================== -->
+<!-- 讲：按真实时间回放一轮对话：模型两次调用之间是工具和路由算法，最后是 ReplyGuard。点 span 看属性。 -->
+<section class="slide" data-section="Tracing">
+  <div class="chrome"><span>OCEAN ABOVE</span><span>10 · OBSERVABILITY</span></div>
+  <div class="frame" style="gap:24px;">
+    <div class="topbar reveal" style="--i:0"><h2>一轮真实对话的 trace</h2><span class="lab"><a href="trace.html" target="_blank" rel="noopener" style="border:0;">TRACE.HTML ↗</a></span></div>
+    <iframe class="embed reveal" style="--i:1" data-src="trace.html" title="Trace 回放" width="1760" height="760"></iframe>
+  </div>
+  <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
+</section>
+
+<!-- =========================== 20 · PRIVACY + AUDIT =========================== -->
 <section class="slide" data-section="Tracing 和审计">
   <div class="chrome"><span>OCEAN ABOVE</span><span>10 · OBSERVABILITY</span></div>
-  <div class="frame" style="gap:36px;">
-    <div class="topbar reveal" style="--i:0"><h2>能看到每一步，同时不泄露数据</h2><span class="lab">PHOENIX · AUDIT</span></div>
-    <div style="display:grid; grid-template-columns: 960px 1fr; gap:64px; align-items:start;">
-      <figure class="reveal" style="--i:1">
-        <div class="shot" style="width:960px; height:500px;"><img src="../iterations/10-otel/screenshots/phoenix-quote-real-1440.png" alt="Phoenix 里一次报价的 trace：agent.turn → chat → execute_tool quote_route → airline.quote_route → core.routing，以及多个 reply_guard span" style="width:1000px;"></div>
-        <figcaption class="cap">一次真实报价的 trace：agent、模型、工具、航线服务、路由算法、ReplyGuard</figcaption>
-      </figure>
-      <div class="rows two">
-        <div class="row f" data-f="1"><span class="n">01</span><div><div class="t" style="font-size:36px;">Tracing 默认关闭</div><div class="d" style="font-size:25px;">打开后 span 里也不放 prompt、回复、邮箱、nonce；会话 id 只存 HMAC；导出失败不影响聊天和订票。</div></div></div>
-        <div class="row f" data-f="2"><span class="n">02</span><div><div class="t" style="font-size:36px;">公开 62 个原始会话前的审计</div><div class="d" style="font-size:25px;">用持有的每个密钥和邀请码逐字扫描全部历史。发现旧提交里有 VPS IP，于是改写历史，推到新建的公开仓库；原来的开发仓库保持私有。</div></div></div>
-      </div>
+  <div class="frame">
+    <div class="topbar reveal" style="--i:0"><h2>能看到每一步，同时不泄露数据</h2><span class="lab">PRIVACY · AUDIT</span></div>
+    <div class="rows">
+      <div class="row reveal" style="--i:1"><span class="n">01</span><div class="t">Tracing 默认关闭</div><div class="d">打开后，span 里也不放 prompt、回复、邮箱和 nonce；会话 id 只存 HMAC；导出失败不影响聊天和订票。</div></div>
+      <div class="row f" data-f="1"><span class="n">02</span><div class="t">公开原始会话前先审计</div><div class="d">用持有的每个密钥和邀请码逐字扫描全部 62 个会话的历史。</div></div>
+      <div class="row f" data-f="2"><span class="n">03</span><div class="t">发现 VPS IP 后改写历史</div><div class="d">旧提交里有服务器 IP，于是改写历史，推到新建的公开仓库；原来的开发仓库保持私有。</div></div>
     </div>
   </div>
   <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- =========================== 19 · LESSONS =========================== -->
+<!-- =========================== 21 · LESSONS =========================== -->
 <section class="slide" data-section="体会">
   <div class="chrome"><span>OCEAN ABOVE</span><span>11 · NOTES</span></div>
   <div class="frame">
@@ -705,7 +725,7 @@ body.static .reveal, body.static .f, body.static .grow, body.static .pop, body.s
   <div class="chrome bottom"><span class="sec"></span><span class="pagenum"></span></div>
 </section>
 
-<!-- =========================== 20 · COLOPHON =========================== -->
+<!-- =========================== 22 · COLOPHON =========================== -->
 <section class="slide" data-section="谢谢">
   <div class="chrome"><span>OCEAN ABOVE · QUOTR TAKE-HOME</span><span>2026 · 11</span></div>
   <div class="glitch left" data-glitch="cover" style="left:var(--edge); top:110px; width:420px; height:860px;"></div>
@@ -835,16 +855,32 @@ class SlidePresentation {
     i = Math.max(0, Math.min(this.slides.length - 1, i));
     if (i !== this.current) {
       this.slides.forEach((s, j) => { s.classList.toggle('active', j === i); s.classList.toggle('visible', j === i); });
-      this.current = i; this.countUp(this.slides[i]);
+      this.current = i; this.countUp(this.slides[i]); this.loadEmbeds(this.slides[i]);
     }
     this.step = step === 'end' ? this.steps[i].max : step; this.paint();
     document.getElementById('progress').style.width = `${((i + 1) / this.slides.length) * 100}%`;
     history.replaceState(null, '', `${location.search}#${i + 1}`);
   }
+  loadEmbeds(slide) {
+    // embedded pages load the first time their slide is shown, then replay their entrance each visit
+    slide.querySelectorAll('iframe[data-src]').forEach(f => {
+      if (!f.src) { f.src = f.dataset.src + (this.isStatic ? '?static' : ''); f.addEventListener('load', () => f.contentWindow.postMessage('deck-visible', '*'), { once: true }); }
+      else f.contentWindow?.postMessage('deck-visible', '*');
+    });
+  }
   next() { if (this.step < this.steps[this.current].max) { this.step++; this.paint(); } else this.show(this.current + 1); }
   prev() { if (this.step > 0) { this.step--; this.paint(); } else if (this.current > 0) this.show(this.current - 1, 'end'); }
 }
 const deck = new SlidePresentation();
+if (deck.isStatic) deck.slides.forEach(s => deck.loadEmbeds(s));
+// keys pressed inside an embedded page come back here, so the deck keeps navigating after a click in it
+addEventListener('message', e => {
+  const k = e.data && e.data.deckKey; if (!k) return;
+  if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(k)) deck.next();
+  else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(k)) deck.prev();
+  else if (k === 'Home') deck.show(0); else if (k === 'End') deck.show(deck.slides.length - 1, 'end');
+  else if (k === 'f' || k === 'F') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+});
 
 /* ===========================================
    INLINE EDITING

@@ -13,6 +13,17 @@
 		}
 	}
 
+	# Talk slides: static files from docs/talk (mounted read-only). Not linked from the app, not indexed.
+	redir /talk /talk/ 308
+	handle_path /talk/* {
+		header X-Robots-Tag "noindex, nofollow"
+		@private path /tools/* /png/* *.py *.sh *.md
+		respond @private 404
+		root * /srv/talk
+		rewrite / /vibe-process.html
+		file_server
+	}
+
 	# Everything else is the web app.
 	handle {
 		reverse_proxy web:3000
