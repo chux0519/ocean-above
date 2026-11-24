@@ -328,7 +328,9 @@ class Agent:
             return run.state  # cancelling, finishing or ended: idempotent, nothing changes (R8)
         turn = run.turn
         if turn is not None and turn.steps_task is not None and turn.steps_task.done():
-            return "finishing"  # the steps ended in this instant; the reply is being stored (R4)
+            # the steps ended in this instant (their result is set, `_turn` has not resumed yet):
+            # the reply counts as complete and is stored as usual (R4; test_p2_9_…finishing…)
+            return "finishing"
         queued = run.state == "queued"
         run.state = "cancelling"
         run.stop_requested = time.monotonic()
@@ -359,6 +361,11 @@ class Agent:
         return None if run is None else run.state
 
     def _retire(self, run: Run) -> None:
+        """Move an ended run to the bounded list of finished runs, keeping only what `cancel_run`
+        reads (id, owner, conversation, state): the turn's context, cards and event queue are
+        dropped (review P2-2)."""
+        run.turn = None
+        run.task = None
         if self._runs.get(run.id) is run:
             del self._runs[run.id]
         self._finished[run.id] = run
@@ -431,11 +438,13 @@ class Agent:
                         self.slots.config.max_turns_per_user, conversation_id)
             emit("error", {"code": "conversation_busy", "message": USER_BUSY})
         except ServerBusy:
+            run.state = "finishing"  # refused: a Stop from here on is too late (review P2-1)
             log.warning("chat turn refused: %d turns running, none ended within %gs (conversation %s)",
                         self.slots.active, self.slots.config.queue_seconds, conversation_id)
             await not_stored()
             emit("error", {"code": "server_busy", "message": SERVER_BUSY})
         except _NotStored:
+            run.state = "finishing"  # (review P2-1)
             log.exception("chat turn: the user's message could not be stored (conversation %s)", conversation_id)
             await not_stored()
             emit("error", {"code": "internal_error", "message": NOT_STORED})
@@ -444,7 +453,9 @@ class Agent:
             emit("error", {"code": "internal_error", "message": INTERNAL})
         finally:
             if run.terminal is None:
-                run.state = "failed"  # shutdown: the task was cancelled
+                # R4 backstop (review P2-1): every stream ends with a terminal event, also when the
+                # task was cancelled by a shutdown or a path above ended without one
+                emit("error", {"code": "internal_error", "message": INTERNAL})
             self._retire(run)
             queue.put_nowait(None)
 
@@ -655,9 +666,9 @@ class Agent:
             turn.in_flight = call_id
             outcome = await turn.threads.run(self._tools.run, turn.user_id, turn.conversation_id,
                                              call["name"], call["arguments"])
-            turn.in_flight = None
             if turn.cancelled:  # the Stop came while the thread ran: its result is not used (R7)
-                raise asyncio.CancelledError()
+                raise asyncio.CancelledError()  # (in_flight still names it: stored as interrupted)
+            turn.in_flight = None
         else:
             turn.exhausted = turn.exhausted or refused == "per_turn"
             payload = refusal(refused, self.budget)

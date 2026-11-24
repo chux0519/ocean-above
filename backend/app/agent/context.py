@@ -30,7 +30,9 @@ from .tools import slim
 HISTORY_CHAR_BUDGET = 40_000  # roughly 10k tokens of history kept in full
 HISTORY_HARD_LIMIT = 80_000  # beyond this the oldest (already shortened) turns are dropped
 SHORT_TEXT_CHARS = 300
-STOPPED_NOTE = "[the user stopped the previous reply; tool calls marked cancelled did not run to the end]"
+STOPPED_NOTE = ("[the user stopped the previous reply; tool calls marked cancelled did not run to the end. "
+                "Quote cards in that reply cannot be confirmed: to book one of its quotes, call request_booking "
+                "for it again so a new confirmation card is shown]")
 _ID_KEYS = ("quote_id", "ticket_id", "origin", "destination", "city", "query", "count", "status")
 
 

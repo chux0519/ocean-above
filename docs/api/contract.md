@@ -65,7 +65,7 @@ type Message = {
   cards: Card[]; created_at: string
   status: "completed" | "cancelled"                   // v1.6; "cancelled" = the user stopped this reply
 }
-type RunStatus = "queued" | "running" | "cancelling" | "finishing" | "cancelled" | "completed" | "failed"
+type RunStatus = "cancelling" | "finishing" | "cancelled" | "completed" | "failed"   // what the cancel endpoint returns
 type Leg = { from: string; to: string; distance_display: string; distance: string }
 type CardState = { status: "quoted" | "presented" | "booked" | "expired" | "stale";
                    bookable: boolean; nonce: string | null; ticket_id: string | null }
@@ -137,9 +137,9 @@ Response `200 {"run_id": "r_…", "status": RunStatus}`, the run's state after t
 
 | status | meaning |
 |---|---|
-| `cancelling` | accepted; the stream ends with `cancelled` once started work has settled (usually milliseconds; a running database step may take longer) |
+| `cancelling` | accepted; the stream ends with `cancelled` once started work has settled (usually milliseconds; a running database step may take up to about 30 s). Exception: if storing the user message or the stopped reply fails, it ends with `error` (`internal_error`) |
 | `cancelled` | already stopped (a repeated Stop; idempotent) |
-| `finishing`, `completed` | too late: the reply was already being stored; the stream ends with `done` |
+| `finishing`, `completed` | too late: the steps had ended (the reply is being stored) or the turn was already being refused; the stream ends with `done`, or with `error` (e.g. `llm_unavailable`, `server_busy`) |
 | `failed` | the run had already ended with `error` |
 
 `404 not_found`: the conversation is not the user's, or the run is unknown, belongs to another conversation or user,

@@ -13,7 +13,7 @@ vi.mock("@/components/shell", () => ({
     <>{children({ user: {}, refreshUser, sidebarSlot: document.body, closeNav: () => {} })}</>,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }), usePathname: () => "/chat" }));
-import ChatPage, { STOP_GRACE_MS } from "@/app/chat/page";
+import ChatPage, { SETTLE_POLL_MS, STOP_GRACE_MS } from "@/app/chat/page";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const enc = new TextEncoder();
@@ -29,8 +29,12 @@ const stoppedMessage = (stoppedTurn.at(-1)!.data as { message: Message }).messag
 const RUN = userMessage.run_id;
 
 /** A fake server: one conversation; the message stream is pushed by the test; abort errors the stream. */
-function server({ headersLate = false } = {}) {
+function server({ headersLate = false, convoLate = false, empty = false } = {}) {
   const calls: string[] = [];
+  let runStatus = "cancelling"; // what the cancel endpoint answers
+  let releaseConvo: () => void = () => {};
+  let holdReload = false; // GET c_1 waits until releaseReload()
+  let releaseReload: () => void = () => {};
   let push!: (chunk: Uint8Array) => void;
   let end!: () => void;
   let release: () => void = () => {};
@@ -40,10 +44,17 @@ function server({ headersLate = false } = {}) {
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     calls.push(`${method} ${url}`);
-    if (url === "/api/conversations" && method === "GET") return json({ conversations: [conv, { ...conv, id: "c_2", title: "Other" }] });
-    if (url === "/api/conversations/c_1") return json({ ...conv, messages });
-    if (url === "/api/conversations/c_2") return json({ ...conv, id: "c_2", messages: [] });
-    if (url.endsWith(`/runs/${RUN}/cancel`)) return json({ run_id: RUN, status: "cancelling" });
+    if (url === "/api/conversations" && method === "GET") return json({ conversations: empty ? [] : [conv, { ...conv, id: "c_2", title: "Other" }] });
+    if (url === "/api/conversations/c_1") {
+      const body = json({ ...conv, messages });
+      return holdReload ? new Promise<Response>((r) => { releaseReload = () => r(body); }) : body;
+    }
+    if (url === "/api/conversations/c_2") return json({ ...conv, id: "c_2", title: "Other", messages: [] });
+    if (url === "/api/conversations" && method === "POST") {
+      const created = json({ ...conv, id: "c_new" });
+      return convoLate ? new Promise<Response>((r) => { releaseConvo = () => r(created); }) : created;
+    }
+    if (url.endsWith(`/runs/${RUN}/cancel`)) return json({ run_id: RUN, status: runStatus });
     if (url.endsWith("/messages")) {
       const body = new ReadableStream<Uint8Array>({
         start(c) {
@@ -54,7 +65,10 @@ function server({ headersLate = false } = {}) {
       });
       const response = new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream", "X-Run-Id": RUN } });
       if (!headersLate) return response;
-      return new Promise<Response>((resolve) => { release = () => resolve(response); });
+      return new Promise<Response>((resolve, reject) => {
+        release = () => resolve(response);
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))); // as real fetch
+      });
     }
     return json({ error: { code: "not_found", message: "nf" } }, 404);
   }));
@@ -64,6 +78,10 @@ function server({ headersLate = false } = {}) {
     end: () => act(async () => { end(); }),
     release: () => act(async () => { release(); }),
     setMessages: (m: Message[]) => { messages = m; },
+    setRunStatus: (st: string) => { runStatus = st; },
+    holdReload: () => { holdReload = true; },
+    releaseReload: () => act(async () => { holdReload = false; releaseReload(); }),
+    releaseConvo: () => act(async () => { releaseConvo(); }),
     get aborted() { return aborted; },
   };
 }
@@ -90,7 +108,7 @@ describe("Stop", () => {
     await srv.send("delta", { text: "The cheapest route goes through " });
     await userEvent.click(stop);
     await waitFor(() => expect(srv.calls).toContain(`POST /api/conversations/c_1/runs/${RUN}/cancel`));
-    expect(screen.getByRole("button", { name: "Stopping" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stopping" })).toHaveAttribute("aria-disabled", "true");
     // the view is frozen: later deltas are not shown
     await srv.send("delta", { text: "never shown. " });
     expect(screen.queryByText(/never shown/)).toBeNull();
@@ -144,6 +162,7 @@ describe("Stop", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
     await waitFor(() => expect(srv.calls.some((c) => c.includes("/cancel"))).toBe(true));
     srv.setMessages([userMessage, stoppedMessage]);
+    srv.setRunStatus("cancelled");
     await act(async () => { vi.advanceTimersByTime(STOP_GRACE_MS + 10); });
     await waitFor(() => expect(srv.aborted).toBe(true));
     await screen.findByTestId("stopped-marker");
@@ -151,17 +170,114 @@ describe("Stop", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
-  it("switching conversations detaches the stream: no stale updates, no Stop sent, Send available", async () => {
+  it("switching conversations detaches the stream: no stale updates, no Stop sent, Send available (review P2-6)", async () => {
     const srv = server();
     render(<ChatPage />);
     await sendText("hi");
     await srv.send("user_message", userMessage);
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    // the old conversation now has stored text: a stale reload would bring it onto c_2's view
+    srv.setMessages([userMessage, stoppedMessage]);
     await userEvent.click(screen.getByRole("button", { name: /Other/ }));
-    await waitFor(() => expect(screen.queryByText(userMessage.text)).toBeNull());
+    await waitFor(() => expect(srv.calls).toContain("GET /api/conversations/c_2"));
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); }); // every pending fetch lands
     expect(srv.aborted).toBe(true); // the reader is closed; the run itself goes on (disconnect != Stop)
-    expect(srv.calls.some((c) => c.includes("/cancel"))).toBe(false);
+    expect(screen.queryByText(userMessage.text)).toBeNull();
+    expect(screen.queryByText(/The cheapest route goes through/)).toBeNull();
+    expect(screen.queryByTestId("stopped-marker")).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stopping" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(srv.calls.filter((c) => c === "GET /api/conversations/c_1")).toHaveLength(1); // no stale reload
     expect(screen.queryByText(/Connection lost/)).toBeNull();
+    // the next reply in the new conversation starts with a fresh Stop, not a leftover "Stopping"
+    await userEvent.type(screen.getByLabelText("Message"), "new chat message");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("button", { name: "Stop" })).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("a reload that lands after switching conversations does not replace the new view (review P2-6)", async () => {
+    const srv = server();
+    render(<ChatPage />);
+    await sendText("hi");
+    await srv.send("user_message", userMessage);
+    srv.setMessages([userMessage, { ...stoppedMessage, status: "completed", text: "Old chat reply." }]);
+    srv.holdReload(); // the reload after `done` is slow
+    await srv.send("done", { message: { ...stoppedMessage, status: "completed", text: "Old chat reply." } });
+    await srv.end();
+    await waitFor(() => expect(srv.calls.filter((c) => c === "GET /api/conversations/c_1")).toHaveLength(2));
+    await userEvent.click(screen.getByRole("button", { name: /Other/ }));
+    await waitFor(() => expect(srv.calls).toContain("GET /api/conversations/c_2"));
+    await srv.releaseReload();
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    expect(screen.queryByText("Old chat reply.")).toBeNull();
+    expect(screen.queryByText(userMessage.text)).toBeNull();
+  });
+
+  it("waits for a slow stopped run to settle before restoring Send (review P2-3)", async () => {
+    const srv = server();
+    render(<ChatPage />);
+    await sendText("hi");
+    await srv.send("user_message", userMessage);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await act(async () => { vi.advanceTimersByTime(STOP_GRACE_MS + 10); }); // the reader is closed, run still draining
+    await waitFor(() => expect(srv.aborted).toBe(true));
+    await act(async () => { vi.advanceTimersByTime(SETTLE_POLL_MS * 2 + 10); });
+    expect(screen.getByRole("button", { name: "Stopping" })).toBeInTheDocument(); // not yet: no Send
+    srv.setMessages([userMessage, stoppedMessage]);
+    srv.setRunStatus("cancelled");
+    await act(async () => { vi.advanceTimersByTime(SETTLE_POLL_MS + 10); });
+    await screen.findByTestId("stopped-marker");
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(srv.calls.filter((c) => c.endsWith("/cancel")).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("closes the request when its headers never arrive, without hanging in Stopping (review P2-4)", async () => {
+    const srv = server({ headersLate: true });
+    render(<ChatPage />);
+    await sendText("hi");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await act(async () => { vi.advanceTimersByTime(STOP_GRACE_MS + 10); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument());
+    expect(srv.calls.some((c) => c.endsWith("/cancel"))).toBe(false); // no run id was ever known
+    expect(screen.queryByText(/Connection lost/)).toBeNull();
+  });
+
+  it("Stop while a new chat is being created sends nothing (review P2-4)", async () => {
+    const srv = server({ convoLate: true, empty: true });
+    render(<ChatPage />);
+    const input = await sendText("Fly me to Lima");
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await srv.releaseConvo();
+    await screen.findByText("Stopped — your message was not sent");
+    expect(srv.calls).toContain("POST /api/conversations");
+    expect(srv.calls.some((c) => c.endsWith("/messages"))).toBe(false);
+    expect(input).toHaveValue("Fly me to Lima");
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+  });
+
+  it("keeps the focus on the one Send/Stop button and returns it to the input after Stop; Esc stops (review P2-5)", async () => {
+    const srv = server();
+    render(<ChatPage />);
+    const input = await sendText("hi");
+    const button = await screen.findByRole("button", { name: "Stop" });
+    expect(document.activeElement).toBe(button); // the same element that was clicked as Send
+    await srv.send("user_message", userMessage);
+    await userEvent.click(button);
+    srv.setMessages([userMessage, stoppedMessage]);
+    await srv.send("cancelled", { run_id: RUN, message: stoppedMessage });
+    await srv.end();
+    await screen.findByTestId("stopped-marker");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(screen.getByTestId("stop-announce")).toHaveTextContent("Reply stopped.");
+    // Esc in the input stops the next reply
+    await userEvent.type(input, "again");
+    await userEvent.keyboard("{Enter}");
+    await screen.findByRole("button", { name: "Stop" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(srv.calls.filter((c) => c.endsWith("/cancel")).length).toBe(2));
   });
 });
 

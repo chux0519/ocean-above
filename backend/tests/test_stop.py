@@ -648,3 +648,256 @@ def test_http_stop_is_owner_only_and_404_for_unknown_runs(world, no_real_llm):
             assert refused.status_code == 404 and refused.json()["error"]["code"] == "not_found"
         client.cookies.clear()
         assert _cancel(client, world.conv, run_id).status_code == 401
+
+
+# ============================================================ review P2 (review-stop.md) =======
+def test_p2_1_a_stop_while_a_server_busy_refusal_refunds_still_ends_with_one_terminal_event(world):
+    """Probe 1 of the review: the turn was refused (no slot) and is refunding the day's message
+    slot in a worker thread when the Stop arrives. Before the fix the task was cancelled inside
+    the refusal branch and the stream ended with no event at all."""
+    gate, entered = threading.Event(), threading.Event()
+    refunds = []
+
+    def slow_refund():
+        entered.set()
+        assert gate.wait(10)
+        refunds.append(1)
+
+    llm = FakeLLM(default=["unused"])
+
+    async def go():
+        agent = Agent(world.airline, llm, concurrency=TurnConcurrency(1, 0.05))
+        agent.slots.active = 1  # another turn holds the only slot
+        events = agent.stream_turn(world.alice, world.conv, "hi", on_not_stored=slow_refund)
+        seen = asyncio.ensure_future(rest(events, []))
+        await asyncio.to_thread(entered.wait, 5)
+        answer = agent.cancel_run(world.alice, world.conv, events.run_id)
+        gate.set()
+        out = await seen
+        await agent.wait_idle()
+        agent.slots.active = 0
+        released(agent, world)
+        return answer, out, agent.run_state(events.run_id)
+
+    answer, seen, state = asyncio.run(go())
+    assert answer == "finishing"  # too late: the refusal is already being sent
+    assert names(seen) == ["error"] and first_data(seen[0].data)["code"] == "server_busy"
+    assert state == "failed" and refunds == [1] and stored(world) == []
+
+
+def test_p2_1_a_run_cancelled_by_a_shutdown_still_ends_with_a_terminal_event(world):
+    gate = asyncio.Event()
+    llm = FakeLLM(["One. ", Wait(gate)])
+
+    async def go():
+        agent = Agent(world.airline, llm)
+        events = agent.stream_turn(world.alice, world.conv, "hi")
+        seen = []
+        await until(events, "delta", seen)
+        agent._runs[events.run_id].task.cancel()  # not a Stop: e.g. the server shutting down
+        await rest(events, seen)
+        await asyncio.gather(*agent._tasks, return_exceptions=True)
+        return seen, agent.run_state(events.run_id)
+
+    seen, state = asyncio.run(go())
+    assert names(seen)[-1] == "error" and seen[-1].data["code"] == "internal_error"
+    assert sum(n in ("done", "cancelled", "error") for n in names(seen)) == 1 and state == "failed"
+
+
+def test_p2_2_a_finished_run_keeps_no_turn_context(world):
+    """Probe 2 of the review: the finished-run list kept every turn's context, cards and queue."""
+    gate = asyncio.Event()
+    llm = FakeLLM([Call("quote_route", origin="A", destination="D")], ["One. ", Wait(gate)], ["Two."])
+
+    async def go():
+        agent = Agent(world.airline, llm)
+        stopped = agent.stream_turn(world.alice, world.conv, "A to D")
+        await until(stopped, "delta", [])
+        agent.cancel_run(world.alice, world.conv, stopped.run_id)
+        await rest(stopped, [])
+        done = agent.stream_turn(world.alice, world.conv, "again")
+        await rest(done, [])
+        await agent.wait_idle()
+        return agent, [stopped.run_id, done.run_id]
+
+    agent, run_ids = asyncio.run(go())
+    for run_id in run_ids:
+        run = agent._finished[run_id]
+        assert run.turn is None and run.task is None
+        assert agent.cancel_run(world.alice, world.conv, run_id) in ("cancelled", "completed")
+
+
+def test_p2_8_the_model_is_told_that_a_stopped_replys_cards_cannot_be_confirmed(world):
+    gate = asyncio.Event()
+    llm = FakeLLM([Call("quote_route", origin="A", destination="D")], ["Ready. ", Wait(gate)], ["Sure."])
+
+    async def go():
+        agent = Agent(world.airline, llm)
+        events = agent.stream_turn(world.alice, world.conv, "A to D")
+        await until(events, "delta", [])
+        agent.cancel_run(world.alice, world.conv, events.run_id)
+        await rest(events, [])
+        await rest(agent.stream_turn(world.alice, world.conv, "book it"), [])
+        await agent.wait_idle()
+
+    asyncio.run(go())
+    notes = [m["content"] for m in llm.requests[-1] if m["role"] == "system" and "stopped" in m["content"]]
+    assert len(notes) == 1 and "cannot be confirmed" in notes[0] and "request_booking" in notes[0]
+
+
+# P2-9: the cooperative checks are the second line of defence for a library that swallows the
+# CancelledError of `steps_task.cancel()`. These tests accept a Stop *without* cancelling the task
+# (exactly what a swallowed cancellation looks like to the loop) at each boundary.
+def swallowed_stop(agent: Agent) -> None:
+    """An accepted Stop whose task cancellation got lost. Safe from a worker thread in tests."""
+    [run] = agent._runs.values()
+    run.state = "cancelling"
+    run.turn.cancelled = True
+
+
+def test_p2_9_a_lost_cancellation_during_a_tool_thread_discards_its_result_and_stops(world):
+    holder: dict = {}
+    find_city = world.airline.find_city
+
+    def stopping_find_city(name):
+        swallowed_stop(holder["agent"])
+        return find_city(name)
+
+    world.airline.find_city = stopping_find_city
+    llm = FakeLLM([Call("find_city", name="A"), Call("find_city", name="B")], default=["unused"])
+
+    async def go():
+        holder["agent"] = agent = Agent(world.airline, llm)
+        seen = await rest(agent.stream_turn(world.alice, world.conv, "A and B?"), [])
+        await agent.wait_idle()
+        released(agent, world)
+        return seen
+
+    seen = asyncio.run(go())
+    assert names(seen)[-1] == "cancelled" and "card" not in names(seen) and len(llm.bodies) == 1
+    rows = world.store.list_tool_calls(world.alice, seen[0].data["id"])
+    assert [r["error"] for r in rows] == ["cancelled: interrupted", "cancelled: not run"]
+
+
+def test_p2_9_a_lost_cancellation_before_a_tool_runs_no_tool(world):
+    holder: dict = {}
+    ran = []
+    find_city = world.airline.find_city
+    world.airline.find_city = lambda name: (ran.append(name), find_city(name))[1]
+    add_llm_call = world.store.add_llm_call
+
+    def stopping_log(user_id, conversation_id, request, response, **kwargs):
+        if response.get("tool_calls"):
+            swallowed_stop(holder["agent"])
+        return add_llm_call(user_id, conversation_id, request, response, **kwargs)
+
+    world.store.add_llm_call = stopping_log
+    llm = FakeLLM([Call("find_city", name="A")], default=["unused"])
+
+    async def go():
+        holder["agent"] = agent = Agent(world.airline, llm)
+        seen = await rest(agent.stream_turn(world.alice, world.conv, "A?"), [])
+        await agent.wait_idle()
+        released(agent, world)
+        return seen
+
+    seen = asyncio.run(go())
+    assert ran == [] and "status" not in names(seen) and names(seen)[-1] == "cancelled"
+    assert [r["error"] for r in world.store.list_tool_calls(world.alice, seen[0].data["id"])] == ["cancelled: not run"]
+
+
+def test_p2_9_a_lost_cancellation_after_a_tool_starts_no_further_model_request(world):
+    holder: dict = {}
+    add_tool_call = world.store.add_tool_call
+
+    def stopping_row(*args, **kwargs):
+        swallowed_stop(holder["agent"])  # the tool finished and is being recorded
+        return add_tool_call(*args, **kwargs)
+
+    world.store.add_tool_call = stopping_row
+    llm = FakeLLM([Call("quote_route", origin="A", destination="D")], default=["never requested"])
+
+    async def go():
+        holder["agent"] = agent = Agent(world.airline, llm)
+        seen = await rest(agent.stream_turn(world.alice, world.conv, "A to D"), [])
+        await agent.wait_idle()
+        released(agent, world)
+        return seen
+
+    seen = asyncio.run(go())
+    assert len(llm.bodies) == 1 and names(seen)[-1] == "cancelled"
+    [card] = seen[-1].data["message"]["cards"]  # the finished tool's card, not bookable
+    assert card["state"]["bookable"] is False
+
+
+def test_p2_9_a_stop_accepted_while_the_last_step_ends_still_ends_cancelled(world):
+    holder: dict = {}
+    add_llm_call = world.store.add_llm_call
+
+    def stopping_log(user_id, conversation_id, request, response, **kwargs):
+        if response.get("finish_reason") == "stop":
+            swallowed_stop(holder["agent"])  # the steps return normally after this
+        return add_llm_call(user_id, conversation_id, request, response, **kwargs)
+
+    world.store.add_llm_call = stopping_log
+    llm = FakeLLM(["All done."])
+
+    async def go():
+        holder["agent"] = agent = Agent(world.airline, llm)
+        events = agent.stream_turn(world.alice, world.conv, "hi")
+        seen = await rest(events, [])
+        await agent.wait_idle()
+        return seen, agent.run_state(events.run_id)
+
+    seen, state = asyncio.run(go())
+    assert names(seen)[-1] == "cancelled" and state == "cancelled"  # R4: an accepted Stop wins
+    assert stored(world)[-1]["status"] == "cancelled"
+
+
+def test_p2_9_a_stop_in_the_instant_the_steps_ended_is_finishing_and_the_reply_completes(world):
+    """`cancel_run`'s `finishing` guard: the steps' result is set but `_turn` has not resumed."""
+    answers = []
+    llm = FakeLLM([Call("quote_route", origin="A", destination="D")], ["Here."])
+
+    async def go():
+        agent = Agent(world.airline, llm)
+        steps = agent._steps
+
+        async def steps_then_stop(turn, messages):
+            result = await steps(turn, messages)
+            run_id = next(iter(agent._runs))
+            # runs after the task's result is set and before `_turn` wakes up (FIFO callbacks)
+            asyncio.get_running_loop().call_soon(
+                lambda: answers.append(agent.cancel_run(world.alice, world.conv, run_id)))
+            return result
+
+        agent._steps = steps_then_stop
+        seen = await rest(agent.stream_turn(world.alice, world.conv, "A to D"), [])
+        await agent.wait_idle()
+        return seen
+
+    seen = asyncio.run(go())
+    assert answers == ["finishing"] and names(seen)[-1] == "done"
+    assert seen[-1].data["message"]["cards"][0]["state"]["bookable"] is True
+
+
+def test_p2_9_nothing_is_sent_after_the_terminal_event(world, caplog):
+    llm = FakeLLM(["Hello."])
+
+    async def go():
+        agent = Agent(world.airline, llm)
+        finish = agent._finish
+
+        async def finish_twice(turn, fallback=None):
+            await finish(turn, fallback)
+            turn.emit("delta", {"text": "late"})
+            turn.emit("done", {"message": {}})
+
+        agent._finish = finish_twice
+        seen = await rest(agent.stream_turn(world.alice, world.conv, "hi"), [])
+        await agent.wait_idle()
+        return seen
+
+    seen = asyncio.run(go())
+    assert names(seen).count("done") == 1 and names(seen)[-1] == "done" and "late" not in str(seen)
+    assert "after done dropped" in caplog.text

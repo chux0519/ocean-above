@@ -42,7 +42,7 @@ export type Message = {
   status?: "completed" | "cancelled";
 };
 /** v1.6: state of a run after `POST /conversations/{id}/runs/{run_id}/cancel`. */
-export type RunStatus = "queued" | "running" | "cancelling" | "finishing" | "cancelled" | "completed" | "failed";
+export type RunStatus = "cancelling" | "finishing" | "cancelled" | "completed" | "failed";
 export type Conversation = ConversationSummary & { messages: Message[] };
 export type Trace = {
   quote_id: string; formula: string; algorithm: string; network_fingerprint: string;
