@@ -1,0 +1,15 @@
+event: user_message
+data: {"id": "m_5", "role": "user", "text": "Quote Guangzhou to Lima again, please", "cards": [], "created_at": "2026-11-23T08:05:00Z", "status": "completed", "run_id": "r_9c41"}
+
+event: status
+data: {"text": "Looking up routes…"}
+
+event: card
+data: {"card": {"type": "quote", "id": "q_8b20", "origin": "Guangzhou", "destination": "Lima", "legs": [{"from": "Guangzhou", "to": "Frankfurt", "distance_display": "1,362.1 km", "distance": "1362.100000000000000000000000000000"}, {"from": "Frankfurt", "to": "Singapore", "distance_display": "1,872.4 km", "distance": "1872.400000000000000000000000000000"}, {"from": "Singapore", "to": "Amsterdam", "distance_display": "4,097.1 km", "distance": "4097.100000000000000000000000000000"}, {"from": "Amsterdam", "to": "Lima", "distance_display": "1,597.0 km", "distance": "1597.000000000000000000000000000000"}], "transfers": ["Frankfurt", "Singapore", "Amsterdam"], "distance_display": "8,928.6 km", "price_display": "$1,160.71", "distance": "8928.600000000000000000000000000000", "price": "1160.718000000000000000000000000000", "expires_at": "2026-11-23T08:20:01Z", "state": {"status": "quoted", "bookable": false, "nonce": null, "ticket_id": null}, "similar_names": []}}
+
+event: delta
+data: {"text": "The cheapest route goes through **Frankfurt**, **Singapore** and **Amsterdam**: "}
+
+event: cancelled
+data: {"run_id": "r_9c41", "message": {"id": "m_6", "role": "assistant", "text": "The cheapest route goes through **Frankfurt**, **Singapore** and **Amsterdam**: ", "cards": [{"type": "quote", "id": "q_8b20", "origin": "Guangzhou", "destination": "Lima", "legs": [{"from": "Guangzhou", "to": "Frankfurt", "distance_display": "1,362.1 km", "distance": "1362.100000000000000000000000000000"}, {"from": "Frankfurt", "to": "Singapore", "distance_display": "1,872.4 km", "distance": "1872.400000000000000000000000000000"}, {"from": "Singapore", "to": "Amsterdam", "distance_display": "4,097.1 km", "distance": "4097.100000000000000000000000000000"}, {"from": "Amsterdam", "to": "Lima", "distance_display": "1,597.0 km", "distance": "1597.000000000000000000000000000000"}], "transfers": ["Frankfurt", "Singapore", "Amsterdam"], "distance_display": "8,928.6 km", "price_display": "$1,160.71", "distance": "8928.600000000000000000000000000000", "price": "1160.718000000000000000000000000000", "expires_at": "2026-11-23T08:20:01Z", "state": {"status": "quoted", "bookable": false, "nonce": null, "ticket_id": null}, "similar_names": []}], "created_at": "2026-11-23T08:05:03Z", "status": "cancelled"}}
+
