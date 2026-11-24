@@ -1,6 +1,7 @@
 """Judging a played case: per-turn expectations and the invariants that hold for every case."""
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -8,6 +9,7 @@ from typing import Any
 
 from .cases import QUOTE_ID, Expect, Turn
 
+BUDGET_KINDS = frozenset({"max_steps", "token_budget", "tool_budget"})  # template replies of a budget stop
 REFUSED = frozenset({"invalid_arguments", "unknown_tool", "tool_failed"})  # the tool did not run
 
 
@@ -31,11 +33,13 @@ class TurnRun:
     tools: list[ToolRecord] = field(default_factory=list)
     card_types: list[str] = field(default_factory=list)
     quote_before: str | None = None  # newest quote id of the conversation before the turn
+    quotes_before: list[str] = field(default_factory=list)  # every quote id before the turn, oldest first
     tickets_before: int = 0
     tickets_after: int = 0
     stream_problem: str | None = None
     recheck: list[dict] = field(default_factory=list)  # an independent ReplyGuard pass over the final text
     latency_s: float = 0.0
+    first_token_s: float | None = None  # until the first streamed text (None: no text was streamed)
     llm_steps: int = 0  # LLM calls of the turn (attempts included)
     turn_tokens: int = 0  # tokens charged against the per-turn soft cap (design §4.8), at the end of the turn
     error: str | None = None  # SSE error code or an exception
@@ -47,18 +51,36 @@ def fold(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def call_matches(call: ToolRecord, expect: Expect, quote_id: str | None) -> bool:
+def _quote_ref(accepted: tuple[str, ...], quote_id: str | None, quotes: list[str]) -> str | None | bool:
+    """The quote id an expected `$QUOTE` / `$QUOTE#i` argument stands for; False if it is not one."""
+    if accepted == (QUOTE_ID,):
+        return quote_id
+    if len(accepted) == 1 and accepted[0].startswith(QUOTE_ID + "#"):
+        i = int(accepted[0][len(QUOTE_ID) + 1:])
+        return quotes[i] if i < len(quotes) else None
+    return False
+
+
+def call_matches(call: ToolRecord, expect: Expect, quote_id: str | None, quotes: list[str] | None = None) -> bool:
     if call.tool != expect.tool or (expect.code is not None and call.code != expect.code):
         return False
-    args = call.args if isinstance(call.args, dict) else {}
+    args = call.args
+    if isinstance(args, str):  # a call that was not run (e.g. over the tool budget) keeps its raw arguments
+        try:
+            args = json.loads(args)
+        except ValueError:
+            args = {}
+    args = args if isinstance(args, dict) else {}
     if set(args) - set(expect.args):
         return False  # an argument the case does not expect (e.g. a filter nobody asked for)
     for key, accepted in expect.args.items():
         if key not in args:
             return False
-        want = [quote_id] if accepted == (QUOTE_ID,) else [fold(a) for a in accepted]
-        got = args[key] if accepted == (QUOTE_ID,) else fold(str(args[key]))
-        if got not in want:
+        ref = _quote_ref(accepted, quote_id, quotes or [])
+        if ref is not False:
+            if ref is None or args[key] != ref:
+                return False
+        elif fold(str(args[key])) not in [fold(a) for a in accepted]:
             return False
     return True
 
@@ -80,7 +102,7 @@ def align(turn: Turn, run: TurnRun) -> tuple[tuple[Expect, ...], list[bool]] | N
         quote = run.quote_before
         hits = []
         for i, expect in enumerate(alt):
-            ok = i < len(calls) and call_matches(calls[i], expect, quote)
+            ok = i < len(calls) and call_matches(calls[i], expect, quote, run.quotes_before)
             hits.append(ok)
             if i < len(calls) and calls[i].quote_id:
                 quote = calls[i].quote_id
@@ -113,6 +135,8 @@ def turn_failures(turn: Turn, run: TurnRun) -> list[str]:
         out.append("forbidden_tool:" + ",".join(sorted(used & turn.forbid)))
     if turn.cards - set(run.card_types):
         out.append("cards")
+    if turn.budget_stop and not any(p.get("kind") in BUDGET_KINDS for p in run.problems):
+        out.append("no_budget_stop")
     for pattern in turn.text_must:
         if not re.search(pattern, run.text):
             out.append(f"text_must:{pattern}")
@@ -149,8 +173,9 @@ def claims_booking(text: str) -> bool:
 INVARIANTS = ("stream", "no_agent_booking", "click_books_once", "no_false_booked", "provenance")
 
 
-def invariant_violations(turns: list[TurnRun], clicks: list[tuple[int, bool, int]]) -> dict[str, list[str]]:
-    """`clicks`: (index of the step in the case, whether a bookable card existed, tickets created).
+def invariant_violations(turns: list[TurnRun], clicks: list[tuple]) -> dict[str, list[str]]:
+    """`clicks`: (index of the step in the case, whether a bookable card existed, tickets created
+    [, tickets expected: 1 by default, 0 for a click that must be refused]).
     Returns invariant name -> descriptions of the violations."""
     bad: dict[str, list[str]] = {}
 
@@ -166,9 +191,11 @@ def invariant_violations(turns: list[TurnRun], clicks: list[tuple[int, bool, int
             add("no_false_booked", f"{t.user!r}: reply says a booking is done but no ticket exists: {t.text!r}")
         if t.outcome == "sent" and t.recheck:
             add("provenance", f"{t.user!r}: {t.recheck}")
-    for index, had_card, created in clicks:
-        if had_card and created != 1:
-            add("click_books_once", f"step {index}: a click on a bookable card created {created} tickets")
+    for index, had_card, created, *rest in clicks:
+        expected = rest[0] if rest else 1
+        if had_card and created != expected:
+            add("click_books_once", f"step {index}: a click on a bookable card created {created} tickets "
+                                    f"(expected {expected})")
         if not had_card and created:
             add("click_books_once", f"step {index}: tickets created without a bookable card")
     return bad
