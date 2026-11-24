@@ -30,6 +30,11 @@ values.
 The Google OAuth **client ID** is public by design (it is sent to every browser). It was still redacted at export
 because it sits in `.env`.
 
+## Final re-scan (after the last export, 64 files)
+- Dev machine `.env`, `.redact.local`, invite codes, test code, old password: 0 hits.
+- VPS `.env`: one non-secret setting (`DAILY_TOKEN_BUDGET` = 2,000,000) ×21; no key, secret or invite code.
+- Token shapes: the same base64 false positive only.
+
 ## Not included (owner decision, 2026-11-24)
 - The homelab "potafree.net" Codex session (`rollout-2026-11-23T15-26-16-…`, 3.1 MB) did the homelab deploy and the
   VPS migration for this project. That one session also holds the owner's other private projects (another website,
