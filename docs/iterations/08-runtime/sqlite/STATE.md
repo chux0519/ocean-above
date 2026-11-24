@@ -13,7 +13,7 @@ booking logic or transaction boundaries; B1–B7 unchanged.
 | Tiny end-to-end benchmark run in the test suite (~9 s) | `backend/tests/test_bench.py` |
 | Measured run on this machine (285 s wall, `nice -n 10`) | `results/bench-2026-11-24.{json,md}` |
 
-## Key results (details: design-section.md X.5, results/)
+## Key results (details: docs/design/sqlite-concurrency.md X.5, results/)
 - Integrity: 0 failures everywhere (double bookings, status mismatches, interleaved turns); 0 BUSY, 0 5xx.
 - Write hold p50 0.5–1.6 ms, p99 ≤ 34 ms; the tail is SQLite busy-handler *waiting* (p99 up to 0.58 s at 25 clients).
 - Single worker CPU saturates first (~200 req/s peak at 50 closed-loop clients).
