@@ -389,6 +389,20 @@ ReplyGuard → `delta`），在 `CallToolsNode` 上执行工具。§4.2 的伪�
   将来可选模式：`after_turn`（当前步结束后停）。规则 R1–R8 见 state_invariants.md。
 - Tracing：默认不装 instrumentation、无 exporter、无 logfire；`Agent(tracer_provider=…)` 给 #35 用（不带消息内容）。
 
+
+### 4.11 观测（OpenTelemetry，#35）
+可选，默认关。`OTEL_TRACING_ENABLED=1` 时 `app/tracing.py` 建一个 TracerProvider，BatchSpanProcessor + OTLP/HTTP exporter（端点取标准变量 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`，默认 `http://localhost:4318`；非本地地址启动时告警）。关时不导入 OTel SDK，没有 provider、exporter 和后台线程，span 调用是共享的空操作。
+
+**Trace 结构**：每轮对话一个 trace，根 `agent.turn`（run_id = SSE `X-Run-Id`，message_id = app.db 记录，会话 id 的哈希，结果 completed / fallback / cancelled / failed，预算用量）。其下是 Pydantic AI 自己的 `invoke_agent` / `chat` / `execute_tool`（GenAI 语义约定，`include_content=False`），我们只补 SDK 没有的：`airline.quote_route` → `core.routing`（算法、locations.db 指纹、候选数、腿数）、`reply_guard`（每句放行的检查，pass/fail + 问题类别）、`run.stop`（从接受 Stop 到停止的回复落库，含 drain 时间）。工具结果码作为属性加在 SDK 的 `execute_tool` 上，LLM 失败重试作为 `agent.turn` 的事件，不另起重复 span。出票点击是独立的 HTTP 请求，自成 trace：`airline.book`（只有状态）→ `booking.recheck`（B6 结果类别、指纹）→ `core.routing`。
+
+**隐私**：span 里只有代码、计数、时长、不透明 id 和指纹（导出的 id：run_id、app.db 的 message_id、供应商的 completion id、tool call id、SDK 的 agent call id、LLM 主机名；会话 id 只以带服务端密钥的 HMAC 出现，可关联、不可反推、无密钥不可核对；模型编造的工具名替换为 `unknown_tool`）；没有用户或模型的文字、prompt、工具参数和结果、城市名、邮箱、用户名、nonce、cookie、密钥。exporter 前一层 `Redacting` 再兜底：异常只留类型（去掉消息和堆栈），status 只留 code，内容类属性键一律删除。生产（VPS）保持关闭，隐私页无需改动；开启时只导出到本机或私网的 collector。
+
+**失败模式**：导出在 SDK 的后台线程里批量进行，队列满了就丢 span；collector 宕机、超时（单次 5 s）或 exporter 抛异常都只丢 span，对话和出票的结果与时延不变（测试：exporter 抛异常、端口关闭、collector 挂起、span 的每个方法都抛异常）。tracing 层自身的错误（包括属性值的计算）被守护层吞掉，不会进入业务代码；一轮结束时先退场 run、结束事件流，最后才写 trace 属性。关停时最多等 5 s，之后剩下的 span 丢弃。本地端点（localhost、私网地址、compose 服务名）一律直连，不走环境里的 HTTP(S)_PROXY / ALL_PROXY；非本地端点告警。
+
+**Phoenix**：`docker compose --profile tracing up` 起 `arizephoenix/phoenix:version-22.0.1`（`PHOENIX_TELEMETRY_ENABLED=false`），UI 只绑 loopback `http://localhost:6006`，数据在 `phoenix` 卷里；普通 `docker compose up` 不启动它。Phoenix 22 能直接把 GenAI span 识别为 AGENT / LLM / TOOL；我们自己的 span 带 `openinference.span.kind`（CHAIN / GUARDRAIL）。
+
+**locations.db 读取期限**（#35 评论）：`_read_rows` 的 SQL 由进度回调 5 s 截止（同 app.db），超时抛 `NetworkDataError`；等锁仍由 5 s busy timeout 限制（原本如此）。文件系统卡在一次读调用里、以及读前后的哈希和 stat 不在期限内。出票时对应 `data_unavailable`，可重试，quote 不会因此变 stale。
+
 ## 5. 路线、距离、价格
 
 - 图：hub–hub 边来自 `hub_links`，非 hub–hub 边来自 `connected_hubs`；双向。非 hub 城市只能当端点（只在 hub 换乘）。

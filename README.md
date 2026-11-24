@@ -70,3 +70,25 @@ How the numbers are checked: `backend/tests/reference.py` is a second implementa
 with the production code on every ordered pair of served cities in `locations.db` (490,700 pairs: price, distance
 and city sequence must be identical) and on randomly generated small graphs, where an exhaustive enumeration of
 all valid paths is the reference.
+
+## Tracing (optional, off by default)
+
+The API can export OpenTelemetry traces of each chat turn to a local [Phoenix](https://github.com/Arize-ai/phoenix):
+the agent run, every model call (tokens, latency) and tool call, the route search, the reply check, a user's Stop and
+the booking re-check. Spans carry codes, counts, durations and ids only — never message text, prompts, tool results,
+city names, emails, nonces, cookies or keys.
+
+With Docker:
+
+    # .env
+    OTEL_TRACING_ENABLED=1
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:6006
+
+    docker compose --profile tracing up -d
+    # chat at http://localhost:3000, traces at http://localhost:6006
+
+A plain `docker compose up` does not start Phoenix, and without `OTEL_TRACING_ENABLED=1` nothing is traced or exported.
+Running the backend on the host instead: start Phoenix (`docker compose --profile tracing up -d phoenix`, or
+`pip install arize-phoenix && phoenix serve`) and set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006`. Evals
+(`python -m evals`) honour the same variables. If the collector is down, spans are dropped; chat and booking are
+unaffected.
