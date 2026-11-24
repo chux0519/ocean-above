@@ -1,0 +1,738 @@
+"""app.db: the business database (users, conversations, messages, call logs, quotes, tickets).
+
+Plain stdlib sqlite3, no ORM. Every operation opens its own connection, so a `Store` can be shared
+between threads. Writes run inside `BEGIN IMMEDIATE` (`Store.write()`): the write lock is taken
+before the first read, so a check-then-write sequence cannot interleave with another writer.
+
+Times are ISO 8601 UTC strings with second precision (`2026-11-23T08:15:00Z`); sub-seconds are
+truncated when a time is stored. The clock is injectable.
+"""
+from __future__ import annotations
+
+import json
+import secrets
+import sqlite3
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterator
+
+Clock = Callable[[], datetime]
+
+# Timeouts (06 P0b, design §4.9). Store calls run in worker threads (`asyncio.to_thread`), which
+# cannot be killed; these bound how long one store operation can keep its thread busy.
+BUSY_TIMEOUT = 10.0  # seconds a statement waits for another connection's lock ("database is locked")
+OPERATION_TIMEOUT = 10.0  # wall seconds one connection (= one read / write transaction) may live while SQL runs
+_PROGRESS_OPS = 1000  # SQLite VM instructions between two deadline checks
+
+SCHEMA_VERSION = 3
+
+_SCHEMA_V1 = """
+CREATE TABLE users (
+    id            TEXT PRIMARY KEY,
+    auth_provider TEXT NOT NULL,
+    provider_sub  TEXT NOT NULL,
+    email         TEXT,
+    display_name  TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    UNIQUE (auth_provider, provider_sub)
+);
+CREATE TABLE conversations (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    title      TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX conversations_by_user ON conversations(user_id, updated_at);
+CREATE TABLE messages (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,   -- insertion order within the database
+    id              TEXT NOT NULL UNIQUE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    role            TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    text            TEXT NOT NULL,
+    cards           TEXT NOT NULL DEFAULT '[]',          -- json; quote cards without live state
+    guard_problems  TEXT,                                -- json or NULL
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX messages_by_conversation ON messages(conversation_id, seq);
+CREATE TABLE llm_calls (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              TEXT NOT NULL UNIQUE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    request         TEXT NOT NULL,                       -- json
+    response        TEXT NOT NULL,                       -- json
+    latency_ms      INTEGER,
+    tokens          INTEGER,
+    model           TEXT,
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX llm_calls_by_conversation ON llm_calls(conversation_id, seq);
+CREATE TABLE tool_calls (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         TEXT NOT NULL UNIQUE,
+    message_id TEXT NOT NULL REFERENCES messages(id),    -- the user message that triggered the turn
+    name       TEXT NOT NULL,
+    args       TEXT NOT NULL,                            -- json
+    result     TEXT,                                     -- json
+    error      TEXT,
+    latency_ms INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX tool_calls_by_message ON tool_calls(message_id, seq);
+CREATE TABLE quotes (
+    id                  TEXT PRIMARY KEY,
+    conversation_id     TEXT NOT NULL REFERENCES conversations(id),
+    user_id             TEXT NOT NULL REFERENCES users(id),
+    origin              TEXT NOT NULL,
+    destination         TEXT NOT NULL,
+    legs                TEXT NOT NULL,                   -- json: from, to, distance, coords, source
+    distance            TEXT NOT NULL,                   -- km, 30 dp decimal string
+    price               TEXT NOT NULL,                   -- USD, 30 dp decimal string
+    network_fingerprint TEXT NOT NULL,
+    status              TEXT NOT NULL
+                        CHECK (status IN ('quoted', 'presented', 'booked', 'expired', 'stale')),
+    status_reason       TEXT,
+    created_at          TEXT NOT NULL,
+    expires_at          TEXT NOT NULL,
+    presented_at        TEXT,
+    closed_at           TEXT                             -- when it became booked / expired / stale
+);
+CREATE INDEX quotes_by_conversation ON quotes(conversation_id);
+-- One row per (quote, message) whose card was sent to the user with `done`. The one-time
+-- confirmation nonce of that card is derived from (quote, user, message); it is never stored.
+CREATE TABLE quote_cards (
+    quote_id      TEXT NOT NULL REFERENCES quotes(id),
+    message_id    TEXT NOT NULL REFERENCES messages(id),
+    presented_at  TEXT NOT NULL,
+    nonce_used_at TEXT,
+    PRIMARY KEY (quote_id, message_id)
+);
+CREATE TABLE tickets (
+    id                   TEXT PRIMARY KEY,
+    user_id              TEXT NOT NULL REFERENCES users(id),
+    quote_id             TEXT NOT NULL UNIQUE REFERENCES quotes(id),   -- B5: one ticket per quote
+    origin               TEXT NOT NULL,
+    destination          TEXT NOT NULL,
+    legs_snapshot        TEXT NOT NULL,                  -- json, same form as quotes.legs
+    distance             TEXT NOT NULL,
+    price                TEXT NOT NULL,
+    network_fingerprint  TEXT NOT NULL,                  -- locations.db verified at booking time
+    confirmed_message_id TEXT NOT NULL REFERENCES messages(id),        -- the card that was clicked
+    booked_at            TEXT NOT NULL
+);
+CREATE INDEX tickets_by_user ON tickets(user_id, booked_at);
+
+-- Q3: booked / expired / stale never change again, whatever the application code does.
+CREATE TRIGGER quotes_terminal_status BEFORE UPDATE OF status ON quotes
+WHEN OLD.status IN ('booked', 'expired', 'stale') AND NEW.status <> OLD.status
+BEGIN SELECT RAISE(ABORT, 'quote status is terminal'); END;
+-- B2/B7: a ticket can only be written for a quote that is `presented` in the same transaction.
+CREATE TRIGGER tickets_need_presented_quote BEFORE INSERT ON tickets
+WHEN (SELECT status FROM quotes WHERE id = NEW.quote_id) IS NOT 'presented'
+BEGIN SELECT RAISE(ABORT, 'ticket needs a presented quote'); END;
+CREATE TRIGGER tickets_are_immutable BEFORE UPDATE ON tickets
+BEGIN SELECT RAISE(ABORT, 'tickets are immutable'); END;
+"""
+
+# v2 (L2 usage limits): one row per chat message the limits let through, written in the same
+# transaction as the count that allowed it, so two racing requests cannot both take the last slot.
+_SCHEMA_V2 = """
+CREATE TABLE message_usage (
+    seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+    id              TEXT NOT NULL UNIQUE,
+    user_id         TEXT NOT NULL REFERENCES users(id),
+    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX message_usage_by_user ON message_usage(user_id, created_at);
+CREATE INDEX llm_calls_by_time ON llm_calls(created_at);
+"""
+
+# v3 (L4 review #7): sessions can be revoked. The cookie carries the user's epoch at sign-in;
+# logout bumps it, so every cookie issued before stops working.
+_SCHEMA_V3 = """
+ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0;
+"""
+
+_MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3}
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def iso(moment: datetime) -> str:
+    """Stored / wire form of a time. Sub-seconds are dropped (floor)."""
+    if moment.tzinfo is None:
+        raise ValueError("naive datetime; times must be timezone-aware")
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_iso(text: str) -> datetime:
+    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def day_start(moment: datetime) -> datetime:
+    """00:00 UTC of the moment's UTC day (usage limits count per UTC day)."""
+    utc = moment.astimezone(timezone.utc)
+    return datetime(utc.year, utc.month, utc.day, tzinfo=timezone.utc)
+
+
+def new_id(prefix: str) -> str:
+    """Opaque id with a type prefix (`u_`, `c_`, `m_`, `q_`, `t_`, ...)."""
+    return f"{prefix}_{secrets.token_hex(8)}"
+
+
+def to_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+class NotFound(Exception):
+    """The object does not exist or belongs to another user (the two are not distinguished)."""
+
+    code = "not_found"
+    status = 404
+
+
+class StoreUnavailable(sqlite3.OperationalError):
+    """app.db did not answer in time: a lock wait passed `busy_timeout` ("database is locked") or
+    an operation passed `operation_timeout` ("interrupted"). The transaction was rolled back, so
+    nothing of it was written; the same operation may be retried."""
+
+
+_UNAVAILABLE = ("database is locked", "database table is locked", "database is busy", "interrupted")
+
+
+def _unavailable(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and not isinstance(exc, StoreUnavailable) \
+        and any(text in str(exc).lower() for text in _UNAVAILABLE)
+
+
+def _disarm(con: sqlite3.Connection) -> None:
+    """Stop the operation deadline (before COMMIT / ROLLBACK, which must not be interrupted)."""
+    con.set_progress_handler(None, 0)
+
+
+class Store:
+    def __init__(self, path: str | Path, clock: Clock = utc_now, *, busy_timeout: float = BUSY_TIMEOUT,
+                 operation_timeout: float | None = OPERATION_TIMEOUT):
+        """`busy_timeout`: seconds a statement waits for a lock held by another connection.
+        `operation_timeout`: wall seconds per connection (one `read()` / `write()`, counted from its
+        opening); SQL still running past it is interrupted at its next check (every few thousand
+        SQLite instructions; None: no limit). Both raise StoreUnavailable, after a rollback."""
+        self.path = Path(path)
+        self.clock = clock
+        self.busy_timeout = busy_timeout
+        self.operation_timeout = operation_timeout
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        con = self._connect(deadline=False)  # migrations are not bounded by the operation timeout
+        try:
+            con.execute("PRAGMA journal_mode = WAL")  # readers are not blocked by a writer
+            self._migrate(con)
+        finally:
+            con.close()
+
+    def now(self) -> str:
+        return iso(self.clock())
+
+    def _connect(self, deadline: bool = True) -> sqlite3.Connection:
+        # isolation_level=None: no implicit transactions; `write()` issues BEGIN IMMEDIATE itself.
+        # `timeout` is SQLite's busy timeout. The progress handler interrupts SQL that runs past
+        # the operation deadline (it does not run while waiting for a lock: that is busy_timeout).
+        con = sqlite3.connect(self.path, isolation_level=None, timeout=self.busy_timeout)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA foreign_keys = ON")
+        if deadline and self.operation_timeout is not None:
+            ends = time.monotonic() + self.operation_timeout
+            con.set_progress_handler(lambda: time.monotonic() > ends, _PROGRESS_OPS)
+        return con
+
+    def _migrate(self, con: sqlite3.Connection) -> None:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            version = con.execute("PRAGMA user_version").fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(f"{self.path} has schema {version}, this code knows {SCHEMA_VERSION}")
+            for target in range(version + 1, SCHEMA_VERSION + 1):
+                for statement in _split_statements(_MIGRATIONS[target]):
+                    con.execute(statement)
+                con.execute(f"PRAGMA user_version = {target}")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+        con.execute("COMMIT")
+
+    @contextmanager
+    def read(self) -> Iterator[sqlite3.Connection]:
+        """A connection for reads; several statements see one snapshot."""
+        try:
+            con = self._connect()
+            try:
+                con.execute("BEGIN")
+                try:
+                    yield con
+                finally:
+                    _disarm(con)
+                    con.execute("ROLLBACK")
+            finally:
+                con.close()
+        except sqlite3.OperationalError as exc:
+            if _unavailable(exc):
+                raise StoreUnavailable(str(exc)) from exc
+            raise
+
+    @contextmanager
+    def write(self) -> Iterator[sqlite3.Connection]:
+        """One `BEGIN IMMEDIATE` transaction: commit on normal exit, roll back on any exception."""
+        try:
+            con = self._connect()
+            try:
+                con.execute("BEGIN IMMEDIATE")
+                try:
+                    yield con
+                except BaseException:
+                    _disarm(con)
+                    if con.in_transaction:  # sqlite rolls back by itself on some errors (disk full)
+                        con.execute("ROLLBACK")
+                    raise
+                _disarm(con)
+                con.execute("COMMIT")
+            finally:
+                con.close()
+        except sqlite3.OperationalError as exc:
+            if _unavailable(exc):  # lock wait or deadline: rolled back, nothing written
+                raise StoreUnavailable(str(exc)) from exc
+            raise
+
+    # Every method below that takes a conversation or message id also takes the user and checks
+    # ownership in the same transaction; NotFound when it is missing or someone else's.
+    # --- convenience wrappers: one transaction each (see records.py for the composable forms) ---
+    def upsert_user(self, auth_provider: str, provider_sub: str, display_name: str,
+                    email: str | None = None) -> dict:
+        from . import records
+
+        with self.write() as con:
+            return records.upsert_user(con, self.now(), auth_provider, provider_sub, display_name, email)
+
+    def get_user(self, user_id: str) -> dict | None:
+        from . import records
+
+        with self.read() as con:
+            return records.get_user(con, user_id)
+
+    def bump_session_epoch(self, user_id: str) -> None:
+        """Revoke every session cookie of the user issued so far (logout)."""
+        from . import records
+
+        with self.write() as con:
+            records.bump_session_epoch(con, user_id)
+
+    def create_conversation(self, user_id: str, title: str = "") -> dict:
+        from . import records
+
+        with self.write() as con:
+            return records.create_conversation(con, self.now(), user_id, title)
+
+    def get_conversation(self, user_id: str, conversation_id: str) -> dict | None:
+        """The conversation summary, or None when it does not exist or belongs to someone else."""
+        from . import records
+
+        with self.read() as con:
+            return records.get_conversation(con, user_id, conversation_id)
+
+    def list_conversations(self, user_id: str) -> list[dict]:
+        from . import records
+
+        with self.read() as con:
+            return records.list_conversations(con, user_id)
+
+    def set_conversation_title(self, user_id: str, conversation_id: str, title: str) -> bool:
+        from . import records
+
+        with self.write() as con:
+            return records.set_conversation_title(con, user_id, conversation_id, title)
+
+    def first_user_text(self, user_id: str, conversation_id: str) -> str:
+        """The first non-blank user message of a conversation the user owns ("" when none)."""
+        from . import records
+
+        with self.read() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.first_user_text(con, conversation_id)
+
+    def add_message(self, user_id: str, conversation_id: str, role: str, text: str,
+                    cards: list | tuple = (), guard_problems: Any = None) -> dict:
+        """Store a message as is. Assistant messages that carry quote or booking-request cards
+        must go through `Airline.post_assistant_message`, which also presents those quotes."""
+        from . import records
+
+        with self.write() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.add_message(con, self.now(), conversation_id, role, text, cards, guard_problems)
+
+    def list_messages(self, user_id: str, conversation_id: str) -> list[dict]:
+        """Raw messages, oldest first. Quote cards carry no live state here; for the contract
+        `Message` form use `Airline.messages`."""
+        from . import records
+
+        with self.read() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.list_messages(con, conversation_id)
+
+    def add_llm_call(self, user_id: str, conversation_id: str, request: Any, response: Any, *,
+                     latency_ms: int | None = None, tokens: int | None = None,
+                     model: str | None = None) -> str:
+        from . import records
+
+        with self.write() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.add_llm_call(con, self.now(), conversation_id, request, response,
+                                        latency_ms, tokens, model)
+
+    def add_tool_call(self, user_id: str, message_id: str, name: str, args: Any, result: Any = None, *,
+                      error: str | None = None, latency_ms: int | None = None) -> str:
+        from . import records
+
+        with self.write() as con:
+            records.require_message(con, user_id, message_id)
+            return records.add_tool_call(con, self.now(), message_id, name, args, result, error, latency_ms)
+
+    def list_llm_calls(self, user_id: str, conversation_id: str) -> list[dict]:
+        from . import records
+
+        with self.read() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            return records.list_llm_calls(con, conversation_id)
+
+    def list_tool_calls(self, user_id: str, message_id: str) -> list[dict]:
+        from . import records
+
+        with self.read() as con:
+            records.require_message(con, user_id, message_id)
+            return records.list_tool_calls(con, message_id)
+
+    # --- usage limits (L2) ---
+    def reserve_message(self, user_id: str, conversation_id: str, *, daily_limit: int,
+                        token_budget: int) -> tuple[str | None, str | None]:
+        """Count and reserve in one `BEGIN IMMEDIATE` transaction: `(reservation_id, None)` when the
+        message may go to the assistant, else `(None, scope)` with scope "user" (the user's messages
+        today reached `daily_limit`) or "site" (today's `llm_calls.tokens` reached `token_budget`);
+        nothing is written then. Today = the UTC day of the store clock."""
+        from . import records
+
+        now = self.clock()
+        since = iso(day_start(now))
+        with self.write() as con:
+            records.require_conversation(con, user_id, conversation_id)
+            if records.messages_since(con, user_id, since) >= daily_limit:
+                return None, "user"
+            if records.tokens_since(con, since) >= token_budget:
+                return None, "site"
+            return records.add_message_usage(con, iso(now), user_id, conversation_id), None
+
+    def release_message(self, user_id: str, reservation_id: str) -> None:
+        """Undo a reservation whose message was refused before anything was stored (bad text)."""
+        from . import records
+
+        with self.write() as con:
+            records.delete_message_usage(con, user_id, reservation_id)
+
+    def messages_today(self, user_id: str) -> int:
+        from . import records
+
+        with self.read() as con:
+            return records.messages_since(con, user_id, iso(day_start(self.clock())))
+
+    def tokens_today(self) -> int:
+        from . import records
+
+        with self.read() as con:
+            return records.tokens_since(con, iso(day_start(self.clock())))
+
+
+def _split_statements(script: str) -> list[str]:
+    """Split a schema script into statements (executescript would commit our transaction).
+    Trigger bodies contain `;`, so a statement ends only where sqlite says it is complete."""
+    out: list[str] = []
+    buf = ""
+    for line in script.splitlines(keepends=True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            out.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        raise ValueError("incomplete statement at the end of the schema script")
+    return out
+"""One lock per conversation, shared by chat turns and the booking endpoint (design §4.6, B7).
+
+In-process only: the API runs as a single uvicorn worker. The database does not rely on this lock
+for B5/B7 (those hold through `BEGIN IMMEDIATE` and `tickets.quote_id UNIQUE`); the lock keeps a
+booking click and a running chat turn of the same conversation from interleaving.
+
+The lock is NOT reentrant. `Airline.book` takes it itself; everything else in `Airline` expects
+the caller (the chat turn) to hold it.
+"""
+from __future__ import annotations
+
+import asyncio
+import threading
+import time
+from contextlib import asynccontextmanager, contextmanager
+from typing import AsyncIterator, Iterator
+
+
+class ConversationBusy(Exception):
+    """The conversation lock was not obtained within the timeout."""
+
+
+class ConversationLocks:
+    def __init__(self) -> None:
+        self._mutex = threading.Lock()
+        self._entries: dict[str, list] = {}  # conversation id -> [lock, holders + waiters]
+
+    def _checkout(self, conversation_id: str) -> threading.Lock:
+        with self._mutex:
+            entry = self._entries.setdefault(conversation_id, [threading.Lock(), 0])
+            entry[1] += 1
+            return entry[0]
+
+    def _checkin(self, conversation_id: str) -> None:
+        with self._mutex:
+            entry = self._entries[conversation_id]
+            entry[1] -= 1
+            if entry[1] == 0:
+                del self._entries[conversation_id]
+
+    @contextmanager
+    def hold(self, conversation_id: str, timeout: float | None = None) -> Iterator[None]:
+        """Blocking form, for sync code (threadpool endpoints). Never call it on the event loop:
+        use `hold_async` there."""
+        lock = self._checkout(conversation_id)
+        try:
+            if not lock.acquire(timeout=-1 if timeout is None else timeout):
+                raise ConversationBusy(conversation_id)
+            try:
+                yield
+            finally:
+                lock.release()
+        finally:
+            self._checkin(conversation_id)
+
+    @asynccontextmanager
+    async def hold_async(self, conversation_id: str, timeout: float | None = None,
+                         poll: float = 0.01) -> AsyncIterator[None]:
+        """Async form of the same lock: waits without blocking the event loop, safe to cancel
+        while waiting, and may be held across awaits (a whole streamed turn)."""
+        lock = self._checkout(conversation_id)
+        try:
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while not lock.acquire(blocking=False):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ConversationBusy(conversation_id)
+                await asyncio.sleep(poll)
+            try:
+                yield
+            finally:
+                lock.release()
+        finally:
+            self._checkin(conversation_id)
+
+    def locked(self, conversation_id: str) -> bool:
+        with self._mutex:
+            entry = self._entries.get(conversation_id)
+            return entry is not None and entry[0].locked()
+"""Server-wide limits on running chat turns, and the bookkeeping of a turn's worker threads
+(06 P0b, design §4.9).
+
+`TurnSlots`: at most `max_active_turns` turns run at once, across all users and conversations, in
+addition to the per-conversation lock. A turn that finds every slot taken waits up to
+`queue_seconds` (first come, first served), then gives up with `ServerBusy`. Waiting is an
+`await` on a future: the event loop is never blocked.
+
+`Threads`: every blocking call a turn makes inside its time limit runs through `Threads.run`, so
+the turn knows which worker threads are still running when the limit cuts it short. A Python
+thread cannot be stopped from outside: a timeout around `asyncio.to_thread` only stops *waiting*
+for it. The turn therefore waits (bounded by `drain_seconds`) for those threads before it stores
+its reply and releases the conversation lock and its slot; the threads themselves are bounded by
+app.db's busy and operation timeouts (`store/db.py`).
+"""
+from __future__ import annotations
+
+import asyncio
+import math
+import os
+from collections import deque
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Callable, Mapping
+
+# name -> (environment variable, lowest, highest)
+_BOUNDS: dict[str, tuple[str, float, float]] = {
+    "max_active_turns": ("AGENT_MAX_ACTIVE_TURNS", 1, 256),
+    "queue_seconds": ("AGENT_TURN_QUEUE_SECONDS", 0, 60),
+    "max_turns_per_user": ("AGENT_MAX_TURNS_PER_USER", 1, 256),
+}
+
+
+class ServerBusy(Exception):
+    """No turn slot became free within the queue time."""
+
+
+@dataclass(frozen=True)
+class TurnConcurrency:
+    max_active_turns: int = 8  # turns running at once, whole server
+    queue_seconds: float = 5.0  # how long a turn waits for a slot, then server_busy
+    max_turns_per_user: int = 2  # turns of one user running at once; more: conversation_busy (P2-8)
+
+    def __post_init__(self) -> None:
+        n, wait = self.max_active_turns, self.queue_seconds
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+            raise ValueError(f"max_active_turns must be a positive integer, got {n!r}")
+        if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not math.isfinite(wait) or wait < 0:
+            raise ValueError(f"queue_seconds must be a number >= 0, got {wait!r}")
+        per_user = self.max_turns_per_user
+        if isinstance(per_user, bool) or not isinstance(per_user, int) or per_user < 1:
+            raise ValueError(f"max_turns_per_user must be a positive integer, got {per_user!r}")
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "TurnConcurrency":
+        """Defaults, overridden by `AGENT_MAX_ACTIVE_TURNS` (integer 1–256),
+        `AGENT_TURN_QUEUE_SECONDS` (number 0–60) and `AGENT_MAX_TURNS_PER_USER` (integer 1–256).
+        A bad value raises ValueError (startup fails)."""
+        env = os.environ if env is None else env
+        values: dict[str, Any] = {}
+        for name, (var, low, high) in _BOUNDS.items():
+            raw = (env.get(var) or "").strip().replace("_", "")
+            if not raw:
+                continue
+            whole = name != "queue_seconds"
+            try:
+                value = int(raw) if whole else float(raw)
+            except ValueError:
+                raise ValueError(f"{var} must be {'an integer' if whole else 'a number'}, got {raw!r}") from None
+            if not low <= value <= high:  # also catches nan
+                raise ValueError(f"{var} must be between {low:g} and {high:g}, got {raw!r}")
+            values[name] = value
+        return cls(**values)
+
+
+EXECUTOR_MARGIN = 16  # worker threads beyond the turns' own: bookings, route checks, message slots
+
+
+def executor_workers(config: TurnConcurrency) -> int:
+    """Size of the event loop's default executor (set at startup, design §4.9). A running turn
+    uses one worker thread at a time; a turn cut short may have two (the thread its time limit
+    left running and the record of the interrupted LLM call). The margin serves the bookings'
+    transactions and the routes' short reads, which no longer wait for locks inside a thread."""
+    return 2 * config.max_active_turns + EXECUTOR_MARGIN
+
+
+class TurnSlots:
+    """A FIFO counting semaphore for chat turns. Lives on one event loop at a time; not
+    thread-safe (only the event loop touches it). Unlike `asyncio.Semaphore` it is not bound to
+    the loop it first waited on (tests run turns of one agent under several `asyncio.run`)."""
+
+    def __init__(self, config: TurnConcurrency):
+        self.config = config
+        self.active = 0  # slots taken
+        self._waiters: deque[asyncio.Future] = deque()
+
+    @property
+    def waiting(self) -> int:
+        return sum(not f.done() for f in self._waiters)
+
+    @asynccontextmanager
+    async def hold(self) -> AsyncIterator[None]:
+        """Take a slot for the body, waiting up to `queue_seconds`; else raise ServerBusy."""
+        await self._acquire()
+        try:
+            yield
+        finally:
+            self._release()
+
+    async def _acquire(self) -> None:
+        if self.active < self.config.max_active_turns and not self._waiters:
+            self.active += 1
+            return
+        if self.config.queue_seconds <= 0:
+            raise ServerBusy()
+        handover = asyncio.get_running_loop().create_future()
+        self._waiters.append(handover)
+        try:
+            async with asyncio.timeout(self.config.queue_seconds):
+                await handover
+        except BaseException as exc:
+            if handover.done() and not handover.cancelled():
+                # the slot was handed over in the same instant as the timeout / cancellation
+                if isinstance(exc, TimeoutError):
+                    return  # keep it: the turn may run
+                self._release()
+                raise
+            handover.cancel()
+            try:
+                self._waiters.remove(handover)
+            except ValueError:
+                pass
+            if isinstance(exc, TimeoutError):
+                raise ServerBusy() from None
+            raise
+        # handed over by `_release`: `active` already counts this turn
+
+    def _release(self) -> None:
+        while self._waiters:
+            handover = self._waiters.popleft()
+            if not handover.done():
+                handover.set_result(None)  # the slot passes to the oldest waiter
+                return
+        self.active -= 1
+
+
+class Threads:
+    """The worker threads one turn started and may not have finished."""
+
+    def __init__(self) -> None:
+        self._running: set[asyncio.Future] = set()
+
+    @property
+    def running(self) -> int:
+        return sum(not f.done() for f in self._running)
+
+    async def run(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """`await asyncio.to_thread(fn, ...)`, but if the caller is cancelled (the turn's time
+        limit), the thread is still tracked until it ends, so `drain` can wait for it."""
+        return await asyncio.shield(self.start(fn, *args, **kwargs))
+
+    def start(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> asyncio.Future:
+        """Start `fn` in a worker thread without waiting; tracked like `run` (for work that
+        must still happen while the turn is being cancelled)."""
+        future = asyncio.ensure_future(asyncio.to_thread(fn, *args, **kwargs))
+        self._running.add(future)
+        future.add_done_callback(self._finished)
+        return future
+
+    def _finished(self, future: asyncio.Future) -> None:
+        self._running.discard(future)
+        if not future.cancelled():
+            future.exception()  # retrieved: a thread that failed after its caller left is not "never retrieved"
+
+    async def drain(self, timeout: float) -> bool:
+        """Wait up to `timeout` seconds for the tracked threads. True when none is left running."""
+        pending = [f for f in self._running if not f.done()]
+        if not pending:
+            return True
+        done, still = await asyncio.wait(pending, timeout=timeout)
+        return not still
+     606 backend/app/airline/service.py
+     320 backend/app/store/records.py
+       5 backend/app/api/__init__.py
+      68 backend/app/api/errors.py
+     217 backend/app/api/google.py
+     113 backend/app/api/guards.py
+      42 backend/app/api/limits.py
+     170 backend/app/api/logins.py
+     360 backend/app/api/routes.py
+      42 backend/app/api/session.py
+      80 backend/app/api/settings.py
+    2023 total

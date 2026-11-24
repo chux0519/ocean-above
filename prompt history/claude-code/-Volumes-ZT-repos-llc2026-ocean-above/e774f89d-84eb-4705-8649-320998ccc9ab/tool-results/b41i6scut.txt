@@ -1,0 +1,290 @@
+## main...origin/main
+44f44b4 07-ui acceptance, deploy log, session export
+4b667ed DESIGN.md §2–6: soft minimalism from 07-ui (issue #39)
+c1f4223 07-ui: soft-minimalist redesign (Closes #39) (#46)
+=================== #49
+P0: Evaluate and migrate custom Agent Loop to OpenAI Agents SDK (streaming, cancellation, tracing) [OPEN] by chux0519
+> **Execution order: 1/4 — P0 runtime migration.** Start with POC + ADR, then migrate generic Agent Runtime if justified. **Do not implement full Stop UI/API or the Phoenix deployment in this issue**: #48 owns cancellation UX/protocol and #35 owns OTel export/Phoenix. Only establish SDK cancellation and trace-processor compatibility. Dependency: none. Blocks #48, #35 and final #47 benchmarks.
+
+## Goal
+
+Evaluate and, if the POC passes, **migrate Ocean Above's custom Python agent orchestration to the OpenAI Agents SDK**. Reduce maintenance of generic runtime machinery (LLM streaming, tool dispatch, run lifecycle, cancellation, built-in tracing) **without changing deterministic business behavior**.
+
+This is a focused SDK migration ticket related to **#48 (Stop SSE / run cancellation)**, **#35 (OpenTelemetry + Phoenix)** and **#47 (multi-model benchmark)**. Avoid separately implementing a second bespoke cancellation loop that would be discarded after migration.
+
+## Current implementation / files
+
+- `backend/app/agent/loop.py`: custom LLM→tool→LLM loop, background task + SSE events, max-step budgets, retry/timeouts, thread draining, per-conversation lock, global/per-user concurrency.
+- `backend/app/agent/llm.py`: custom httpx OpenAI-compatible streaming protocol and tool-call chunk assembly.
+- `backend/app/agent/tools.py`: four domain tools + validation; intentionally **no booking tool**.
+- `backend/app/agent/context.py`: app.db history reconstruction/compaction.
+- `backend/app/agent/guard.py`: ReplyGuard verifies cities/numbers and booking claims **before text is streamed**.
+- `backend/app/airline/`, `backend/app/core/`, `backend/app/store/`: deterministic domain and transaction boundary. **Keep these unchanged unless a narrowly scoped compatibility fix is required.**
+- `backend/evals/`: full-agent evaluation and isolated state/booking tests. Reuse as a regression gate.
+
+## Phase 1 — POC and ADR (required before full migration)
+
+- [ ] Prototype `openai-agents` Python on the **actual configured DeepSeek/OpenAI-compatible provider**, using `OpenAIChatCompletionsModel` + configured `AsyncOpenAI(base_url=...)` as appropriate. Confirm the SDK's exact currently supported interfaces.
+- [ ] Demonstrate streaming text, multiple sequential and parallel tool calls, tool errors, termination, explicit `result.cancel()`, safe cancellation while a tool is in progress, and model stream closure (not merely browser disconnect).
+- [ ] Check DeepSeek reasoning/thinking request compatibility, tool-call incremental chunks, provider usage, cancellation usage gaps, retry behavior and error propagation.
+- [ ] Compare against a small `pydantic-ai-slim[openai]` spike if OpenAI Agents SDK reveals material limitations; consider `openai-python` only as a model-client-only fallback, **not** a replacement for the loop by itself.
+- [ ] Measure dependency footprint (`uv tree`, lockfile, image size), cold start, first-token latency, cancellation latency, and **maintained application LOC removed/added**. Do not equate star count with technical suitability.
+- [ ] Write a short ADR in `docs/design/`: adopt/decline with evidence, trade-offs and explicit migration boundaries. Do not perform a large rewrite if the POC fails.
+
+## Phase 2 — Replace generic Agent Runtime (if POC passes)
+
+- [ ] Adapt `find_city`, `quote_route`, `request_booking`, `list_my_tickets` to SDK function tools, with authenticated user/conversation identifiers injected through trusted Run Context (never model-supplied).
+- [ ] Keep `Airline.book` **outside tools** and preserve explicit user-click/nonce B1–B7 rules. SDK guardrails alone must never authorize booking.
+- [ ] Replace generic hand-written model HTTP stream parsing and LLM→tool dispatch with SDK Runner; remove obsolete code rather than maintaining duplicate loops.
+- [ ] Preserve the **existing SSE contract and UI cards**: convert SDK streamed events to current `status`, `card`, `delta`, `replace`, `done`/`error` semantics. Quote/confirmation cards cannot become bookable before server-side presentation.
+- [ ] Preserve the current **pre-stream ReplyGuard** semantics: verify sentence fragments against structured records before emission; an SDK final-output guardrail is *not* an equivalent substitute.
+- [ ] Reuse `app.db` conversation storage, quoting/ticket records and history compaction; do not silently replace it with an SDK Session.
+- [ ] Preserve/enforce current per-turn tool-call count, token soft cap, max steps, retries/timeout semantics, per-user/global active-turn quotas, conversation locks and safe blocking-thread drain. If SDK does not expose a required budget control, keep a narrow application-level adapter with tests.
+- [ ] Integrate with **#48**: app-owned run ID, ownership-checked idempotent Stop endpoint; SDK cancellation must stop upstream LLM work and future tools while allowing already-started sync/DB operations to settle. Network disconnect alone continues background run. Preserve partial valid output and explicit cancellation status in persisted history.
+
+## Phase 3 — Tracing compatibility
+
+- [ ] Use SDK built-in Agent/LLM/Tool spans. Implement/configure a **custom trace processor → OpenTelemetry/OTLP → local Phoenix** (coordinate with #35); built-in SDK spans are not automatically OTLP.
+- [ ] **Explicitly replace/disable default remote OpenAI trace export** before use with DeepSeek or user data. No unapproved outbound telemetry, raw user PII, nonce, cookie, or provider API key in spans by default.
+- [ ] Add business-only custom spans (`route.search`, `booking.recheck`, `reply_guard`, `run.stop`) where useful; avoid duplicate spans. Trace one run from HTTP through SDK, tools, domain and completion/cancellation.
+- [ ] Keep tracing opt-in and non-blocking: Phoenix unavailable must not break chat or booking.
+
+## Acceptance / regression gates
+
+1. POC/ADR shows measurable simplification and compatible real-provider behavior before removing the existing loop.
+2. Current `backend/tests/`, independent route/reference checks, B1–B7 model-based safety and `backend/evals/` continue to pass with no critical regression.
+3. The normal natural-language quote→confirmation→user-click booking flow, ticket/history lookup, long contexts, multilingual/ambiguous city cases, streaming and fallback paths remain supported.
+4. Explicit Stop works end-to-end, including at race boundaries; broken SSE connection without Stop still permits server completion/reload; no unsafe background tool execution or booking.
+5. Existing HTTP/SSE contract fixture tests and desktop/mobile UI tests pass, or any necessary protocol change is versioned, documented, and migrated with frontend/backend together.
+6. Built-in SDK traces are visible through local Phoenix when enabled, with **no outbound default tracing** and no data leakage.
+7. Update README, `docs/design/design.md`, final `DESIGN.md`, lockfile, test/benchmark evidence and raw coding-agent sessions in `prompt history/`.
+
+## Non-goals
+
+No business-rule rewrite, no MCP/graph-DB/PostgreSQL migration, no true payment or schedules, no multi-agent handoff requirement, and no forced SDK adoption if it makes the system larger or less reliable.
+
+## Scheduling
+
+**High priority, coordinate directly with #48.** First land a small POC + ADR; only then migrate the runtime and implement Stop on the selected execution engine. #35 can build on the SDK's tracing once the processor/export path is established. #47 remains a model-evaluation extension.
+--- comments:
+
+=================== #48
+P0: Stop SSE generation by cancelling the backend Agent run safely [OPEN] by chux0519
+> **Execution order: 2/4 — P0 functional cancellation.** **Blocked by #49's SDK runtime decision/migration** (or its ADR selecting the existing loop). Implement app-owned run_id, Stop endpoint/UI, cancellation semantics and tests against the selected runtime. Do not duplicate SDK evaluation/POC here; #49 owns it. Blocks #35 final tracing of Stop and #47 final benchmark.
+
+## Priority / motivation
+
+**P0 functional requirement**: Ocean Above users must be able to stop an in-progress streamed Agent run. Stopping only the browser's SSE fetch is not sufficient: today `Agent.stream_turn()` creates a background `asyncio.Task` which intentionally continues after the client disconnects. A deliberate Stop must stop further model/tool work and free capacity safely. Ordinary network disconnection should continue to preserve current recovery behavior.
+
+Research references:
+- Vercel AI SDK `useChat().stop()` + server abort propagation: https://github.com/vercel/ai/blob/main/content/docs/06-advanced/02-stopping-streams.mdx
+- OpenAI Agents SDK streamed `cancel(mode="immediate"|"after_turn")`: https://openai.github.io/openai-agents-python/streaming/
+- LangGraph disconnect `cancel|continue` vs checkpointed HITL interrupt: https://github.com/langchain-ai/langgraph/blob/main/libs/sdk-py/langgraph_sdk/schema.py
+- Pi agent abort signal to cooperative tools: https://github.com/earendil-works/pi
+
+## Current source to inspect
+
+- `backend/app/agent/loop.py`: `stream_turn()` creates `_run` task + event queue; `_events()` decoupled from task; `_steps()` can perform many tools; `_llm_step()` uses `aclosing`; `_drain()` tracks in-flight `asyncio.to_thread()` calls and preserves conversation locks; `_finish()` persists and presents cards.
+- `backend/app/agent/llm.py`: streaming `httpx.AsyncClient.stream`, close/abort required.
+- `backend/app/api/routes.py`: streaming POST, authenticated conversation ownership; separate `POST /quotes/{id}/book`.
+- `frontend/src/lib/api.ts`: `sendMessage(..., signal?: AbortSignal)` already accepts a signal.
+- `frontend/src/app/chat/page.tsx`: sends SSE, disables Send while generating, reloads server state on normal/failed completion; no explicit Stop.
+- `backend/app/agent/concurrency.py`: global/per-user turn slots, shielded thread work and 30s bounded drain.
+- `backend/app/airline/service.py`: booking confirmation and B1–B7 are separate; never cancel an already submitted booking transaction via Agent Stop.
+
+## Semantics (must be explicit)
+
+1. **User Stop** = cancel current Agent run; no new LLM calls or new tools after cancellation is observed; close in-flight model HTTP stream, preserve already completed tool results and the validated partial response; settle storage safely and free lock/turn slot.
+2. **Network disconnect / closed tab / transient SSE failure** = continue background run and persist final result, maintaining current behavior. Do not infer user Stop from `request.is_disconnected()` alone.
+3. **Stop ≠ rollback booking**. A separate Confirm Booking HTTP action and committed ticket are immutable, never silently reverted. Any already-running synchronous tool/DB transaction must be allowed to settle safely before releasing relevant locks; a stopped turn cannot mint fresh booking authority for unseen information.
+4. **MVP: immediate cooperative Stop**, not pause/resume, rewind, regenerate, or LangGraph-style checkpoint interruption. Document graceful `after_turn` as an optional future mode.
+
+## P0 implementation
+
+- [ ] Introduce an explicit `run_id` / turn id and lifecycle (`queued|running|cancelling|cancelled|completed|failed` or equivalent), with one active run per conversation given existing lock constraints. Persist enough final status to distinguish a user-cancelled response from a normal completed one.
+- [ ] Provide authenticated, ownership-checked **idempotent cancellation** endpoint, e.g. `POST /api/conversations/{conversation_id}/runs/{run_id}/cancel`. Do not let an old Stop cancel a newer run; reject cross-user/cross-conversation requests; decide semantics for finished/unknown runs.
+- [ ] Add an internal run registry `run_id → task/cancel state` for the single-worker version. Control cancellation independently from the SSE connection. Document why this registry is not multi-worker-safe and how a durable/shared coordinator would be needed later.
+- [ ] Make cancellation cooperative across loop boundaries: before the next LLM request, before each tool dispatch, and after returning from a blocking tool. In-flight `httpx` streaming must close promptly. Cancellation must not be swallowed by generic exception handling or converted into a retryable model error; no retries after Stop.
+- [ ] Preserve `Threads` tracking/drain behavior for already-started `to_thread` operations; do not claim the thread itself was hard-killed. Ensure conversation lock and active-turn slot remain held until safe cleanup (or the existing bounded drain exception with diagnostic logging).
+- [ ] Persist the user's message and **only already validated partial assistant text/cards/results** with clear `cancelled` status; prevent incomplete tool-call fragments from becoming valid next-turn context. Ensure no misleading 'booked' confirmation text and keep quote cards unbookable until the existing verified presentation criteria are met. Define/refuse/settle any already-produced but not presented quotes.
+- [ ] SSE lifecycle: include `run_id` early (without breaking the first `user_message` compatibility contract), then terminal `cancelled` / `done` / `error` semantics. A cancelled run must end exactly once, persist history consistently, and allow immediate later user messages once cleanup is finished.
+- [ ] Frontend: show a clearly labeled Stop button (square icon) in the composer during submitted/streaming; clicking Stop should call the cancellation endpoint **and** abort/close the SSE fetch. Display a distinct 'Stopped' state (not network failure), preserve partial validated text and cards via authoritative conversation refresh; restore Send and prevent stale updates after switching conversations.
+- [ ] Define Stop at race boundaries: before the first user message is stored; while queued for a slot; during model streaming; between model and tool; during sync tool/DB work; while persisting assistant; after completed; repeated Stop; two tabs; SSE disconnection without Stop. Handle daily-message-slot refunds only if the user message was not stored, consistent with current quota semantics.
+- [ ] Ensure a cancelled run has no subsequent tool calls, no unapproved tickets, no unsafe new quote nonce, and no leaked active-turn slot/conversation lock.
+
+## Verification / observability
+
+- [ ] Fake LLM that streams indefinitely, then Stop → upstream stream is closed and no more model tokens/tool steps occur.
+- [ ] Stop in the middle of a multi-tool completion → earlier completed tools retained; later tools not dispatched; next-turn reconstructed context valid.
+- [ ] Stop during `to_thread` → no premature lock release, bounded drain, no unsafely cancellable booking transaction.
+- [ ] Disconnect the SSE consumer without Stop → run still completes and persisted conversation can be reloaded (existing behavior preserved).
+- [ ] Cross-user cancellation rejected; wrong run id cannot cancel a new run; repeat Stop safe; concurrent Stop/finish race has exactly one terminal outcome.
+- [ ] E2E desktop/mobile: Stop becomes available while waiting for the first token, clicking stops the UI and server, partial text visibly marked as interrupted; next message works, no error toast claiming ordinary network failure.
+- [ ] Keep B1–B7 booking model, all existing budget/concurrency/ReplyGuard tests green; new tests are deterministic and no external model is required.
+- [ ] Optional metrics/spans: `agent.run.stop_requested`, `agent.run.cancelled`, stop-to-completion latency, tokens after stop request, thread drain time; integrate with optional Phoenix work without hard dependency.
+
+## Acceptance
+
+1. A deliberate user Stop halts the backend Agent run and upstream LLM request, rather than only closing the frontend SSE reader.
+2. Network disconnection without Stop remains resumable by reloading history; partial user-cancelled output is clearly distinguishable from normal completion.
+3. All cancellation races have named regression tests, ownership checks, stable history/context, and no booking safety regressions.
+4. `README`, `docs/api/contract.md`, `docs/design/design.md`, frontend screenshots/UX states and `prompt history/` updated.
+5. Using a mainstream SDK is explicitly allowed and preferred **if** it reduces maintained code without weakening run cancellation, safety, or eval outcomes. The core Python airline/booking/route/price/database services remain unchanged; no MCP or graph DB migration is needed.
+
+## Scheduling
+
+**P0, before P1 observability (#35) and multi-model benchmarking (#47).** Although higher-priority, design stop-related traces so Phoenix can visualize them later. Implement with a focused backend + frontend PR and add a separate review of cancellation races.
+
+
+## SDK evaluation / optional migration (2026-11-24 addendum; requested by owner)
+
+**Do not treat the hand-written Agent Loop as a permanent constraint.** We actively prefer an established SDK if it reduces implementation/maintenance effort and offers correct native cancellation/streaming. Compare *Agent SDK* vs *model API SDK* (the latter does not implement an agent loop).
+
+| Candidate | Rationale | Important trade-off |
+|---|---|---|
+| **OpenAI Agents SDK (Python)** — first POC | Python fits existing FastAPI backend; Runner.run_streamed() + result.cancel() / cancel(mode="after_turn"), function tools, tracing, built-in run controls | Extra dependencies vs raw client; non-OpenAI DeepSeek endpoint must be configured through OpenAIChatCompletionsModel/AsyncOpenAI; ensure provider compatibility and explicit tracing/exporter privacy |
+| **Pydantic AI Slim [openai]** — comparison POC | Python, provider abstraction, run cancellation/stream interruption, typed tool validation, optional slim deps | Map partial tool calls, run history, model profiles and current custom ReplyGuard/quoting semantics explicitly |
+| **openai-python** — minimal migration | Official model SDK; easier replacement for custom httpx streaming, parsing and retries | No automatic tool-dispatching agent loop or run registry; cannot alone solve user Stop |
+| **Vercel AI SDK** — reference / TS alternative | Strong React useChat stop/stream UX, provider ecosystem | JS/TS-first; migrating backend agent orchestration from FastAPI to Next.js is a larger cross-language rewrite, not justified solely for Stop |
+
+Research:
+- https://openai.github.io/openai-agents-python/streaming/ (explicit cancel and after_turn, cleanup)
+- https://openai.github.io/openai-agents-python/models/ (non-OpenAI / Chat Completions integration)
+- https://pydantic.dev/docs/ai/core-concepts/output/ (cancel streams and interrupted tool calls)
+- https://pydantic.dev/docs/ai/overview/install/ (slim installs)
+- https://ai-sdk.dev/docs/advanced/stopping-streams (propagation and resume/abort caveats)
+
+### Benchmark the migration decision, do not assume it
+
+- [ ] Build small isolated POCs for **OpenAI Agents SDK Python** and **Pydantic AI Slim** on the *actual* DeepSeek/OpenAI-compatible provider. Record lockfile/install dependency changes (use `uv tree` / cold-start and image size), maintained app LOC removed, streaming first-token latency, cancellation-to-upstream-close latency, event/usage compatibility, and implementation complexity. Popularity is only a secondary signal; stars alone do not demonstrate lower maintenance.
+- [ ] Verify multi-step tools, model-specific thinking/reasoning settings, malformed/partial streaming tool call arguments, provider usage metadata (including cancelled calls), retry/timeout behavior and explicit abort. Handle unsupported features with provider-specific adapters or documented limits.
+- [ ] Preserve existing HTTP/SSE event contract or change it deliberately with versioned frontend/contract fixtures and backward-compatible tests. SDK's built-in sessions/guardrails must **not silently replace** app.db persistent history, ReplyGuard, or the independent deterministic business invariants.
+- [ ] Keep domain tools in `airline/` as a thin SDK tool adapter. The SDK **must not** receive a privileged `book` tool: booking remains the separate user-click + nonce endpoint, with B1–B7 intact.
+- [ ] Keep application-owned run_id, ownership-checked Stop endpoint, per-user/global turn quotas, and SQLite/thread cleanup guarantees even if the SDK provides its own stream cancellation. Closing the local event consumer alone is not cancellation.
+- [ ] Test tracing with OpenTelemetry/Phoenix: decide whether to use SDK-native traces, exporter adapters or manual OTel spans; prevent duplicative spans, and disable uploads to unapproved external tracing backends by default.
+- [ ] Run existing Python unit/model-based tests and real `backend/evals` before/after the proposed migration. **No regression** in safety, correct tool trajectories, streaming/Stop, price provenance, and default-model cost/latency; show comparative results.
+- [ ] Decide in a short ADR: choose the Agent SDK only if the POC **materially reduces maintained runtime code/complexity** and passes cancellation/safety/provider compatibility; otherwise migrate only to the official OpenAI Python client (or keep current loop) and explain why. No forced full rewrite.
+
+**Implementation sequencing:** POC + ADR first, then selected SDK integration (if approved by test results), then finish the Stop lifecycle. Avoid writing two competing cancellation implementations only to delete one.
+
+
+--- comments:
+
+=================== #35
+#31-P2 Opt-in OpenTelemetry tracing + local Phoenix profile (queued) [OPEN] by chux0519
+> **Execution order: 3/4 — P1 observability.** **Depends on #49 (selected SDK + trace processor hook) and #48 (stable Stop/run lifecycle).** Prefer SDK-native Agent/LLM/Tool spans adapted to OpenTelemetry, adding only missing domain spans. The existing text referring to the custom httpx loop is historical; avoid duplicate instrumentation. Owns OTLP exporter, opt-in Phoenix Compose profile, redaction and end-to-end trace verification. Blocks integrated trace links in #47.
+
+Parent: #31 (read it in full; baseline and non-goals there) · Rules: AGENTS.md · Design: docs/design/design.md §4
+Queued after P0/P1. Scope exactly as #31 P2: OTEL_TRACING_ENABLED (default off), OTLP/HTTP exporter, nested spans agent.turn / agent.llm / agent.tool / airline.quote_route / core.routing / reply_guard / airline.book, one correlation id per turn, no PII/keys/nonces/prompts exported by default, exporter failure never affects chat or booking, optional Phoenix compose profile (not started by default) + README. New dependencies (opentelemetry-sdk, exporter) to be listed in the PR.
+**Model:** Opus 5.5 · **Branch:** it06-otel
+--- comments:
+chux0519: Also queued here (from P0b open point 3): give core/network.py locations.db reads an operation deadline like app.db (progress handler), if cheap.
+=================== #47
+Multi-model Agent benchmark with optional Promptfoo comparison UI [OPEN] by chux0519
+> **Execution order: 4/4 — P1 model benchmarks.** Final end-to-end evaluation **depends on #49 and #48**; trace linking benefits from #35, but model-neutral config/cost registry/experiment planning may begin earlier. Promptfoo remains optional. Do not rewrite deterministic business assertions.
+
+## Goal
+
+Add a **reproducible multi-model Agent benchmark** for Ocean Above, using the existing Python `backend/evals/` as the business-correctness oracle and **Promptfoo as an optional experiment orchestration/comparison UI**. Do not replace deterministic tests or introduce an LLM judge for objectively testable booking/routing facts.
+
+## Existing baseline
+
+- `backend/evals/cases.py`, `checks.py`, `runner.py`, `report.py`, `__main__.py`: full agent loop on isolated `app.db` and a copy of `locations.db`; multi-turn/click tests, tool trajectories, B1–B7 safety, streaming/reply guard, repeated real-model runs, JSON/Markdown reports, usage/latency.
+- `backend/app/agent/config.py` and `llm.py`: currently configured around OpenAI-compatible HTTP API and provider-specific thinking fields.
+- `backend/evals/runner.py` hardcodes DeepSeek Flash cost rates (`PRICE`); unsuitable for comparing other models.
+- Preserve existing golden cases and regression cases, including nearest-served follow-up, book-on-first-message, ambiguous cities, long history, prompt injection, no-early-booking.
+
+## P0 — Framework-neutral model matrix + accurate metrics
+
+- [ ] Define versioned experiment spec (`model/provider/base_url/auth ref/reasoning effort/temperature/output budget/prompt version/code SHA/dataset version/pricing version/N runs`) with no credentials in reports.
+- [ ] Add a provider abstraction/config to support multiple OpenAI-compatible endpoints; cleanly isolate protocol differences for native Anthropic/Gemini or report unsupported configurations explicitly, rather than assuming DeepSeek thinking fields apply universally.
+- [ ] Remove global DeepSeek-only `PRICE` from comparisons. Use a versioned model pricing registry including cache hit/miss, input/output/reasoning billing where applicable; preserve **unknown cost** rather than presenting a false zero. Record observed usage, estimated usage, API failures and missing-usage separately.
+- [ ] Reuse exactly the same real Agent, Tools, guard, budgets, isolated DB fixtures, deterministic ground-truth assertions and scenarios for each model. Ensure repeatability: dataset/commit, seeds, concurrency, temperature, run ordering and wall-time noted; optionally interleave model runs to reduce time-of-day provider effects.
+- [ ] Report per-model/per-case: strict safety violations (must be zero), end-to-end task/trajectory pass, tool accuracy, unnecessary/spurious calls, fallback rate, retries, budget truncations, total tokens, cost per run, **cost per successful task** (sum of costs including failures / successful tasks), turn p50/p95 and first-token latency where available. Distinguish per-call from end-to-end metrics.
+- [ ] Provide readable Markdown + JSON comparison matrix, failed-case drill-down and a sample benchmark command. Do not present tiny-N pass differences as statistically significant.
+
+## P1 — Optional Promptfoo adapter/UI
+
+- [ ] Add an opt-in Promptfoo config and Python custom provider/adapter which invokes the existing `backend/evals` case runner and returns structured result + metrics/assertions; avoid reimplementing scenario logic in YAML.
+- [ ] Validate that each Promptfoo evaluation executes an **entire multi-turn case** (including confirmation click, with isolated test DB) rather than one completion.
+- [ ] Allow model x reasoning level x prompt version x dataset experiments. Supply documented CLI and `promptfoo view` workflow for comparison results.
+- [ ] Gate correctness on Python assertions/B1–B7 and never let an optional LLM-as-a-Judge override a deterministic failure.
+- [ ] Leave Promptfoo completely optional for running the normal app and baseline pytest suite.
+
+## P1 — Regression & safe evaluation
+
+- [ ] Add more multi-turn cases: changing origin/destination; multiple quotes and 'book the second'; explicit negation vs confirmation; tool failure/retry; user trying to bypass confirmation; budget exhaustion; stale quote; context compaction; multilingual ambiguous names.
+- [ ] Shadow-mode design only (no real booking calls, no write to production database). Document privacy/PII redaction before collecting real user prompts.
+- [ ] Keep evaluation/fixture traffic independent of real users and rate/cost protected (`--estimate`, `--max-cost`, concurrency controls).
+
+## Acceptance criteria
+
+1. At least two distinct model configurations can be compared on identical real-agent cases using a single documented command, with per-model JSON + Markdown summaries; authenticated API calls are only run when explicitly configured.
+2. The cost registry is model-specific and versioned; missing usage/rates are clearly identified, not silently assigned DeepSeek rates.
+3. All core route/price checks and B1–B7 safety rules remain deterministic and unchanged; any violation is an automatic FAIL.
+4. Promptfoo optional integration (if included in this issue) shows per-model/per-case outcomes and can be opened in its comparison UI; removing Promptfoo does not affect Ocean Above runtime/tests.
+5. Tests cover provider adapters, metadata, cost accounting, repeated runs and result scoring. Record benchmark evidence/limitations, update design docs, retain full coding agent session exports in `prompt history/`.
+
+## Out of scope
+
+No change to production booking architecture, no PostgreSQL/Neo4j/MCP migration, no online shadow booking, no mandatory Phoenix service. Instrumentation with trace IDs may integrate with optional OpenTelemetry/Phoenix work when present.
+
+## Scheduling
+
+Implement **P0 first** (independent model comparison + trustworthy cost/metrics). Add Promptfoo only after the existing Python runner produces model-neutral output. This is a post-take-home extension, not a blocker for submission.
+--- comments:
+
+=================== #41
+Document SQLite concurrency limits and benchmark-driven PostgreSQL migration criteria [OPEN] by chux0519
+> **Independent parallel workstream.** SQLite limitation documentation and workload/benchmark design can run alongside #49–#48; for comparable performance results, run the final load test on a pinned, stable application revision. No SDK migration dependency and no database migration in this issue.
+
+## Context / current implementation (2026-11-23)
+
+Document the trade-off of **SQLite `app.db` with WAL mode** and establish a reproducible benchmark to decide whether migration to PostgreSQL (or smaller SQLite optimizations) is justified. **Do not migrate the DB in this issue.**
+
+Current source:
+- `backend/app/store/db.py`: `PRAGMA journal_mode=WAL`; per-operation SQLite connections (`timeout=30`); `read()` uses `BEGIN`; `write()` uses `BEGIN IMMEDIATE` through COMMIT/ROLLBACK.
+- `backend/app/airline/locks.py`: in-process lock keyed by conversation, shared by chat turns and booking.
+- `backend/app/airline/service.py`: `book()` obtains the conversation lock, then `Store.write()`, then `_book() → _recheck()`. The latter hashes/reloads `locations.db` when needed and revalidates/recomputes the cheapest route **while holding app.db's writer lock**.
+- Deployment uses one Uvicorn worker. The separate read-only `locations.db` is not the WAL `app.db` (distinct requirements).
+
+## Add to limitations / design docs
+
+- [ ] Explain: WAL allows concurrent readers and one writer; `BEGIN IMMEDIATE` serializes writes for the **whole app.db file** (not row/table locks). This **does not mean** HTTP requests or LLM turns are globally serialized.
+- [ ] Explain: the per-conversation lock serializes turns/clicks of the **same conversation** only; it is in-process and does **not** coordinate multiple workers/machines. SQLite constraints/transactions still protect one-ticket-per-quote but would not replace all app-level conversation ordering semantics.
+- [ ] Explain: `_recheck()` currently executes inside the writer transaction. Any expensive `locations.db` fingerprint/rebuild/route search extends the blocking time for unrelated writes (messages, call logs, other bookings).
+- [ ] State why this is a conscious take-home trade-off: simple transactions/atomic booking, minimal operational complexity; **not** a measured production scalability guarantee.
+- [ ] Distinguish SQLite lock waiting (`timeout=30`, possible `database is locked`) from application conversation-busy/turn timeout.
+- [ ] Add a benchmark-and-migration decision section to `docs/design/design.md` §11 / final English design doc. Keep it concise and mark all thresholds below as illustrative service SLOs, not measured results.
+
+## Reproducible benchmark plan (no real LLM costs)
+
+1. **Instrumentation**: measure `Store.write()` separately as (a) time spent waiting for `BEGIN IMMEDIATE`, (b) time holding the write transaction until COMMIT, and (c) total duration; expose counts of `SQLITE_BUSY` / timeouts. Add `airline._recheck` and graph reload duration as separate spans/metrics (may reuse optional OpenTelemetry work, but benchmark must work without Phoenix).
+2. **Deterministic setup**: use a copied `locations.db`, fresh isolated `app.db`, fixed test seed, pre-created users/conversations/valid presented quotes and nonces, fake LLM/tool results. Avoid external LLM/network latency masking DB lock contention. Keep write transactions realistic (LLM/tool call logs, quote creation, booking, conversation history reads).
+3. **Scenarios**:
+   - Readers + writers (e.g., 70% history/tickets reads, 20% chat/log/quote writes, 10% bookings);
+   - Booking burst, with distinct users/conversations/quotes;
+   - Same-conversation double-click and concurrent turns for lock/idempotency checks;
+   - Forced route-network reload or changed `locations.db` during booking, measuring `_recheck` overhead;
+   - If testing storage growth, seed increasing counts of messages/tool logs/quotes/tickets independently of city count.
+4. **Load sweep**: 1 / 5 / 10 / 25 / 50 / 100 concurrent clients, warm-up + repeated measured intervals; hold workload distribution, hardware and DB size fixed. Record Python/SQLite versions, CPU, filesystem type, host/container details. Include realistic separate LLM-latency scenario as a second end-to-end benchmark, not the only measurement.
+5. **Metrics**: request throughput, end-to-end p50/p95/p99 by endpoint, SQLite writer-lock wait and transaction-hold p50/p95/p99, booking `_recheck` p50/p95/p99, `SQLITE_BUSY`/5xx rate, CPU/memory/IO, WAL growth/checkpoint latency, data-integrity errors (double bookings, quote/ticket status mismatch).
+6. **Tools**: simple Python `httpx` + `asyncio` workload (or Locust/k6) plus in-process store microbenchmark; first benchmark current implementation, then compare optimizations under identical workload and SLOs. Include run instructions and machine-readable results, not only screenshots.
+
+## Decide whether to migrate
+
+- Keep SQLite if correctness holds and the observed writer-lock wait, booking latency, error rate and sustained write throughput meet the explicitly stated target SLO on expected workload.
+- First try shortening write transactions: consider computing expensive route validation **before** acquiring `app.db` writer lock, but preserve atomic confirmation and protect the TOCTOU boundary (e.g., consistent version/fingerprint verification inside transaction). Do not change this blindly; correctness and booking invariants B1–B7 are mandatory.
+- Consider batching/asynchronously exporting noncritical telemetry logs or separating high-volume observability data, without degrading conversation history integrity.
+- Move to PostgreSQL when sustained write contention, multi-instance deployment, or operational requirements justify it. PostgreSQL row locks help with different quotes, but migrations also require revisiting conversation-level locking, idempotency, schema/transactions and operational overhead. Do not conflate a graph DB or MCP with solving app.db writer contention.
+- Publish a small decision table with **measured** before/after results and rationale. No arbitrary QPS threshold should be portrayed as a fact.
+
+## Acceptance
+
+- Documentation clearly distinguishes WAL, per-conversation locks and single-worker restrictions.
+- A reproducible, isolated benchmark harness or detailed ready-to-run plan with workload generators and metrics; report measured results if executed, otherwise explicitly label as unmeasured.
+- B1–B7 and regression tests remain green after any instrumentation or optimization.
+- No unnecessary switch to PostgreSQL; log future migration as a conditional decision.
+
+--- comments:
+

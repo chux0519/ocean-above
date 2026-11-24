@@ -1,0 +1,726 @@
+## 4. Agent loop 设计
+
+### 4.1 状态机
+
+```mermaid
+stateDiagram-v2
+  [*] --> BuildContext: 收到用户消息（已落库）
+  BuildContext --> CallLLM
+  CallLLM --> ExecTools: 有 tool_calls
+  CallLLM --> StreamReply: 文本
+  CallLLM --> Fallback: LLM 错误且重试用尽
+  ExecTools --> CallLLM: 结果追加（step < MAX_STEPS）；卡片已推送
+  ExecTools --> Fallback: step = MAX_STEPS
+  ExecTools --> Fallback: 每轮工具调用用尽且有被拒调用
+  ExecTools --> Fallback: 本轮 token ≥ 软上限
+  StreamReply --> StreamReply: 一句通过校验 → 推送
+  StreamReply --> Fallback: 某句校验失败 → replace
+  StreamReply --> Persist: 文本结束
+  Fallback --> Persist: 代码模板回复（只用记录）
+  Persist --> [*]: 存 assistant 消息 + 卡片；quote → presented；done
+```
+
+### 4.2 伪代码
+
+```python
+def run_turn(conv, user_text, emit) -> AssistantMessage:
+    with conversation_lock(conv):                  # 同会话串行；出票接口也拿同一把锁
+        store.add_message(conv, role="user", text=user_text)
+        ctx = build_context(conv)                  # system + 历史（LLM 原文）+ 历史工具结果（精简）
+        produced = []                              # 本轮记录：quote / booking request / ticket list / city
+        for step in range(MAX_STEPS):              # MAX_STEPS = 6
+            stream = llm.chat_stream(ctx, tools=TOOL_SCHEMAS, temperature=0)
+            if stream.tool_calls():                # 分片的参数拼完整后再执行
+                for call in stream.tool_calls():
+                    emit("status", status_text(call))
+                    result = dispatch(call, conv)  # pydantic 校验 → airline → ToolCall 落库
+                    produced += result.records     # 校验失败也返回结构化错误，让 LLM 自行修正
+                    for card in cards_for(result.records):
+                        emit("card", card)         # 卡片立即推送，按钮在 done 前禁用
+                    ctx.append(tool_message(call.id, result.for_llm()))
+                store.add_llm_call(conv, ctx, stream.raw())
+                continue
+            guard = ReplyGuard(records=visible_records(conv, produced), user_text=user_text)
+            for sentence in stream.sentences():    # 按句缓冲
+                ok, problems = guard.check(sentence)
+                if not ok:
+                    emit("replace", fallback_reply(produced))
+                    return persist(conv, fallback_reply(produced), produced, guard_problems=problems)
+                emit("delta", sentence)
+            store.add_llm_call(conv, ctx, stream.raw())
+            return persist(conv, stream.text(), produced)
+        emit("replace", fallback_reply(produced))
+        return persist(conv, fallback_reply(produced), produced)
+```
+
+### 4.3 上下文
+- system prompt：角色；工具使用规则；「事实在卡片里，文字里不要自己算数，提到数字只能照抄工具结果的显示值」；
+  「用户要订票时调用 `request_booking`，告诉用户点击确认卡出票」；「城市名有歧义时先问用户」；当前日期。
+  **不放城市列表**（城市由工具解析）。
+- 历史：本会话全部消息，**用 LLM 原文**（与渲染后一致，因为文本不再做替换）；工具结果以精简 JSON 保留
+  （记录 id + 显示值），超过预算时从最早的轮次开始压缩成摘要，quote 和 ticket id 始终保留。
+- LLM 参数：`temperature=0`，`tool_choice=auto`；并行工具调用允许（按顺序执行）。
+
+### 4.4 工具
+
+| 工具 | 参数 | 返回的记录 | 为什么这样设计 |
+|---|---|---|---|
+| `find_city` | `name` | `CityRecord`：规范名、是否有服务、是否 hub、直连 hub；无服务时附最近的有服务城市（前 3 个）；找不到或有歧义时附候选 | 城市解析和「无服务 → 最近有服务城市」（要求 8）是确定性逻辑；歧义（如 `San Jose` / `San José`）返回 `ambiguous_city`，由用户选 |
+| `quote_route` | `origin`, `destination` | `Quote`：航段、中转、距离、价格（显示值 + 高精度值）、来源、库指纹、有效期；错误：`unknown_city` / `ambiguous_city` / `same_city` / `no_service`（附最近有服务城市，排除另一端）/ `unreachable` | 询价产生不可变记录；确认卡、出票都引用同一个 id |
+| `request_booking` | `quote_id` | `BookingRequest`：确认卡（完整航段、中转、距离、价格、有效期）；nonce 在本轮 `done` 时随消息下发，不进工具结果 | LLM 只能让确认卡出现，不能出票；出票的触发是用户点击（P4） |
+| `list_my_tickets` | 可选：`city`、`ticket_id`、`booked_after/before` | `TicketList`：票据记录 + `count` | 要求 9：票据只从 app.db 读；数量由代码给出（FSR 的计数教训） |
+
+工具设计取舍：
+- **少而粗**：4 个工具覆盖全部需求。工具越少，LLM 选错的机会越少，也更容易统计成功率。
+- 参数只收**名字和 id**，不收距离、价格等数字，LLM 没有机会把自己算的数传进来。
+- 返回给 LLM 的都是已格式化的显示值，LLM 不需要也不应该自己舍入或换算。
+- 错误也是结构化记录，LLM 据此组织语言，但事实来自记录；**无服务、歧义、找不到也各有一张卡片**，
+  即使 LLM 文字写错，卡片上的事实是对的。
+
+### 4.5 回复校验（ReplyGuard）
+- **数字按值溯源**：句子里每个数字（含金额、公里数、计数）规范化后必须等于本轮可见记录的某个显示值
+  （如 `$1,234.57`、`9,497.3 km`、`3`）。另外允许：用户本条消息里原样出现过的数字、Markdown 有序列表序号、
+  记录 id、日期。
+- **城市名按值溯源**：句子里出现的任何库内城市名，必须出现在本轮记录里或用户本条消息里（防止 LLM 用常识推荐
+  「附近的 Dubai」——库里 Abu Dhabi 最近的有服务城市是 Tirana）。
+- 失败：流式下已推出的句子无法撤回，所以**不重写**，直接 `replace` 成代码模板回复（模板只用记录拼句子）。
+  失败原因落库，计入评测指标。
+- 已知漏洞：文字写出的数（「两千多公里」「three tickets」）看不出来 → prompt 禁止 + 评测检查 + 写入已知限制。
+- 03 开工第一步：用约 20 个用例在 DeepSeek flash 上实测校验通过率和回退率，再定 prompt；如回退率过高，改为
+  「文字不写任何数字，事实全在卡片」。
+
+- **实现细化（T3，2026-11-23）**：
+  - 可见记录 = 上下文里全部工具结果 + 出票事件（不只本轮）；工具只回显 LLM 自己参数的内容（query、filter、错误信息）
+    不算记录；
+  - 城市名：用户在本会话任何一条消息里提到的库内城市都可出现；prompt 要求城市名一律用记录里的英文原名
+    （回复是中文也一样）；被翻译成其他文字的城市名 guard 查不到，写入已知限制；
+  - 数字带单位核对（`$` ↔ 价格、`km` ↔ 距离；英里、小时、百分比等一律不放行）；计数只来自代码给的
+    `count` / `leg_count` / `transfer_count`；有序列表序号只认 1、2、3… 连续序列；
+  - **出票声明规则**：本轮记录里没有用户点击出票或非空的查票结果时，「已出票 / booked / confirmed」类说法回退模板；
+    `request_booking` 成功的轮次由代码在末尾追加固定的点击提示；
+  - LLM 不可用且本轮没有任何产出 → SSE `error`，只保留用户消息；`finish_reason` 不是 `stop` → 模板；
+  - 整轮总时限 90 s、会话锁等待 10 s（超时 `conversation_busy`，消息不保存）；内联 `<think>` 块剥离；
+    给 LLM 的高精度值去掉，只给显示值。
+  - 真模型实测（deepseek-flash，effort high，31 场景 / 50 轮）：50/50 原样放行，0 回退，0 虚假出票声明；费用约 $0.016。
+
+### 4.6 失败处理
+| 情况 | 处理 |
+|---|---|
+| LLM 超时 / 5xx | 指数退避重试 2 次 → 回复「服务暂时不可用」，用户消息保留，可重发 |
+| 工具参数不合法 | 结构化错误回给 LLM，计入工具调用成功率的失败 |
+| 超过 MAX_STEPS | 模板回复，附本轮已产生的记录 |
+| 用户在回复完成前又发消息 / 点按钮 | 同会话串行（每会话一把锁，聊天和出票接口共用）；uvicorn 单 worker |
+| 超出限额 | 明确提示（每用户每日消息上限、全站每日预算） |
+| 本轮工具调用或 token 超出预算 | 超出的工具调用不执行并回结构化拒绝；需要结束时模板回复（`tool_budget` / `token_budget`），见 §4.8 |
+| 全站对话轮次已满 | 最多等 5 s；仍满 → `server_busy`，消息不保存，额度退还，前端保留输入 |
+| app.db 锁等待 / 操作超时 | 回滚；HTTP 503 `data_unavailable`（出票可用同一 nonce 重试）；对话里走模板 / `internal_error` |
+| 同一用户已有 2 个轮次在跑 | `conversation_busy`（其他会话忙），什么都不存 |
+| 用户消息没能存入 app.db | `internal_error`（没有保存），额度退还 |
+
+### 4.7 流式输出
+- 传输：`POST /api/conversations/{id}/messages` 返回 SSE（`text/event-stream`），前端用 fetch 逐段读取。
+- 事件：
+  | 事件 | 内容 | 时机 |
+  |---|---|---|
+  | `status` | 「正在查询航线…」等进度 | 每次工具调用前 |
+  | `card` | 行程卡 / 确认卡 / 票卡 / 无服务卡 / 歧义卡（完全由记录渲染） | 工具返回后立即推 |
+  | `delta` | 通过校验的一句文本 | LLM 流式输出时，按句 |
+  | `replace` | 整条文本替换为代码模板 | 某句校验失败 |
+  | `ping` | 心跳 | 每 15 秒（防止 Cloudflare 断开空闲连接） |
+  | `done` / `error` | 消息 id、各卡片的服务端状态 | 结束 |
+- 卡片按钮在 `done` 之前禁用；之后的按钮状态（可订 / 已出票 / 已过期）一律以服务端当前 quote 状态为准，
+  包括断线重连后拉到的历史卡片。
+- 断线：后端照常跑完一轮并落库，前端重连后拉会话即可看到完整结果。
+
+### 4.8 每轮预算（06 P0a，#32）
+集中在 `agent/budget.py`：`AgentBudget`（配置）+ `BudgetTracker`（一轮的计数）。loop 只在两处问它：每次调 LLM 前
+（`stop_before_step`）和每个工具调用前（`admit_tool_call`）。
+
+| 预算 | 默认 | 环境变量（范围） | 超出时 |
+|---|---|---|---|
+| LLM 步数 | 6 | `AGENT_MAX_STEPS`（1–20） | 模板回复，`max_steps` |
+| 每步工具调用 | 4 | `AGENT_MAX_TOOL_CALLS_PER_STEP`（1–16） | 多出的不执行，回结构化拒绝，本轮继续 |
+| 每轮工具调用 | 12 | `AGENT_MAX_TOOL_CALLS_PER_TURN`（1–64） | 多出的不执行，回结构化拒绝，本步结束后模板回复，`tool_budget` |
+| 单次输出 token（含思考） | 4096 | `AGENT_MAX_OUTPUT_TOKENS_PER_CALL`（256–32768） | 请求的 `max_tokens`；截断 → 模板（`truncated`） |
+| 每轮总 token（软上限） | 60000（原 20000；06 P1 实测长会话中三步轮次约 27k） | `AGENT_MAX_TOTAL_TOKENS_PER_TURN`（1000–1000000） | 不再开始下一步，模板回复，`token_budget` |
+| 每轮总时长 | 90 s | `AGENT_MAX_TURN_SECONDS`（5–600） | 模板回复（`turn_timeout`）；没有产出 → `llm_unavailable` |
+
+环境变量不合法（非数字、越界、非整数）时应用启动失败，不会带着错误的预算运行。
+
+- **工具调用逐个计数**，不是按 LLM 步计数。一次 completion 里超出的调用**不执行**（不发 `status`、不碰 airline），
+  每个都得到一条 `{"code":"tool_budget_exceeded","message":…,"limit":"per_step"|"per_turn"}` 工具结果，
+  所以每个 `tool_call_id` 都有回应，协议有效；拒绝也像普通调用一样存入 `tool_calls`（`error = "budget: …"`），
+  下一轮重建的上下文与记录的 completion 对齐。拒绝不是记录：不进 ReplyGuard，模板也不引用它。
+- 一次 completion 的工具调用超过 `每步上限 × 4`（默认 16）时视为异常：一个都不执行、不逐条落拒绝，本轮以模板结束
+  （`tool_budget`，值为调用数）；该 completion 在 `llm_calls` 里标 `tool_calls_not_run`，重建上下文时跳过它。
+- 工具返回后，结果、卡片和给 LLM 的消息立即登记到本轮，再写 `tool_calls` 行；时限落在写行上时，模板回复仍带这张卡。
+- **token 软上限**：在两次 LLM 请求之间、以及每次重试之前检查（正在进行的那一步会跑完，超出后不再开始下一步，也不再重试）。
+  每次调用按以下规则计费：服务商回报的用量取 `max(total_tokens, prompt_tokens + completion_tokens)`（0 不算回报）；
+  **没读到任何响应体的失败**（HTTP 错误状态、连接 / 握手失败）计 0；其余没有可用回报的调用（流中途断开、
+  completion 没带 usage）按估算计：`ceil(请求 JSON 字符数 / 2) + ceil(已收到的输出字符数 / 2)`（输出含文本、思考、
+  工具调用，最多到单次输出上限）；输出量不可知时（本次调用超时、ReplyGuard 截断、整轮时限打断）按整个单次输出上限计。
+  整轮时限打断的调用也落一条 `llm_calls`（`aborted: "turn_timeout"`）。每次计费写在 `llm_calls.response.budget`；
+  `llm_calls.tokens` 存同一个计费值（服务商原始回报仍在 `response.usage`），全站每日预算（§8.2）按它累计，
+  所以两者口径一致。**这不是严格的费用上限**：单次调用最多可以超出剩余额度一整步，价格也按模型而异。
+- **预算停止永远不出票、不改 quote 状态**：agent 本来就没有出票路径；被拒的 `request_booking` 不执行，所以不会出现确认卡。
+  已执行的工具结果和卡片照常保留，assistant 消息照常存储（模板），会话保持良构。
+- 停止时记一条 warning 日志（步数、已执行/被拒调用数、token、估计次数）。
+
+### 4.9 并发与阻塞调用（06 P0b，#33）
+- **全站并发上限**：同时运行的对话轮次最多 `AGENT_MAX_ACTIVE_TURNS`（默认 8，1–256），在每会话锁之外。先拿会话锁，再拿名额
+  （先来先得），最多等 `AGENT_TURN_QUEUE_SECONDS`（默认 5 s，0–60）；等不到 → SSE `error server_busy`，在 `user_message`
+  之前发出，什么都不存，并退还当天的消息额度。等待是 `await`，不阻塞事件循环。
+- **线程不能强制中止**：工具和 app.db 调用在工作线程里跑（`asyncio.to_thread`）；超时只能停止等待，线程会跑完。所以本轮
+  在时限内启动的线程都登记下来；整轮超时或出错后，先等它们结束（最多 30 s）再落 assistant 消息、释放会话锁和名额——
+  否则线程可能在锁释放后还在写 quote。超过 30 s 记 error 日志后照常结束。线程占着名额，因此线程数有上限。
+- **app.db 时限**：每条语句等锁最多 10 s（busy timeout），每个连接（一次读或写事务）从打开起 10 s 后中断正在跑的 SQL；
+  两者都回滚并抛 `StoreUnavailable`。HTTP 一律 503 `data_unavailable`（出票：没写入任何东西，quote 和 nonce 不变，可重试）；
+  对话轮次里走现有的 `internal_error` / 模板回退。
+- **每用户上限**：同一用户同时运行的轮次最多 `AGENT_MAX_TURNS_PER_USER`（默认 2，1–256），在会话锁之后、名额之前检查；
+  超出 → SSE `error conversation_busy`（文案说明是其他会话在忙），什么都不存，不退额度。
+- **出票点击不占线程等锁**：`book_async` 在事件循环上等会话锁（`hold_async`），拿到锁后才在工作线程里跑出票事务；请求被取消时
+  也等事务线程结束再释放锁。每用户同时进行的点击最多 2 个，超出 → 409 `conversation_busy`（可重试，什么都没改）。
+  出票事务开始前先加载已变化的 locations.db，事务内的 B6 严格复核只需重新哈希文件。
+- **线程池大小**：启动时显式设置事件循环默认线程池为 `2 × AGENT_MAX_ACTIVE_TURNS + 16`（默认 32）：每个运行中的轮次
+  同时最多用一个线程，被打断的轮次最多两个（未结束的工具线程 + 被打断调用的记录），余量给出票事务和路由的短读取。
+- **消息没存上**：保存用户消息时 app.db 出错 → SSE `internal_error`（“没有保存”），在 `user_message` 之前，退还当天额度。
+  app.db 超时的 HTTP 503 文案改为 “服务繁忙，没有做任何改动”。
+- 未覆盖（替换原句）：读 locations.db 没有操作时限；出票事务里的严格复核仍在 app.db 写锁内哈希 locations.db，文件系统卡住时
+  写锁被一直占着，其他写入 10 s 后 `StoreUnavailable`。CPU 计算（路由毫秒级）。等名额时持有会话锁：全站满载时，
+  同会话的点击最多等 5 s（在事件循环上，不占线程）后得到 `conversation_busy`。
+
+## 5. 路线、距离、价格
+
+- 图：hub–hub 边来自 `hub_links`，非 hub–hub 边来自 `connected_hubs`；双向。非 hub 城市只能当端点（只在 hub 换乘）。
+- 价格和距离成正比 ⇒ 最便宜 = 最短；欧氏距离满足三角不等式 ⇒ 有直飞时直飞最便宜（要求 5 自然满足）。
+- **规范计价函数**（全系统唯一，报价、出票复核、参考比对都只用它）：给定城市序列，在固定的 Decimal 上下文
+  （prec=50, ROUND_HALF_EVEN）里按航段顺序计算 `sqrt(dx²+dy²)`、求和、乘 `Decimal("0.13")`，量化为 30 位小数的字符串。
+  坐标是整数，只有完全平方数的航段距离是精确值，其余是 50 位精度近似；文档和界面都称「高精度值」。
+- 选路：加载（或库指纹变化）时，对每个 hub 对用 networkx `shortest_simple_paths`（Yen）取出「整数边权最优 + 很小容差」
+  内的全部简单路径作为候选（边权 = 规范单段距离量化到 1e-30 后的整数，整数运算无误差；容差只会多收候选，
+  保证 √2+√8 对 √18 这类无理数平手不被漏掉）。查询时枚举「起点直连 hub × 终点直连 hub」拼出候选路线，全部交给规范函数
+  计价，按（价格，航段数，城市名序列）取最小。**networkx 只用来产生候选，不使用它返回的长度。**
+  实测：真实库每个 hub 对恰好 1 条候选，加载约 0.12 s；全部 490,700 个有服务城市对与参考实现比对一致，用时约 28 s。
+- 存储值上「各段之和」与「总距离」可能相差 ≤ 航段数 × 1e-30（先对未舍入值求和再量化一次，避免把舍入值喂回计算）；
+  「计算依据」以总距离字段为准。
+- 显示：距离 1 位小数（km），价格到分（ROUND_HALF_UP）；舍入只在渲染层。「计算依据」显示每段高精度距离、求和、
+  × 0.13，并注明「价格按未舍入的距离计算，所以显示距离 × 0.13 可能和显示价格差 1 分」。
+- 城市解析：先按原样（NFC）精确匹配；不中再做大小写 + 去重音折叠匹配，折叠后命中多个（库里唯一的一组是
+  `San Jose` 与 `San José`）→ `ambiguous_city`，绝不自动选；仍不中 → difflib 候选。命中的城市如有折叠同名的兄弟，
+  记录里带 `similar_names`，卡片显示区分信息（直连 hub）。
+- 最近有服务城市：在有服务城市中按距离取前 3 个，可排除指定城市（避免建议的城市就是另一端）。
+- 正确性保证：
+  1. 独立参考实现（逐对 Bellman-Ford，不共享代码）与生产实现在**全部有服务城市对**上比对路线成本；
+  2. hypothesis 随机图（不连通、平手、共线）；
+  3. 结构性检查：中间城市都是 hub、每段都是真实航线、总距离 = 各段之和、价格 = 距离 × 0.13；
+  4. 线程一致性：默认上下文的新线程里算出的报价字符串与主线程逐字节相同；
+  5. 呈现侧：卡片只由记录渲染；文本经 ReplyGuard（§4.5）；评测再查一遍「回复中每个数字、城市都能在记录里找到」。
+
+### 5.1 溯源记录（Quote 示例）
+
+```json
+{
+  "id": "q_7f3a",
+  "origin": "Guangzhou", "destination": "Lima",
+  "legs": [
+    {"from": "Guangzhou", "to": "Johannesburg",
+     "from_coord": [-9278, 3445], "to_coord": [...],
+     "source": "locations.connected_hubs(Guangzhou)",
+     "distance": "…(30 位小数)…"},
+    {"from": "Johannesburg", "to": "…", "source": "hub_links(…,…)", "distance": "…"}
+  ],
+"""The agent loop (design §4): one chat turn as a stream of contract SSE events.
+
+    user message stored -> [LLM -> tools -> cards]* -> guarded text -> assistant message stored
+
+The LLM chooses tools and writes text; routes, prices and tickets come from the airline through
+the four tools. Text is released sentence by sentence after the ReplyGuard traced every number
+and city in it; the first problem replaces the whole reply with a code template. The turn's
+quote cards become bookable only when `Airline.post_assistant_message` stores them (`done`).
+
+Nothing here can book: the loop talks to the airline through `Toolbox` (four tools, no booking)
+and `post_assistant_message`. Booking is the HTTP endpoint's call, caused by the user's click.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from contextlib import aclosing, contextmanager
+from dataclasses import dataclass, field, replace
+from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
+
+from ..airline import ConversationBusy, NotFound
+from .budget import AgentBudget, BudgetTracker, refusal
+from .concurrency import ServerBusy, Threads, TurnConcurrency, TurnSlots
+from .context import build_context
+from .guard import CityIndex, ReplyGuard, SentenceBuffer
+from .config import EFFORTS
+from .llm import LLM, Completion, LLMError, TextDelta
+from .prompt import system_prompt
+from .templates import CLICK_TO_BOOK, fallback_reply
+from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, MAX_RAW_ARGUMENTS, Outcome, Toolbox
+
+log = logging.getLogger(__name__)
+
+DEFAULT_BUDGET = AgentBudget()
+MAX_STEPS = DEFAULT_BUDGET.max_steps
+TURN_TIMEOUT = DEFAULT_BUDGET.max_turn_seconds  # a whole turn (all LLM calls, tools, retries); then the template reply
+LOCK_TIMEOUT = 10.0  # waiting for another turn of the same conversation; then conversation_busy
+DRAIN_TIMEOUT = 30.0  # after the turn's time limit: waiting for its worker threads (design §4.9)
+MAX_USER_CHARS = 2000
+TITLE_CHARS = 60
+LLM_UNAVAILABLE = "The assistant is temporarily unavailable. Your message was saved; please try again."
+BUSY = "This conversation is still working on your previous message. Please try again in a moment."
+SERVER_BUSY = "The assistant is busy right now. Your message was not sent; please try again in a moment."
+INTERNAL = "Something went wrong. Your message was saved; please try again."
+NOT_STORED = "Something went wrong and your message was not saved. Please try again in a moment."
+USER_BUSY = ("Your other conversations are still working on earlier messages. "
+             "Please wait for a reply there, then try again.")
+FLOOD_FACTOR = 4  # a completion with more than max_tool_calls_per_step * this many calls runs none
+
+
+@dataclass(frozen=True)
+class Event:
+    """One SSE event of docs/api/contract.md: `name` and its JSON `data`."""
+
+    name: str
+    data: dict
+
+
+class _Stopped(Exception):
+    """The step ends the turn with the template reply for `problems`."""
+
+    def __init__(self, problems: list[dict]):
+        super().__init__(problems[0]["kind"])
+        self.problems = problems
+
+
+class _GuardFailed(_Stopped):
+    """The ReplyGuard refused the text."""
+
+
+class _UserBusy(Exception):
+    """The user already has `max_turns_per_user` turns running."""
+
+
+class _NotStored(Exception):
+    """Storing the user's message failed: nothing of the turn exists."""
+
+
+@dataclass
+class _Turn:
+    user_id: str
+    conversation_id: str
+    user_message: dict
+    guard: ReplyGuard
+    emit: Callable[[str, dict], None]
+    budget: BudgetTracker = field(default_factory=lambda: BudgetTracker(DEFAULT_BUDGET))
+    reasoning_effort: str | None = None  # per-request thinking level; None = the client's default
+    text: str = ""  # released so far
+    cards: list[dict] = field(default_factory=list)
+    outcomes: list[Outcome] = field(default_factory=list)
+    threads: Threads = field(default_factory=Threads)  # blocking calls inside the time limit
+
+
+def message_view(message: dict) -> dict:
+    """Contract `Message` of a stored row without quote cards (user messages)."""
+    return {"id": message["id"], "role": message["role"], "text": message["text"],
+            "cards": list(message["cards"]), "created_at": message["created_at"]}
+
+
+class Agent:
+    def __init__(self, airline: Any, llm: LLM, *, budget: AgentBudget | None = None,
+                 max_steps: int | None = None,
+                 ping_interval: float = 15.0, retries: int = 2, backoff: float = 0.5,
+                 llm_timeout: float = 60.0, turn_timeout: float | None = None,
+                 lock_timeout: float | None = LOCK_TIMEOUT,
+                 concurrency: TurnConcurrency | None = None, drain_timeout: float = DRAIN_TIMEOUT,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+        """`budget`: the per-turn limits (design §4.8; default `AgentBudget()`). `max_steps` and
+        `turn_timeout` override its fields (tests, older callers). `concurrency`: the server-wide
+        limit on running turns (design §4.9; default `TurnConcurrency()`). `drain_timeout`: how
+        long a cut-short turn waits for its worker threads before it ends anyway."""
+        budget = budget or DEFAULT_BUDGET
+        if max_steps is not None:
+            budget = replace(budget, max_steps=max_steps)
+        if turn_timeout is not None:
+            budget = replace(budget, max_turn_seconds=turn_timeout)
+        self.budget = budget
+        self.llm = llm
+        self.store = airline.store
+        self.ping_interval = ping_interval
+        self.retries = retries
+        self.backoff = backoff
+        self.llm_timeout = llm_timeout
+        self.lock_timeout = lock_timeout
+        self.slots = TurnSlots(concurrency or TurnConcurrency())
+        self.drain_timeout = drain_timeout
+        self._sleep = sleep
+        self._tools = Toolbox(airline)
+        # The only other things the loop takes from the airline. No reference to the Airline
+        # object itself is kept.
+        self._post_assistant_message = airline.post_assistant_message
+        self._locks = airline.locks
+        self._networks = airline.networks
+        self._index: tuple[str, CityIndex] | None = None
+        self._tasks: set[asyncio.Task] = set()
+        self._user_turns: dict[str, int] = {}  # user id -> running turns (event loop only)
+
+    @property
+    def max_steps(self) -> int:
+        return self.budget.max_steps
+
+    @property
+    def turn_timeout(self) -> float:
+        return self.budget.max_turn_seconds
+
+    # ------------------------------------------------------------------ public -------------
+    def stream_turn(self, user_id: str, conversation_id: str, text: str, *,
+                    reasoning_effort: str | None = None,
+                    on_not_stored: Callable[[], Any] | None = None,
+                    on_server_busy: Callable[[], Any] | None = None,
+                    owner_checked: bool = False) -> AsyncIterator[Event]:
+        """Start a turn and return its events: `user_message`, then `status` / `card` / `delta` /
+        `replace` / `ping`, ending with exactly one `done` or `error`.
+
+        `reasoning_effort` overrides the LLM's thinking level for this turn (none / low / high /
+        max; None = configured default). `on_not_stored`: a blocking callable run (in a worker
+        thread, before the event is sent) when the turn ends before the user's message was
+        stored: refused with `server_busy`, or app.db failed to store the message
+        (`internal_error`) - the API gives the day's message slot back there. It runs even when
+        nobody reads the stream. `on_server_busy` is its older name.
+        `owner_checked`: the caller already checked (off the event loop) that the conversation is
+        the user's, so this method reads nothing from app.db (06 review P2-9); the turn's own
+        writes still check ownership.
+
+        Raises before anything is stored: NotFound (not the user's conversation), ValueError
+        (empty or too long text, unknown reasoning_effort). Must be called on the event loop. The turn runs in its own
+        task: it finishes and is stored even when the client stops reading."""
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text must not be empty")
+        text = text.strip()
+        if len(text) > MAX_USER_CHARS:
+            raise ValueError(f"text is longer than {MAX_USER_CHARS} characters")
+        if reasoning_effort is not None and reasoning_effort not in EFFORTS:
+            raise ValueError(f"reasoning_effort must be one of {', '.join(EFFORTS)}")
+        if not owner_checked and self.store.get_conversation(user_id, conversation_id) is None:
+            raise NotFound(conversation_id)
+        queue: asyncio.Queue[Event | None] = asyncio.Queue()
+        task = asyncio.get_running_loop().create_task(
+            self._run(user_id, conversation_id, text, reasoning_effort, queue, on_not_stored or on_server_busy))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return self._events(queue)
+
+    async def wait_idle(self) -> None:
+        """Wait for every running turn (shutdown, tests)."""
+        while pending := [t for t in self._tasks if not t.done()]:
+            await asyncio.wait(pending)
+
+    async def _events(self, queue: asyncio.Queue) -> AsyncIterator[Event]:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), self.ping_interval)
+            except asyncio.TimeoutError:
+                yield Event("ping", {})
+                continue
+            if event is None:
+                return
+            yield event
+
+    # ------------------------------------------------------------------ one turn -----------
+    async def _run(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+                   queue: asyncio.Queue, on_not_stored: Callable[[], Any] | None = None) -> None:
+        def emit(name: str, data: dict) -> None:
+            queue.put_nowait(Event(name, data))
+
+        async def not_stored() -> None:
+            if on_not_stored is not None:
+                try:
+                    await asyncio.to_thread(on_not_stored)
+                except Exception:
+                    log.exception("not-stored callback failed (conversation %s)", conversation_id)
+
+        # The conversation lock first, then the user's own limit, then a server-wide slot: a
+        # second message of a busy conversation waits without taking a slot. Every refusal comes
+        # before anything is stored.
+        try:
+            async with self._locks.hold_async(conversation_id, timeout=self.lock_timeout):
+                with self._user_turn(user_id):
+                    async with self.slots.hold():
+                        await self._turn(user_id, conversation_id, text, reasoning_effort, emit)
+        except ConversationBusy:
+            emit("error", {"code": "conversation_busy", "message": BUSY})
+        except _UserBusy:
+            log.warning("chat turn refused: user already has %d turns running (conversation %s)",
+                        self.slots.config.max_turns_per_user, conversation_id)
+            emit("error", {"code": "conversation_busy", "message": USER_BUSY})
+        except ServerBusy:
+            log.warning("chat turn refused: %d turns running, none ended within %gs (conversation %s)",
+                        self.slots.active, self.slots.config.queue_seconds, conversation_id)
+            await not_stored()
+            emit("error", {"code": "server_busy", "message": SERVER_BUSY})
+        except _NotStored:
+            log.exception("chat turn: the user's message could not be stored (conversation %s)", conversation_id)
+            await not_stored()
+            emit("error", {"code": "internal_error", "message": NOT_STORED})
+        except Exception:
+            log.exception("chat turn failed (conversation %s)", conversation_id)
+            emit("error", {"code": "internal_error", "message": INTERNAL})
+        finally:
+            queue.put_nowait(None)
+
+    @contextmanager
+    def _user_turn(self, user_id: str) -> Iterator[None]:
+        """At most `max_turns_per_user` running turns per user (06 review P2-8). Event loop only."""
+        if self._user_turns.get(user_id, 0) >= self.slots.config.max_turns_per_user:
+            raise _UserBusy()
+        self._user_turns[user_id] = self._user_turns.get(user_id, 0) + 1
+        try:
+            yield
+        finally:
+            self._user_turns[user_id] -= 1
+            if not self._user_turns[user_id]:
+                del self._user_turns[user_id]
+
+    async def _turn(self, user_id: str, conversation_id: str, text: str, reasoning_effort: str | None,
+                    emit: Callable[[str, dict], None]) -> None:
+        store = self.store
+        conversation = await asyncio.to_thread(store.get_conversation, user_id, conversation_id)
+        try:
+            user_message = await asyncio.to_thread(store.add_message, user_id, conversation_id, "user", text)
+        except Exception as exc:  # app.db timeout, the conversation gone: nothing of the turn exists
+            raise _NotStored() from exc
+        emit("user_message", message_view(user_message))
+        if conversation is not None and not conversation["title"]:
+            await asyncio.to_thread(store.set_conversation_title, user_id, conversation_id,
+                                    " ".join(text.split())[:TITLE_CHARS])
+
+        context = await asyncio.to_thread(build_context, store, user_id, conversation_id)
+        index = await asyncio.to_thread(self._city_index)
+        today = store.clock().date()
+        guard = ReplyGuard(index, records=context.records, user_text=text,
+                           earlier_user_texts=context.user_texts[:-1], today=today)
+        turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
+                     reasoning_effort)
+        messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
+
+        try:
+            try:
+                async with asyncio.timeout(self.turn_timeout):
+                    fallback = await self._steps(turn, messages)
+            finally:
+                await self._drain(turn)
+        except TimeoutError:
+            fallback = [{"kind": "turn_timeout", "value": str(self.turn_timeout)}]
+        except LLMError as exc:
+            fallback = [{"kind": "llm_error", "value": str(exc)[:200]}]
+        except Exception as exc:  # a bug or a store error in the middle of the turn
+            if not turn.outcomes and not turn.text:
+                raise
+            log.exception("chat turn failed after producing output (conversation %s)", conversation_id)
+            fallback = [{"kind": "internal_error", "value": type(exc).__name__}]
+        if fallback is not None and fallback[0]["kind"] in ("max_steps", "token_budget", "tool_budget"):
+            log.warning("chat turn stopped by its budget (conversation %s): %s %s", conversation_id,
+                        fallback[0]["kind"], turn.budget.snapshot())
+        if fallback is not None and fallback[0]["kind"] in ("llm_error", "turn_timeout") \
+                and not turn.outcomes and not turn.text:
+            emit("error", {"code": "llm_unavailable", "message": LLM_UNAVAILABLE})
+            return
+        await self._finish(turn, fallback)
+
+    async def _steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
+        """The LLM / tool steps of a turn. Returns None when the LLM's text can stay, otherwise
+        the problems that make the template reply replace it.
+
+        Budgets (design §4.8): a step starts only while steps and tokens are left; each tool call
+        runs only while calls are left for the step and the turn. A call that is not admitted is
+        never executed: it gets a `tool_budget_exceeded` result (stored like any tool call, so
+        every tool call of the completion has its result and the stored history stays well-formed).
+        Once the turn's calls are used up and a call was refused, the turn ends with the template."""
+        while (stop := turn.budget.stop_before_step()) is None:
+            try:
+                completion = await self._llm_step(turn, messages)
+            except _Stopped as stopped:  # guard failure, or no retry left within the token cap
+                return stopped.problems
+            if not completion.tool_calls:
+                if completion.finish_reason != "stop":  # "length", "content_filter", ...
+                    return [{"kind": "truncated", "value": str(completion.finish_reason)}]
+                if not turn.text.strip():
+                    return [{"kind": "empty_reply", "value": ""}]
+                return None
+            if _flooded(completion, self.budget):
+                # far more calls than a step may run (06 review P2-3): none runs and none is
+                # stored one by one; the logged completion is marked so the next context skips it
+                refused = len(completion.tool_calls)
+                turn.budget.refused_calls += refused
+                log.warning("chat turn: a completion with %d tool calls; none run (conversation %s)",
+                            refused, turn.conversation_id)
+                return [{"kind": "tool_budget", "value": str(refused)}]
+            messages.append(completion.assistant_message())
+            turn_exhausted = False
+            for call in completion.tool_calls:
+                refused = turn.budget.admit_tool_call()
+                if refused is None:
+                    turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
+                    outcome = await turn.threads.run(self._tools.run, turn.user_id, turn.conversation_id,
+                                                     call["name"], call["arguments"])
+                else:
+                    turn_exhausted = turn_exhausted or refused == "per_turn"
+                    payload = refusal(refused, self.budget)
+                    outcome = Outcome(call["name"], str(call["arguments"])[:MAX_RAW_ARGUMENTS], payload["code"], payload,
+                                      error=f"budget: {refused}")
+                # The outcome and its cards belong to the turn as soon as the tool returned, before
+                # the row is written: if the time limit lands on the write, the reply still
+                # carries the card that the stored row (written while draining) describes (P2-5).
+                turn.outcomes.append(outcome)
+                if refused is None:  # a refusal is no record a reply may quote
+                    turn.guard.add_record(outcome.payload)
+                for card in outcome.cards:
+                    turn.cards.append(card)
+                    turn.emit("card", {"card": card})
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
+                await turn.threads.run(
+                    self.store.add_tool_call, turn.user_id, turn.user_message["id"], outcome.name,
+                    outcome.args, outcome.payload, error=outcome.error, latency_ms=outcome.latency_ms)
+            if turn_exhausted:
+                return [{"kind": "tool_budget", "value": str(self.budget.max_tool_calls_per_turn)}]
+        return [stop]
+
+    async def _drain(self, turn: _Turn) -> None:
+        """Wait for worker threads the time limit (or an error) left running. A thread cannot be
+        stopped; until it ends it may still write (a quote, a tool call row), so the reply is not
+        stored and the conversation lock and the slot are not released before it ends - unless it
+        outlives `drain_timeout` (store timeouts make that unlikely), which is logged."""
+        if not turn.threads.running:
+            return
+        log.warning("chat turn cut short with %d worker thread(s) running; waiting up to %gs (conversation %s)",
+                    turn.threads.running, self.drain_timeout, turn.conversation_id)
+        if not await turn.threads.drain(self.drain_timeout):
+            log.error("chat turn: %d worker thread(s) still running after %gs; ending the turn anyway "
+                      "(conversation %s)", turn.threads.running, self.drain_timeout, turn.conversation_id)
+
+    async def _finish(self, turn: _Turn, fallback: list[dict] | None = None) -> None:
+        """Persist the assistant message (the `done` moment: quote cards become bookable)."""
+        text = turn.text.rstrip()
+        if fallback is not None:
+            text = fallback_reply(turn.outcomes)
+            turn.emit("replace", {"text": text})
+        elif CLICK_TO_BOOK not in text and any(
+                o.name == "request_booking" and o.code == "ok" for o in turn.outcomes):
+            # fixed by code, whatever the LLM wrote: the click is what books
+            piece = ("\n\n" if text else "") + CLICK_TO_BOOK
+            turn.emit("delta", {"text": piece})
+            text += piece
+        message = await asyncio.to_thread(
+            self._post_assistant_message, turn.user_id, turn.conversation_id, text, turn.cards, fallback)
+        turn.emit("done", {"message": message})
+
+    # ------------------------------------------------------------------ LLM step -----------
+    def _release(self, turn: _Turn, piece: str, first_of_step: bool) -> None:
+        """Check the reply so far plus `piece`; send `piece` when nothing is wrong. Checking the
+        whole text catches a number or a city name that spans two pieces (`St. | Louis`)."""
+        if not turn.text:
+            piece = piece.lstrip()
+        elif first_of_step and not turn.text[-1].isspace() and not piece[:1].isspace():
+            piece = "\n\n" + piece  # text of a later step starts a new paragraph
+        problems = turn.guard.check(turn.text + piece)
+        if problems:
+            raise _GuardFailed(problems)
+        turn.text += piece
+        turn.emit("delta", {"text": piece})
+
+    async def _llm_step(self, turn: _Turn, messages: list[dict]) -> Completion:
+        """One LLM call with retries. Text is released as it streams. A failed call is retried
+        only while none of its text has been released."""
+        request = {"turn": turn.user_message["id"], "messages": list(messages),
+                   "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
+                   "reasoning_effort": turn.reasoning_effort or getattr(self.llm, "reasoning_effort", None)}
+        for attempt in range(self.retries + 1):
+            started = time.monotonic()
+            buffer = SentenceBuffer()
+            completion: Completion | None = None
+            released = False
+            content = blank = ""
+
+            def log_call(response: dict, usage: Any = None, *, output_chars: int | None = None,
+                         no_response: bool = False) -> asyncio.Future:
+                # every attempt counts against the turn's tokens, also failed ones and retries
+                charged, estimated = turn.budget.charge(usage, messages, output_chars=output_chars,
+                                                        no_response=no_response)
+                response = {**response, "budget": {"charged_tokens": charged, "estimated": estimated,
+                                                   "turn_tokens": turn.budget.tokens}}
+                # `tokens` = what the turn was charged, so the site's daily budget (§8.2) counts
+                # estimated calls the same way (06 review P2-9); `response.usage` keeps the report
+                return turn.threads.start(
+                    self.store.add_llm_call, turn.user_id, turn.conversation_id, request, response,
+                    latency_ms=int((time.monotonic() - started) * 1000), tokens=charged,
+                    model=getattr(self.llm, "model", None))
+
+            try:
+                # aclosing: a guard failure or a timeout must close the HTTP stream right away
+                async with asyncio.timeout(self.llm_timeout), \
+                        aclosing(self.llm.stream(
+                            messages, TOOL_SCHEMAS, reasoning_effort=turn.reasoning_effort)) as stream:
+                    async for event in stream:
+                        if isinstance(event, TextDelta):
+                            content += event.text
+                            for sentence in buffer.push(event.text):
+                                if sentence.strip():
+                                    self._release(turn, blank + sentence, not released)
+                                    blank, released = "", True
+                                else:
+                                    blank += sentence  # white space is never sent on its own
+                        else:
+                            completion = event
+                if completion is None:
+                    raise LLMError("LLM stream ended without a completion", retryable=True,
+                                   received=len(content))
+                rest = buffer.flush()
+                if rest.strip():
+                    self._release(turn, blank + rest, not released)
+            except _GuardFailed as failed:
+                # the stream was cut by us; how much (hidden) output it produced is unknown
+                await asyncio.shield(log_call({"content": content, "guard_problems": failed.problems,
+                                               "aborted": True}))
+                raise
+            except asyncio.CancelledError:
+                # the turn's time limit (or shutdown) interrupted this call: it is still recorded
+                # and charged (06 review P2-4); `_drain` waits for the record to be written
+                log_call({"content": content, "aborted": "turn_timeout"})
+                raise
+            except (LLMError, TimeoutError) as exc:
+                if isinstance(exc, LLMError):
+                    error, usage = exc, exc.usage
+                    received = exc.received if exc.received is not None else (len(content) or None)
+                else:  # this call's own time limit: the stream was open, its output unknown
+                    error, usage, received = LLMError("LLM call timed out", retryable=True), None, None
+                await asyncio.shield(log_call(
+                    {"content": content, "error": str(error)[:300], "attempt": attempt + 1}, usage,
+                    output_chars=received, no_response=isinstance(exc, LLMError) and received is None))
+                if released or not error.retryable or attempt == self.retries:
+                    raise error from None
+                if (stop := turn.budget.out_of_tokens()) is not None:
+                    raise _Stopped([stop]) from None  # no retry past the token cap (P2-2)
+                await self._sleep(self.backoff * 2 ** attempt)
+                continue
+            record = completion.as_record()
+            if _flooded(completion, self.budget):
+                record["tool_calls_not_run"] = True  # build_context skips this completion
+            await asyncio.shield(log_call(record, completion.usage, output_chars=completion.output_chars))
+            return completion
+        raise LLMError("unreachable", retryable=False)  # pragma: no cover
+
+    def _city_index(self) -> CityIndex:
+        """City names for the guard, from the airline's current network (rebuilt when
+        locations.db changes)."""
+        net = self._networks.current()
+        if self._index is None or self._index[0] != net.fingerprint.id:
+            self._index = (net.fingerprint.id, CityIndex(net.cities))
+        return self._index[1]
+
+
+def _flooded(completion: Completion, budget: AgentBudget) -> bool:
+    """More tool calls in one completion than any honest step needs (P2-3)."""
+    return len(completion.tool_calls) > budget.max_tool_calls_per_step * FLOOD_FACTOR
