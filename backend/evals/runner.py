@@ -62,6 +62,8 @@ class RunResult:
     retries: int = 0  # LLM calls that failed (the loop retried them or gave up)
     llm_latency_ms: list[int] = field(default_factory=list)
     config: str = ""  # the benchmark configuration that played it ("" outside a benchmark)
+    # per Click step: (step index, a bookable card existed, tickets created, tickets expected)
+    clicks: list[tuple[int, bool, int, int]] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -170,7 +172,7 @@ async def _play(case: Case, result: RunResult, llm: Any, workdir: Path, effort: 
     user = store.upsert_user("eval", f"{case.name}-{result.index}", "Eval")["id"]
     conv = store.create_conversation(user)["id"]
     index = CityIndex(airline.networks.current().cities)
-    clicks: list[tuple[int, bool, int, int]] = []
+    clicks = result.clicks
 
     for step_no, step in enumerate(case.steps):
         before = len(airline.tickets(user))
