@@ -12,6 +12,10 @@ earlier assistant messages is passed back. The reasoning is stored with every LL
 (`llm_calls.response`, tagged with the turn's user message id) and is put back here on the
 assistant message it belongs to. It is passed back verbatim or not at all: turns that were
 shortened, replies replaced by a template and turns made with thinking off carry none.
+
+A reply the user stopped (#48): its tool calls without a result are stored as `cancelled` (their
+result is never given to the model), its text is the part the guard had released, and a system
+note follows it.
 """
 from __future__ import annotations
 
@@ -26,6 +30,9 @@ from .tools import slim
 HISTORY_CHAR_BUDGET = 40_000  # roughly 10k tokens of history kept in full
 HISTORY_HARD_LIMIT = 80_000  # beyond this the oldest (already shortened) turns are dropped
 SHORT_TEXT_CHARS = 300
+STOPPED_NOTE = ("[the user stopped the previous reply; tool calls marked cancelled did not run to the end. "
+                "Quote cards in that reply cannot be confirmed: to book one of its quotes, call request_booking "
+                "for it again so a new confirmation card is shown]")
 _ID_KEYS = ("quote_id", "ticket_id", "origin", "destination", "city", "query", "count", "status")
 
 
@@ -124,7 +131,13 @@ def _emit(turn: _Turn, short: bool, out: Context) -> None:
             out.messages.append({"role": "tool", "tool_call_id": "call_" + call["id"], "content": _dumps(result)})
             out.records.append(result)
     for message in turn.later:
-        if message["role"] == "assistant":
+        if message["role"] == "assistant" and message.get("status") == "cancelled":
+            # a reply the user stopped (#48, R7): only its released text, then a note, so the model
+            # knows the reply was cut and an empty one leaves no empty assistant message
+            if message["text"].strip():
+                out.messages.append(_assistant(_cut(message["text"], short), ""))
+            out.messages.append({"role": "system", "content": STOPPED_NOTE})
+        elif message["role"] == "assistant":
             reasoning = "" if short or message["guard_problems"] else turn.final_reasoning(message["text"])
             out.messages.append(_assistant(_cut(message["text"], short), reasoning))
         elif message["role"] == "system":

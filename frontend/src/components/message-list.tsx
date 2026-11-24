@@ -4,9 +4,20 @@ import type { Draft } from "@/lib/chat";
 import { Markdown } from "@/components/markdown";
 import { CardView } from "@/components/cards";
 import { cn } from "@/lib/utils";
+import { StopIcon } from "@/components/icons";
 
-function Bubble({ m, streaming, readOnly, onBooked, onAsk }: { m: Pick<Message, "role" | "text" | "cards">; streaming?: boolean; readOnly?: boolean; onBooked?: () => void; onAsk?: (t: string) => void }) {
+/** The marker of a reply the user stopped (contract v1.6): quiet, not an error. */
+export function StoppedMarker({ label = "Stopped" }: { label?: string }) {
+  return (
+    <p className="inline-flex items-center gap-1.5 text-sm text-ink-2" data-testid="stopped-marker">
+      <StopIcon size={12} className="fill-current" />{label}
+    </p>
+  );
+}
+
+function Bubble({ m, streaming, readOnly, onBooked, onAsk }: { m: Pick<Message, "role" | "text" | "cards" | "status">; streaming?: boolean; readOnly?: boolean; onBooked?: () => void; onAsk?: (t: string) => void }) {
   const user = m.role === "user";
+  const stopped = m.role === "assistant" && m.status === "cancelled";
   return (
     <div className={cn("flex flex-col gap-3", user ? "items-end" : "items-start")}>
       {m.text && (
@@ -14,7 +25,9 @@ function Bubble({ m, streaming, readOnly, onBooked, onAsk }: { m: Pick<Message, 
           {user ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : <Markdown text={m.text} streaming={streaming} />}
         </div>
       )}
-      {m.cards.map((c, i) => <CardView key={i} card={c} streaming={streaming} readOnly={readOnly} onBooked={onBooked} onAsk={onAsk} />)}
+      {stopped && m.text && <StoppedMarker />}
+      {m.cards.map((c, i) => <CardView key={i} card={c} streaming={streaming} readOnly={readOnly} stopped={stopped} onBooked={onBooked} onAsk={onAsk} />)}
+      {stopped && !m.text && <StoppedMarker label="Stopped before a reply" />}
     </div>
   );
 }

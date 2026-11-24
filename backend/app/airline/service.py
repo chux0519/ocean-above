@@ -221,12 +221,17 @@ class Airline:
         return Result("ok", {k: v for k, v in card.items() if k != "type"}, (card,))
 
     def post_assistant_message(self, user_id: str, conversation_id: str, text: str,
-                               cards_: Iterable[dict] = (), guard_problems: Any = None) -> dict:
+                               cards_: Iterable[dict] = (), guard_problems: Any = None, *,
+                               present: bool = True, status: str = "completed") -> dict:
         """The `done` moment of a chat turn, in one transaction: store the assistant message and
         present its quote / booking-request cards (`quoted` -> `presented`, B2). Returns the
         contract `Message`; its quote cards now carry `state.nonce` when bookable. Send that
         message with the `done` event - the nonce must not reach the client earlier and must
         never be given to the LLM.
+
+        A reply the user stopped (#48, invariant R6): `present=False` stores its quote cards by
+        reference but presents none of them (no status change, no `quote_cards` row, so no nonce
+        and never bookable through this message); `status="cancelled"` marks the message.
 
         Quote cards are stored by reference and re-rendered from the quote on every read.
         Raises NotFound (conversation not the user's) or ValueError (a quote card that does not
@@ -242,16 +247,18 @@ class Airline:
                 else:
                     stored.append(card)
             message = records.add_message(con, iso(now), conversation_id, "assistant", text,
-                                          stored, guard_problems)
+                                          stored, guard_problems, status=status)
             for quote_id in dict.fromkeys(quote_ids):
                 quote = records.get_quote(con, quote_id)
                 if quote is None or quote["user_id"] != user_id or quote["conversation_id"] != conversation_id:
                     raise ValueError(f"card for a quote outside this conversation: {quote_id!r}")
-                status = self._settle(con, quote, now)
-                if status == "quoted":
+                if not present:
+                    continue
+                state = self._settle(con, quote, now)
+                if state == "quoted":
                     records.set_quote_status(con, quote, "presented", iso(now))
-                    status = "presented"
-                if status == "presented":
+                    state = "presented"
+                if state == "presented":
                     records.add_quote_card(con, quote_id, message["id"], iso(now))
             return self._message_view(con, user_id, message, now)
 
@@ -481,7 +488,7 @@ class Airline:
                                         similar_names=_similar(self.networks, quote))
             out.append(card)
         return {"id": message["id"], "role": message["role"], "text": message["text"],
-                "cards": out, "created_at": message["created_at"]}
+                "cards": out, "created_at": message["created_at"], "status": message.get("status", "completed")}
 
 
 # ---------------------------------------------------------------------- helpers ---------------

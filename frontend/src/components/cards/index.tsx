@@ -2,11 +2,11 @@ import type { Card } from "@/lib/types";
 import { QuoteCardView, TicketCardView } from "./route-card";
 import { AmbiguousCityCardView, NoServiceCardView, NoticeCardView, TicketListCardView, UnknownCityCardView } from "./simple-cards";
 
-export function CardView({ card, streaming, readOnly, onBooked, onAsk }: { card: Card; streaming?: boolean; readOnly?: boolean; onBooked?: () => void; onAsk?: (text: string) => void }) {
+export function CardView({ card, streaming, readOnly, stopped, onBooked, onAsk }: { card: Card; streaming?: boolean; readOnly?: boolean; stopped?: boolean; onBooked?: () => void; onAsk?: (text: string) => void }) {
   switch (card.type) {
     case "quote":
     case "booking_request":
-      return <QuoteCardView card={card} streaming={streaming} readOnly={readOnly} onBooked={onBooked} onAsk={onAsk} />;
+      return <QuoteCardView card={card} streaming={streaming} readOnly={readOnly} stopped={stopped} onBooked={onBooked} onAsk={onAsk} />;
     case "ticket": return <TicketCardView card={card} />;
     case "ticket_list": return <TicketListCardView card={card} />;
     case "no_service": return <NoServiceCardView card={card} />;

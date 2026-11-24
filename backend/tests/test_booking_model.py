@@ -58,13 +58,13 @@ REAL_LENGTH = 100
 def gen_event(rng: random.Random) -> tuple:
     kind = rng.choices(
         ["quote", "done", "drop", "user_message", "llm_request_booking", "click", "click_concurrent",
-         "replay", "other_user_click", "clock", "db_change", "reconnect"],
-        weights=[14, 16, 2, 5, 8, 20, 5, 4, 3, 9, 6, 8],
+         "replay", "other_user_click", "clock", "db_change", "reconnect", "stop_turn"],
+        weights=[14, 16, 2, 5, 8, 20, 5, 4, 3, 9, 6, 8, 4],
     )[0]
     r = lambda: rng.randrange(1000)  # noqa: E731
     if kind == "quote":
         return (kind, r(), r(), r())
-    if kind in ("done", "drop", "reconnect"):
+    if kind in ("done", "drop", "reconnect", "stop_turn"):
         return (kind, r())
     if kind == "user_message":
         return (kind, r(), r())
@@ -273,6 +273,22 @@ class Sim:
         assert len(message["cards"]) == len(cards)
         self.see_cards(message)
 
+    def ev_stop_turn(self, c):
+        """The user stopped the turn (#48, R6): its cards are stored with a `cancelled` message and
+        none of them is presented; no quote changes status."""
+        ci = c % len(self.convs)
+        user, conv = self.convs[ci]
+        cards, self.pending[ci] = self.pending[ci], []
+        before = self.raw_rows()
+        message = self.air.post_assistant_message(self.users[user], conv, "Let me", cards,
+                                                  [{"kind": "cancelled", "value": ""}],
+                                                  present=False, status="cancelled")
+        assert_message(message, SCHEMAS)
+        assert message["status"] == "cancelled" and len(message["cards"]) == len(cards)
+        # nothing changes status (a lazy expiry is settled on the next read, as everywhere)
+        assert self.raw_rows() == before, "R6: a stopped turn changed a quote"
+        self.see_cards(message)
+
     def ev_drop(self, c):
         """The stream died before `done`: its cards were never presented."""
         self.pending[c % len(self.convs)] = []
@@ -379,6 +395,10 @@ class Sim:
         wins = [o for o in outcomes if isinstance(o, dict)]
         codes = sorted(o for o in outcomes if not isinstance(o, dict))
         if expected == "booked":
+            # the root cause first: a ticket was written, so the quote must be booked (B7) - the
+            # losers' codes (B5) follow from that
+            if len(wins) == 1:
+                assert self.raw_rows()[q.id] == "booked", ("B7", q.id, self.raw_rows()[q.id], outcomes)
             assert len(wins) == 1 and codes == ["already_booked"] * (threads - 1), ("B5", outcomes)
             self.booked(q, q.user, wins[0])
         else:
@@ -404,7 +424,8 @@ class Sim:
             status = self.mstatus(q)
             state = card["state"]
             assert state["status"] == status, f"Q2: card says {state['status']}, model {status}"
-            assert state["bookable"] is (status == "presented"), f"Q2: bookable on a {status} quote"
+            bookable = status == "presented" and message.get("status") != "cancelled"
+            assert state["bookable"] is bookable, f"Q2 / R6: bookable on a {status} quote ({message.get('status')})"
             assert (state["nonce"] is not None) is state["bookable"]
             assert state["ticket_id"] == (q.ticket if status == "booked" else None)
             if state["nonce"] is not None:
@@ -683,6 +704,14 @@ REGRESSIONS = {
         [("quote", 0, 4, 7), ("done", 0), ("quote", 0, 7, 4), ("done", 0), ("click", 1, "valid", 0),
          ("click", 0, "valid", 0)],
         {"tickets": 2, "status": ["booked", "booked"]}),
+    "a stopped turn's quote is never presented; a new quote is bookable (R6, B2)": (
+        [("quote", 0, 4, 7), ("stop_turn", 0), ("click", 0, "valid", 0), ("click", 0, "garbage", 0),
+         ("reconnect", 0), ("quote", 0, 4, 7), ("done", 0), ("click", 1, "valid", 0), ("click", 0, "valid", 0)],
+        {"tickets": 1, "status": ["quoted", "booked"]}),
+    "a quote presented earlier stays bookable on its own card after a stopped turn shows it (R6, Q2)": (
+        [("quote", 0, 4, 7), ("done", 0), ("llm_request_booking", 0, 0), ("stop_turn", 0), ("reconnect", 0),
+         ("click", 0, "valid", 0)],
+        {"tickets": 1, "status": ["booked"]}),
     "a nonce of another quote is refused (B3)": (
         [("quote", 0, 4, 7), ("done", 0), ("quote", 0, 7, 4), ("done", 0), ("click", 0, "other_quote", 0),
          ("click", 1, "other_quote", 0)],
@@ -819,11 +848,17 @@ class TicketWithoutStatusChange(Airline):  # B7: writes the ticket, leaves the q
             records.set_quote_status = real
 
 
+class PresentsStoppedTurns(Airline):  # R6: a stopped turn's cards become bookable
+    def post_assistant_message(self, *args, present=True, **kwargs):
+        return super().post_assistant_message(*args, present=True, **kwargs)
+
+
 # mutant -> the rule its first detected failure must name
 MUTANTS = {
     NoRecheck: "B6", ExpiryOffByOne: "B4", AnyNonce: "B3", LlmBooks: "B3", Supersedes: "Q1",
     PresentsOnQuote: "B2", NoOwnerCheck: "B1", NonceLeaksToTheTool: "B3", ForgetsToStoreStale: "B6",
     UnreadableMeansFresh: "B6", SkipsBookedCheck: "B5", TicketWithoutStatusChange: "B7",
+    PresentsStoppedTurns: "R6",
 }
 
 

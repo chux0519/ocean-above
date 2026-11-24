@@ -129,13 +129,18 @@ def final_text(events: list[Event]) -> str:
 
 
 def assert_stream(events: list[Event], schemas: dict | None = None) -> dict | None:
-    """The stream follows docs/api/contract.md. Returns the `done` message (None for `error`)."""
+    """The stream follows docs/api/contract.md. Returns the `done` / `cancelled` message (None for
+    `error`, and for `cancelled` before the user message was stored)."""
     kinds = names(events)
+    if kinds == ["cancelled"]:  # stopped before the user message was stored (R5)
+        assert first_data(events[0].data) == {"message": None}
+        return None
     assert kinds[0] == "user_message", kinds
     assert kinds.count("user_message") == 1
-    assert kinds[-1] in ("done", "error") and sum(k in ("done", "error") for k in kinds) == 1, kinds
-    assert set(kinds) <= {"user_message", "status", "card", "delta", "replace", "ping", "done", "error"}
-    assert_message(events[0].data, schemas)
+    assert kinds[-1] in TERMINALS and sum(k in TERMINALS for k in kinds) == 1, kinds
+    assert set(kinds) <= {"user_message", "status", "card", "delta", "replace", "ping", *TERMINALS}
+    assert str(events[0].data.get("run_id", "")).startswith("r_")
+    assert_message({k: v for k, v in events[0].data.items() if k != "run_id"}, schemas)
     assert events[0].data["role"] == "user" and events[0].data["cards"] == []
     pushed = []
     for e in events[1:-1]:
@@ -155,8 +160,16 @@ def assert_stream(events: list[Event], schemas: dict | None = None) -> dict | No
     if last.name == "error":
         assert set(last.data) == {"code", "message"}
         return None
-    assert set(last.data) == {"message"}
-    message = last.data["message"]
+    if last.name == "cancelled":
+        assert set(last.data) == {"run_id", "message"} and last.data["run_id"] == events[0].data["run_id"]
+        message = last.data["message"]
+        assert message["status"] == "cancelled"
+        for card in message["cards"]:  # R6: nothing of a stopped reply is bookable
+            assert "state" not in card or (card["state"]["bookable"] is False and card["state"]["nonce"] is None)
+    else:
+        assert set(last.data) == {"message"}
+        message = last.data["message"]
+        assert message["status"] == "completed"
     assert_message(message, schemas)
     assert message["role"] == "assistant"
     assert final_text(events).rstrip() == message["text"]
@@ -166,3 +179,15 @@ def assert_stream(events: list[Event], schemas: dict | None = None) -> dict | No
 
 
 Step = Callable[[list[dict]], list]
+TERMINALS = ("done", "cancelled", "error")
+
+
+def first_data(data: dict) -> dict:
+    """The data of a stream's first event without its `run_id` (contract v1.6), which must be there."""
+    assert str(data.get("run_id", "")).startswith("r_"), data
+    return {k: v for k, v in data.items() if k != "run_id"}
+
+
+def first_sse(events: list) -> list:
+    """Parsed SSE `(name, data)` pairs with the first event's `run_id` checked and removed."""
+    return [(name, first_data(data) if i == 0 else data) for i, (name, data) in enumerate(events)]

@@ -9,7 +9,7 @@ Design context: `docs/design/design.md` §6.
 `user_message(conv, text)` (incl. negations and questions), `llm_request_booking(conv, quote)`,
 `click_book(user, quote, nonce)`, `click_book_concurrent(user, quote, nonce)`, `replay_nonce(quote, nonce)`,
 `clock(+Δ)`, `db_change(kind)` (leg removed / coordinate moved / unrelated row changed / file replaced),
-`other_user_click(quote, nonce)`, `disconnect_reconnect(conv)`.
+`other_user_click(quote, nonce)`, `disconnect_reconnect(conv)`, `stop_turn(conv)` (R6).
 
 ## B. Booking
 - **B1 Ownership.** A ticket exists only if its quote belongs to the user who clicked.
@@ -24,7 +24,8 @@ Design context: `docs/design/design.md` §6.
 
 ## Q. Quotes
 - **Q1 No supersede.** Creating a quote never changes the status of another quote.
-- **Q2 Button state.** The button state a client sees (after `done` or reconnect) equals the server's quote state.
+- **Q2 Button state.** The button state a client sees (after `done` or reconnect) equals the server's quote state;
+  a card of a `cancelled` message is never bookable (R6).
 - **Q3 Terminal.** `booked`, `expired`, `stale` never change again.
 
 ## Process
@@ -52,3 +53,31 @@ Design context: `docs/design/design.md` §6.
 - **C3 Clicks hold no worker thread while waiting.** A booking click waits for the conversation lock on the event
   loop; its transaction runs to its end before the lock is released, even when the request is cancelled.
 - **C4 Per-user caps.** At most `AGENT_MAX_TURNS_PER_USER` turns and 2 pending booking clicks per user at once.
+
+## R. Stop (user cancellation of a running turn, #48)
+Event alphabet for these rules: `send(conv)` (a turn starts, gets `run_id`), `stop(user, conv, run_id)` (the cancel
+endpoint), `disconnect(conv)` (the SSE reader goes away), `model_token`, `tool_start`, `tool_end`, `persist`, `finish`.
+Booking model (B/Q): `stop_turn(conv)` = the turn's pending cards are stored with a `cancelled` message and are **not**
+presented.
+- **R1 Explicit only.** A run is cancelled only by `stop` from its owner, naming its own conversation and `run_id`. A
+  disconnect, a closed tab or a failed SSE read never cancels (the run completes and is stored). A `run_id` of an
+  older run, of another conversation or of another user never cancels anything (404, nothing changes).
+- **R2 Nothing new after Stop.** Once a run is cancelling, it starts no LLM request, no retry and no tool call; the
+  model's HTTP stream in flight is closed. A worker thread that already started runs to its end (it cannot be killed).
+- **R3 Drain before release.** C2 holds for a stopped run: the conversation lock, the turn slot and the per-user count
+  are released only after its worker threads ended (or after the drain timeout, logged), and before its terminal event.
+- **R4 One terminal outcome.** Every run ends with exactly one of `done`, `cancelled`, `error`, and the run registry's
+  final state agrees (`completed` / `cancelled` / `failed`). A Stop that arrives after the steps ended (while the reply
+  is being stored, or later) changes nothing: the run ends `completed`.
+- **R5 What a stopped run stores.** Stop before the user message is stored (waiting for the lock or a slot): nothing
+  is stored and the day's message slot is given back (U1). Otherwise: the user message and exactly one assistant
+  message with status `cancelled`, holding only text that already passed ReplyGuard (no template, no click hint) and
+  the cards of tool calls that finished before the Stop.
+- **R6 No booking authority from a stopped run.** Quote and booking-request cards of a `cancelled` message are never
+  presented: no nonce, `bookable` false, the quote stays `quoted` (then `expired`); a click on it is `not_presented`. Only a later *completed* turn can present
+  it (e.g. `request_booking` shows its full card with `done`). Stop
+  never creates, changes or reverts a ticket or another quote's status. A new quote in a later turn is bookable as usual.
+- **R7 Well-formed history.** Every tool call of a stored completion has a `tool_calls` row: a call interrupted by Stop
+  or never started is stored with error `cancelled`. The next turn's context gives the model `{"code":"cancelled"}` for
+  those calls, never their result; aborted model calls never enter the context.
+- **R8 Idempotent.** Repeating `stop` for the same run returns the same state and changes nothing more.

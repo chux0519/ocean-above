@@ -254,3 +254,33 @@ def test_nonce_of_a_card_is_consumed_once(store):
         assert records.mark_nonce_used(con, quote["id"], message, store.now()) is True
         assert records.mark_nonce_used(con, quote["id"], message, store.now()) is False
         assert records.mark_nonce_used(con, quote["id"], "m_other", store.now()) is False
+
+
+def test_a_v3_database_is_migrated_to_v4_and_old_messages_are_completed(tmp_path):
+    """#48: messages.status is added by migration v4; every older row reads `completed`, nothing is lost."""
+    path = tmp_path / "app.db"
+    store = Store(path, clock=FakeClock())
+    user = store.upsert_user("dev", "demo", "demo")["id"]
+    conv = store.create_conversation(user)["id"]
+    store.add_message(user, conv, "user", "hello")
+    store.add_message(user, conv, "assistant", "hi", [{"type": "notice", "code": "same_city", "message": "x"}],
+                      [{"kind": "max_steps", "value": "6"}])
+    before = [{k: v for k, v in m.items() if k != "status"} for m in store.list_messages(user, conv)]
+    con = sqlite3.connect(path)
+    con.execute("ALTER TABLE messages DROP COLUMN status")  # back to the v3 layout
+    con.execute("PRAGMA user_version = 3")
+    con.commit()
+    con.close()
+    again = Store(path, clock=FakeClock())
+    after = again.list_messages(user, conv)
+    assert [m["status"] for m in after] == ["completed", "completed"]
+    assert [{k: v for k, v in m.items() if k != "status"} for m in after] == before
+    con = sqlite3.connect(path)
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
+    with pytest.raises(sqlite3.IntegrityError):  # only the two statuses
+        con.execute("UPDATE messages SET status = 'paused'")
+    con.close()
+    stopped = again.add_message(user, conv, "assistant", "", status="cancelled")
+    assert again.list_messages(user, conv)[-1]["status"] == stopped["status"] == "cancelled"
+    with pytest.raises(ValueError):
+        again.add_message(user, conv, "assistant", "", status="paused")

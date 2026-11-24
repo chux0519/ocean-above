@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { cn } from "@/lib/utils";
 import { LimitNotice, type Limited } from "@/components/limit-notice";
-import { ArrowDownIcon, NewChatIcon, SendUpIcon } from "@/components/icons";
+import { ArrowDownIcon, NewChatIcon, SendUpIcon, StopIcon } from "@/components/icons";
+import { StoppedMarker } from "@/components/message-list";
 
 /** Errors sent before user_message: nothing was stored and the slot is refunded, so the input keeps its text
  * and the user can retry (contract v1.5). internal_error counts only before user_message. */
@@ -20,6 +21,22 @@ const NOT_SENT: Record<string, string> = {
   server_busy: "The assistant is busy right now. Your message is kept — try again in a moment.",
   internal_error: "Something went wrong and your message was not sent. It is kept below — try again.",
 };
+
+/** After Stop, how long the stream may take to deliver its `cancelled` event before the reader is closed anyway
+ * (counted from the click, so a request whose headers never arrive is closed too). */
+export const STOP_GRACE_MS = 3000;
+/** After the reader was closed without a terminal event: ask the server how the run ended, this often and this long
+ * (a stopped turn first lets a running tool or database step finish, up to about 30 s). */
+export const SETTLE_POLL_MS = 1000;
+export const SETTLE_MAX_MS = 35000;
+const SETTLED = new Set(["cancelled", "completed", "failed"]);
+
+/** The reply being streamed: its conversation, run id (from the response headers), reader and Stop state. */
+type Live = { conv: string | null; runId: string | null; abort: AbortController; stop: boolean; cancelSent: boolean;
+  grace: ReturnType<typeof setTimeout> | null };
+
+/** Stop pressed while a new chat was still being created: the message is not sent. */
+class StoppedBeforeSend extends Error {}
 
 const EXAMPLES = ["I want to fly from Guangzhou to Lima", "Can I fly from Abu Dhabi?", "Which tickets do I have?"];
 
@@ -70,8 +87,24 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
   const [error, setError] = useState<string | null>(null);
   const [limited, setLimited] = useState<Limited | null>(null);
   const [retry, setRetry] = useState<(() => void) | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [notSent, setNotSent] = useState(false); // stopped before the server stored the message
+  const [announce, setAnnounce] = useState(""); // screen-reader message after a Stop (review P2-5)
+  const live = useRef<Live | null>(null);
+  const action = useRef<HTMLButtonElement>(null); // the Send / Stop button
+  // Bumped whenever the view leaves the conversation of a running stream: that stream no longer updates the view.
+  const view = useRef(0);
   const bottom = useRef<HTMLDivElement>(null);
   const streaming = state.draft !== null || sending;
+
+  /** Leave the current stream without stopping it (switching conversations): the run finishes on the server and
+   * is stored; only this view stops reading it. */
+  const detach = useCallback(() => {
+    view.current += 1;
+    live.current?.abort.abort();
+    live.current = null;
+    setSending(false); setStopping(false); setNotSent(false); setAnnounce("");
+  }, []);
 
   const load = useCallback(async (id: string, follow = false) => {
     if (follow) stick.current = true;
@@ -117,6 +150,7 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
   useEffect(() => { if (stick.current) bottom.current?.scrollIntoView?.({ block: "end" }); }, [state]);
 
   async function select(id: string) {
+    detach();
     closeNav(); setActiveId(id); setError(null); setRetry(null); setLoadingConv(true);
     try { await load(id, true); } catch (e) {
       setState({ messages: [], draft: null });
@@ -125,6 +159,7 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
     } finally { setLoadingConv(false); }
   }
   async function newChat() {
+    detach();
     try {
       const c = await api.createConversation();
       setList((l) => [c, ...l]); setActiveId(c.id); setState({ messages: [], draft: null }); closeNav(); setError(null); setRetry(null);
@@ -135,30 +170,63 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
   async function submit(t: string, fromInput = false) {
     t = t.trim();
     if (!t || streaming) return;
-    setError(null); setRetry(null); setLimited(null); setSending(true); toBottom();
+    setError(null); setRetry(null); setLimited(null); setNotSent(false); setAnnounce(""); setSending(true); toBottom();
+    const mine = view.current;
+    const here = () => view.current === mine; // still the conversation this stream belongs to
+    const run: Live = { conv: activeId, runId: null, abort: new AbortController(), stop: false, cancelSent: false, grace: null };
+    live.current = run;
     let id = activeId;
+    let stoppedEarly = false;    // `cancelled` before user_message: nothing stored, keep the input
     let stored = false;          // user_message seen: the server kept the text
     let busy: string | false = false; // conversation_busy / server_busy: nothing stored, keep the input
     let limit: Limited | null = null; // 429 rate_limited: nothing stored, keep the input
     let streamError: string | null = null;
     let lost = false;
+    let ended = false;           // a terminal event (done / cancelled / error) arrived
     try {
-      if (!id) { const c = await api.createConversation(); id = c.id; setActiveId(id); }
+      if (!id) {
+        const c = await api.createConversation(); id = c.id;
+        if (!here()) return;
+        setActiveId(id);
+      }
+      run.conv = id;
+      if (run.stop) throw new StoppedBeforeSend(); // Stop while the chat was being created: do not send at all
       let s = state;
       await api.sendMessage(id, t, (ev) => {
+        if (!here()) return; // the user switched conversations: never update another chat's view
         if (ev.event === "error" && BUSY.has(ev.data.code) && !stored) { busy = ev.data.code; return; }
+        if (ev.event === "cancelled" && !ev.data.message && !stored) stoppedEarly = true;
+        if (ev.event === "done" || ev.event === "cancelled" || ev.event === "error") ended = true;
         if (ev.event === "user_message") { stored = true; if (fromInput) setText((p) => (p.trim() === t ? "" : p)); }
+        // after Stop the draft is frozen: only the stored user message and the terminal event still count
+        if (run.stop && !["user_message", "cancelled", "done", "error"].includes(ev.event)) return;
         if (ev.event === "error") streamError = ev.data.message;
         s = applyEvent(s, ev); setState(s);
-      });
+      }, run.abort.signal, (runId) => { run.runId = runId; if (run.stop) void requestCancel(run); });
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof StoppedBeforeSend) stoppedEarly = true;
+      else if (run.stop || !here()) { /* closed by Stop or by leaving the conversation: not a network error */ } else if (err instanceof ApiError) {
         if (err.code === "conversation_busy" || err.code === "server_busy") busy = err.code;
         else if (err.status === 429) limit = { scope: err.scope ?? null, message: err.message };
         else streamError = err.message;
       } else lost = true; // network drop
     }
-    setSending(false);
+    // Stopped, but the reader was closed before the run ended (a slow tool or database step): wait until the server
+    // says the run is over, so the reload shows the stopped reply and the conversation lock is free (review P2-3).
+    if (run.stop && !ended && !stoppedEarly && here()) await settle(run, here);
+    if (run.grace) clearTimeout(run.grace);
+    if (live.current === run) live.current = null;
+    if (!here()) return; // another conversation is on screen; its own state is untouched
+    const hadFocus = typeof document !== "undefined" && document.activeElement === action.current;
+    setSending(false); setStopping(false);
+    if (run.stop && hadFocus) box.current?.focus(); // keyboard users continue in the input (review P2-5)
+    if (run.stop) setAnnounce(stoppedEarly ? "Stopped. Your message was not sent." : "Reply stopped.");
+    if (stoppedEarly) {
+      setState((s) => ({ ...s, draft: null }));
+      setNotSent(true);
+      onUsage?.(); // the day's message slot was given back
+      return; // nothing stored: no reload, input untouched
+    }
     if (limit) {
       setState((s) => ({ ...s, draft: null }));
       setLimited(limit);
@@ -174,7 +242,15 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
     }
     // Stream over (done, error or disconnect): the server state wins.
     let reloaded = true;
-    if (id) await load(id).catch(() => { reloaded = false; setState((s) => ({ ...s, draft: null })); });
+    if (id) {
+      // not `load`: a reload that lands after the user switched conversations must not replace that view (review P2-6)
+      const cid = id;
+      await api.conversation(cid)
+        .then((c) => { if (here()) setState({ messages: c.messages, draft: null }); })
+        .catch(() => { reloaded = false; if (here()) setState((s) => ({ ...s, draft: null })); });
+    }
+    if (!here()) return;
+    if (run.stop) { refreshList().catch(() => {}); onUsage?.(); return; } // a stopped reply is not an error
     if (lost) {
       setError(reloaded ? "Connection lost. Showing the saved conversation." : "Connection lost and the conversation could not be reloaded.");
       if (!reloaded && id) { const cid = id; setRetry(() => () => select(cid)); }
@@ -183,8 +259,39 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
     onUsage?.();
   }
 
+  /** Ask the server to stop the run; the stream then delivers `cancelled`. */
+  async function requestCancel(run: Live) {
+    if (!run.conv || !run.runId || run.cancelSent) return; // no run id yet: sent when the headers arrive
+    run.cancelSent = true;
+    try { await api.cancelRun(run.conv, run.runId); } catch { /* unknown or ended run: the reload shows the truth */ }
+  }
+
+  /** Poll the cancel endpoint (idempotent) until the run has ended, the run is unknown, or SETTLE_MAX_MS passed. */
+  async function settle(run: Live, here: () => boolean) {
+    if (!run.conv || !run.runId) return; // the headers never arrived: nothing to ask about
+    const until = Date.now() + SETTLE_MAX_MS;
+    while (here() && Date.now() < until) {
+      try {
+        if (SETTLED.has((await api.cancelRun(run.conv, run.runId)).status)) return;
+      } catch { return; } // 404 (forgotten) or offline: the reload shows what is stored
+      await new Promise((r) => setTimeout(r, SETTLE_POLL_MS));
+    }
+  }
+
+  /** Stop: the view stops updating at once; the server stops the run (no further model or tool work). The reader is
+   * closed after STOP_GRACE_MS from the click whatever happens, so Stop never hangs (review P2-4). */
+  function stop() {
+    const run = live.current;
+    if (!run || run.stop) return;
+    run.stop = true; setStopping(true);
+    setState((s) => (s.draft ? { ...s, draft: { ...s.draft, status: null } } : s));
+    run.grace = setTimeout(() => run.abort.abort(), STOP_GRACE_MS);
+    void requestCancel(run);
+  }
+
   function send(e: React.FormEvent) { e.preventDefault(); void submit(text, true); }
   function onKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape" && streaming) { e.preventDefault(); stop(); return; } // Esc stops, like the button
     // Enter sends, Shift+Enter is a new line; never while an IME is composing (Chinese/Japanese input).
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(text, true); }
   }
@@ -223,8 +330,17 @@ function Chat({ onUsage, sidebarSlot, closeNav, headerSlot }: { onUsage?: () => 
           <textarea ref={box} rows={1} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
             placeholder="Where do you want to go?" aria-label="Message"
             className="max-h-52 min-h-11 flex-1 resize-none bg-transparent py-2.5 text-md text-ink outline-none focus-visible:outline-none" />
-          <Button type="submit" aria-label="Send" className="size-11 shrink-0 px-0" disabled={streaming || !text.trim()}><SendUpIcon size={20} strokeWidth={2} /></Button>
+          {/* One element for Send and Stop, so focus stays on it when it changes (review P2-5). While stopping it is
+              aria-disabled rather than disabled: a disabled button would drop the focus. */}
+          <Button ref={action} type={streaming ? "button" : "submit"} aria-label={streaming ? (stopping ? "Stopping" : "Stop") : "Send"}
+            title={streaming ? "Stop (Esc)" : undefined} onClick={streaming ? stop : undefined}
+            aria-disabled={streaming && stopping ? true : undefined} disabled={!streaming && !text.trim()}
+            className={cn("size-11 shrink-0 px-0", streaming && stopping && "opacity-50")}>
+            {streaming ? <StopIcon size={14} className="fill-current" /> : <SendUpIcon size={20} strokeWidth={2} />}
+          </Button>
         </div>
+        <p className="sr-only" aria-live="polite" data-testid="stop-announce">{stopping ? "Stopping the reply…" : announce}</p>
+        {notSent && <div className="mx-auto mt-2 flex max-w-3xl justify-center" role="status"><StoppedMarker label="Stopped — your message was not sent" /></div>}
         <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-ink-3">Nothing is booked until you press <span className="font-medium text-ink-2">Confirm booking</span> on a quote.</p>
       </form>
     </section>

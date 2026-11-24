@@ -62,9 +62,12 @@ def test_cancel_while_the_model_streams_closes_the_stream_and_ends_the_turn(worl
         return seen
 
     events = asyncio.run(go())
-    assert names(events)[-2:] == ["replace", "done"]
+    # #48: a Stop keeps the released text (no template) and ends with `cancelled`
+    assert names(events)[-2:] == ["delta", "cancelled"]
     assert llm.streams == ["closed early"] and len(llm.bodies) == 1  # still: no further request
-    assert stored(world)[-1]["guard_problems"] == [{"kind": "cancelled", "value": ""}]
+    last = stored(world)[-1]
+    assert last["guard_problems"] == [{"kind": "cancelled", "value": ""}]
+    assert (last["status"], last["text"]) == ("cancelled", "Let me look.")
     logged = world.store.list_llm_calls(world.alice, world.conv)
     assert logged[-1]["response"]["aborted"] == "cancelled" and logged[-1]["response"]["content"] == "Let me look. "
     assert not world.airline.locks.locked(world.conv)
@@ -99,14 +102,17 @@ def test_cancel_during_a_tool_waits_for_its_thread_and_runs_no_later_tool(world)
         return out
 
     events = asyncio.run(go())
-    assert names(events)[-1] == "done"
+    assert names(events)[-1] == "cancelled"
     assert ran == ["A"] and len(llm.bodies) == 1  # B never ran, no LLM request after the cancel
     assert stored(world)[-1]["guard_problems"] == [{"kind": "cancelled", "value": ""}]
     assert not world.airline.locks.locked(world.conv)
-    # as with the turn's time limit (design §4.9): the interrupted call's thread ran to its end, but
-    # its result is not part of the turn (no card, no tool_calls row). Settling such results is #48.
+    # #48 decision 2: the interrupted call's thread ran to its end, but its result is not part of
+    # the turn (no card, not given to the model); both calls are stored as `cancelled` (R7)
     turn_id = events[0].data["id"]
-    assert world.store.list_tool_calls(world.alice, turn_id) == []
+    rows = world.store.list_tool_calls(world.alice, turn_id)
+    assert [(r["name"], r["error"]) for r in rows] == [("find_city", "cancelled: interrupted"),
+                                                       ("find_city", "cancelled: not run")]
+    assert all(r["result"]["code"] == "cancelled" for r in rows)
     assert "card" not in names(events)
 
 

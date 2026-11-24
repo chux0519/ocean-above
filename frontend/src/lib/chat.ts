@@ -15,6 +15,8 @@ export function applyEvent(s: ChatState, e: SseEvent): ChatState {
     case "delta": return { ...s, draft: { ...d, text: d.text + e.data.text } };
     case "replace": return { ...s, draft: { ...d, text: e.data.text } };
     case "done": return { messages: [...s.messages, e.data.message], draft: null };
+    // Stop (v1.6): the stored, stopped reply replaces the draft; null = stopped before anything was stored
+    case "cancelled": return { messages: e.data.message ? [...s.messages, e.data.message] : s.messages, draft: null };
     case "error": return { ...s, draft: { ...d, status: null, error: e.data.message } };
     default: return s;
   }

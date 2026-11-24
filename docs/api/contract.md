@@ -1,4 +1,7 @@
-# API and card contract (v1.5, 2026-11-24)
+# API and card contract (v1.6, 2026-11-24)
+
+v1.6 (#48, additive): Stop. `X-Run-Id` header and `run_id` on the first SSE event, terminal `cancelled` event,
+`POST /api/conversations/{id}/runs/{run_id}/cancel`, `Message.status`.
 
 Single source for the frontend (T6) and backend (T2/T3/T5). Change it only through the coordinator. Examples live in
 `contract/fixtures/`; both sides' tests load them. Numbers in fixtures are **illustrative** (computed with a quick
@@ -36,7 +39,8 @@ script, not by the production core) — correctness is tested in the backend, no
 | GET | `/api/conversations` | – | `{"conversations":[ConversationSummary]}` newest first |
 | POST | `/api/conversations` | `{}` | `ConversationSummary` |
 | GET | `/api/conversations/{id}` | – | `Conversation` (messages oldest first; card states are current server state) |
-| POST | `/api/conversations/{id}/messages` | `{"text"}` | **SSE stream** (below) |
+| POST | `/api/conversations/{id}/messages` | `{"text"}` | **SSE stream** (below); header `X-Run-Id: r_…` |
+| POST | `/api/conversations/{id}/runs/{run_id}/cancel` | `{}` | `{"run_id", "status": RunStatus}` (Stop, below); 404 `not_found` |
 | POST | `/api/quotes/{id}/book` | `{"nonce"}` | `{"ticket": TicketCard, "message": Message}` or error (below) |
 | GET | `/api/quotes/{id}/trace` | – | `Trace` |
 | GET | `/api/tickets` | – | `{"tickets":[TicketCard]}` newest first |
@@ -59,7 +63,9 @@ type Message = {
   id: string; role: "user" | "assistant" | "system"   // system = booking results etc.
   text: string                                        // markdown for assistant; plain for user
   cards: Card[]; created_at: string
+  status: "completed" | "cancelled"                   // v1.6; "cancelled" = the user stopped this reply
 }
+type RunStatus = "cancelling" | "finishing" | "cancelled" | "completed" | "failed"   // what the cancel endpoint returns
 type Leg = { from: string; to: string; distance_display: string; distance: string }
 type CardState = { status: "quoted" | "presented" | "booked" | "expired" | "stale";
                    bookable: boolean; nonce: string | null; ticket_id: string | null }
@@ -88,6 +94,13 @@ type Trace = { quote_id: string; formula: string; algorithm: string; network_fin
   distance: string; price: string; distance_display: string; price_display: string; note: string }
 ```
 
+A **stopped reply** (`status: "cancelled"`) keeps only text that had passed the checks and the cards of tool calls that
+finished before the Stop. Its quote / booking-request cards are never presented by it: on that message every card has `bookable` false and
+`nonce` null; `state.status` is the quote's current status (`quoted`, later `expired`; a quote already shown with `done`
+in an earlier reply keeps its status and stays bookable on that earlier card only). Draw them with the full route facts, **no Confirm button**, and the
+note "Stopped before confirmation — ask again to book". Draw the message itself with a "Stopped" marker after its text
+(an empty text shows only the marker). A later turn's new quote is bookable as usual.
+
 Card buttons: a quote or booking-request card shows **Confirm booking** only when `state.bookable` is true; clicking
 posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is running, buttons stay disabled until
 `done`; after `done` (or on reload) the card state from the server wins.
@@ -98,14 +111,41 @@ posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is run
 
 | event | data | notes |
 |---|---|---|
-| `user_message` | `Message` | the stored user message, first event |
+| `user_message` | `Message & {"run_id"}` | the stored user message, first event |
 | `status` | `{"text":"Looking up routes…"}` | progress, replaceable |
 | `card` | `{"card": Card}` | push immediately; state.bookable is false until `done` |
 | `delta` | `{"text":"…"}` | append; already validated text (one sentence or more) |
 | `replace` | `{"text":"…"}` | replace the whole assistant text so far |
 | `ping` | `{}` | heartbeat every 15 s; ignore |
 | `done` | `{"message": Message}` | final assistant message incl. cards with current states |
+| `cancelled` | `{"run_id", "message": Message \| null}` | v1.6, terminal: the run was stopped by the cancel endpoint. `message` = the stored assistant message (`status: "cancelled"`); `null` when the Stop came before the user message was stored (no `user_message` event was sent, nothing is stored, the day's message slot is given back — keep the input text) |
 | `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation, or the user already has 2 turns running in
 other conversations), `internal_error` sent before `user_message` (the message could not be stored; slot refunded) and `server_busy` (too many turns site-wide; the day's message slot is given back): both are sent before `user_message`, nothing is stored — keep the input box text and retry |
 
-Example: `contract/fixtures/sse_quote_turn.txt`.
+Every stream ends with exactly one of `done`, `cancelled`, `error`. The **first event** (whichever it is, also an
+`error` sent before `user_message`) carries `"run_id"` in its data; the same id is in the response header `X-Run-Id`,
+which arrives before any event (use it to Stop while the turn waits for the conversation lock or a slot).
+
+Example: `contract/fixtures/sse_quote_turn.txt`; a stopped turn: `contract/fixtures/sse_cancelled_turn.txt`.
+
+## Stop (`POST /api/conversations/{id}/runs/{run_id}/cancel`)
+
+Body `{}`. Signed-in owner only; same origin rules as every POST. Only this endpoint stops a run: closing the SSE
+stream (network loss, closed tab) does **not** — the run finishes and is stored; reload the conversation.
+
+Response `200 {"run_id": "r_…", "status": RunStatus}`, the run's state after the request:
+
+| status | meaning |
+|---|---|
+| `cancelling` | accepted; the stream ends with `cancelled` once started work has settled (usually milliseconds; a running database step may take up to about 30 s). Exception: if storing the user message or the stopped reply fails, it ends with `error` (`internal_error`) |
+| `cancelled` | already stopped (a repeated Stop; idempotent) |
+| `finishing`, `completed` | too late: the steps had ended (the reply is being stored) or the turn was already being refused; the stream ends with `done`, or with `error` (e.g. `llm_unavailable`, `server_busy`) |
+| `failed` | the run had already ended with `error` |
+
+`404 not_found`: the conversation is not the user's, or the run is unknown, belongs to another conversation or user,
+or ended long ago (the server keeps the last 1024 finished runs; a restart forgets all). A Stop never affects another
+run, in particular not a newer run of the same conversation. Stop never books, never cancels a ticket and never
+changes a quote that was already shown with `done`.
+
+Client: on Stop, call this endpoint **and** abort the SSE fetch; then reload the conversation (authoritative) and show
+the reply as stopped — not as a network error.

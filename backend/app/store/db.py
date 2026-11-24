@@ -71,7 +71,7 @@ def _report(hook: Callable[[OpTiming], Any], kind: str, started: float, begun: f
 def _failure(exc: BaseException) -> str:
     return "timeout" if "interrupted" in str(exc).lower() else "busy"
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_V1 = """
 CREATE TABLE users (
@@ -201,7 +201,13 @@ _SCHEMA_V3 = """
 ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0;
 """
 
-_MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3}
+# v4 (#48 Stop): a reply the user stopped is stored with status 'cancelled'; every older row is 'completed'.
+_SCHEMA_V4 = """
+ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'
+    CHECK (status IN ('completed', 'cancelled'));
+"""
+
+_MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3, 4: _SCHEMA_V4}
 
 
 def utc_now() -> datetime:
@@ -447,14 +453,15 @@ class Store:
             return records.first_user_text(con, conversation_id)
 
     def add_message(self, user_id: str, conversation_id: str, role: str, text: str,
-                    cards: list | tuple = (), guard_problems: Any = None) -> dict:
-        """Store a message as is. Assistant messages that carry quote or booking-request cards
+                    cards: list | tuple = (), guard_problems: Any = None, *, status: str = "completed") -> dict:
+        """Store a message as is (`status`: "completed", or "cancelled" for a reply the user stopped). Assistant messages that carry quote or booking-request cards
         must go through `Airline.post_assistant_message`, which also presents those quotes."""
         from . import records
 
         with self.write() as con:
             records.require_conversation(con, user_id, conversation_id)
-            return records.add_message(con, self.now(), conversation_id, role, text, cards, guard_problems)
+            return records.add_message(con, self.now(), conversation_id, role, text, cards, guard_problems,
+                                       status=status)
 
     def list_messages(self, user_id: str, conversation_id: str) -> list[dict]:
         """Raw messages, oldest first. Quote cards carry no live state here; for the contract

@@ -87,6 +87,7 @@
         "booked_at": "2026-11-23T08:03:12Z"
       }
     ],
-    "created_at": "2026-11-23T08:03:12Z"
+    "created_at": "2026-11-23T08:03:12Z",
+    "status": "completed"
   }
 }

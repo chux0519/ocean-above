@@ -12,7 +12,7 @@ from .db import NotFound, new_id, to_json
 PREVIEW_CHARS = 120
 
 _USER_COLS = "id, auth_provider, provider_sub, email, display_name, created_at, session_epoch"
-_MESSAGE_COLS = "id, conversation_id, role, text, cards, guard_problems, created_at"
+_MESSAGE_COLS = "id, conversation_id, role, text, cards, guard_problems, created_at, status"
 _QUOTE_COLS = (
     "id, conversation_id, user_id, origin, destination, legs, distance, price, network_fingerprint, "
     "status, status_reason, created_at, expires_at, presented_at, closed_at"
@@ -134,18 +134,21 @@ def require_message(con, user_id: str, message_id: str) -> None:
 
 # --- messages ------------------------------------------------------------------------------
 def add_message(con, now: str, conversation_id: str, role: str, text: str,
-                cards: Iterable[dict] = (), guard_problems: Any = None) -> dict:
+                cards: Iterable[dict] = (), guard_problems: Any = None, *, status: str = "completed") -> dict:
+    """`status`: "completed", or "cancelled" for an assistant reply the user stopped (#48)."""
+    if status not in ("completed", "cancelled"):
+        raise ValueError(f"message status must be completed or cancelled, got {status!r}")
     mid = new_id("m")
     cards = list(cards)
     con.execute(
-        "INSERT INTO messages (id, conversation_id, role, text, cards, guard_problems, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, conversation_id, role, text, cards, guard_problems, created_at, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (mid, conversation_id, role, text, to_json(cards),
-         None if guard_problems is None else to_json(guard_problems), now),
+         None if guard_problems is None else to_json(guard_problems), now, status),
     )
     con.execute("UPDATE conversations SET updated_at = ? WHERE id = ?", (now, conversation_id))
     return {"id": mid, "conversation_id": conversation_id, "role": role, "text": text,
-            "cards": cards, "guard_problems": guard_problems, "created_at": now}
+            "cards": cards, "guard_problems": guard_problems, "created_at": now, "status": status}
 
 
 def list_messages(con, conversation_id: str) -> list[dict]:
