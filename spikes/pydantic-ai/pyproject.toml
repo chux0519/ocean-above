@@ -1,0 +1,17 @@
+[project]
+name = "spike-pydantic-ai"
+version = "0.0.0"
+description = "Issue #49 phase 1: Pydantic AI Slim POC against DeepSeek (not shipped)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic-ai-slim[openai]",
+    # the backend's own runtime deps, so ../../backend/app imports (airline, tools)
+    "networkx>=3.3",
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+otel = ["opentelemetry-sdk"]
+
+[tool.uv]
+package = false
