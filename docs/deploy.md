@@ -55,6 +55,10 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   messages), then start the old image.
 
 ## Deploy log
+- 2026-11-24 `0789110`: 11-followup (#55) — conversation load race, busy refusals refund the message slot, "Stop
+  outcome unknown" notice; api + web. Health 200 after 10 s. Public check: a second message sent 1 s into a running turn
+  of the same conversation waited for the lock and completed (both stored, usage +2); the refusal paths are covered by
+  HTTP tests (not forced on production).
 - 2026-11-24 `43a72de`: 09-stop — user Stop (#48), app.db schema v4 (migrated on start; backup in `/tmp` on the VPS);
   api + web. Health 200 after 12 s (the retrying check). Public API e2e: a three-route request stopped after the first
   card → cancel 200 `cancelling` → terminal `cancelled` 0.85 s later; stored reply `status: cancelled`, its three quote

@@ -25,7 +25,7 @@ concurrency limits stay our own code.
 | 3 | #35 OpenTelemetry + local Phoenix | 10-otel | #49, #48 accepted | next |
 | 4 | #47 multi-model benchmark, optional Promptfoo (deepseek-flash official vs deepseek-v4.1-flash-1017 and qwen3.8-flash on Bailian; tokens when price unknown) | 11-bench | #49, #48 (traces from #35) | queued |
 | — | #41 SQLite limits + benchmark, PostgreSQL criteria | 08-runtime (parallel) | — | done (PR #51, docs/design/sqlite-concurrency.md) |
-| — | #55 review follow-up: load race, busy quota, Stop before run ID | 11-followup | — | in progress |
+| — | #55 review follow-up: load race, busy quota, Stop before run ID | 11-followup | — | done 2026-11-24 (PR #57, released `0789110`) |
 | — | #11 / #12 thinking level, BYOK, thinking bench | bonus | — | not scheduled |
 
 Each item starts only after the one before it is accepted.
