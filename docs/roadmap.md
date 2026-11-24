@@ -12,15 +12,15 @@ part of it to a mainstream agent SDK, for two reasons:
 2. **Systematic tracing.** Agent / LLM / tool spans from the SDK, exported through OpenTelemetry to a local Phoenix,
    instead of instrumenting a custom loop by hand.
 
-Which SDK (OpenAI Agents SDK or Pydantic AI Slim, or neither) is decided by POC evidence in
-`docs/design/adr-001-agent-runtime.md`. The SDK never gets booking authority: booking stays the user's click on a
+Decided: **Pydantic AI Slim** (owner, 2026-11-24, after both POCs; evidence and boundaries in
+`docs/design/adr-001-agent-runtime.md`). The SDK never gets booking authority: booking stays the user's click on a
 confirm card (nonce, B1–B7), ReplyGuard still checks text before it is streamed, and app.db history, budgets and
 concurrency limits stay our own code.
 
 ## Order
 | # | Issue | Iteration | Depends on | Status |
 |---|---|---|---|---|
-| 1 | #49 SDK POC, ADR, runtime migration | 08-runtime | — | in progress |
+| 1 | #49 SDK POC, ADR, runtime migration | 08-runtime | — | ADR-001: Pydantic AI Slim (2026-11-24); migration in progress |
 | 2 | #48 backend run cancellation + Stop UI | 09-stop | #49 accepted | queued |
 | 3 | #35 OpenTelemetry + local Phoenix | 10-otel | #49, #48 accepted | queued |
 | 4 | #47 multi-model benchmark, optional Promptfoo | 11-bench | #49, #48 (traces from #35) | queued |
