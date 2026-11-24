@@ -125,7 +125,7 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
     lines = [
         f"# LLM eval report — {s['mode']} mode",
         "",
-        f"- Date: {s['date']} · commit `{s['commit']}`",
+        f"- Date: {s['date']} · commit `{s['commit']}`" + (" · tracing on (OTLP)" if s.get("tracing") else ""),
         f"- Model: `{s['model']}` · reasoning effort: **{s['effort']}** · {s['n']} run(s) per case · "
         f"{len(cases)} cases · {s['runs']} runs · {s['turns']} chat turns",
         f"- Cost: **${s['cost_usd']:.4f}** ({s['llm_calls']} LLM calls; tokens: {s['usage']['hit']:,} cached in / "

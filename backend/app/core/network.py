@@ -10,12 +10,16 @@ import hashlib
 import re
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 _COORD_RE = re.compile(r"-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?\Z")
+READ_BUSY_SECONDS = 5.0  # SQLite busy timeout: waiting for a writer's lock on locations.db
+READ_SECONDS = 5.0  # operation deadline for the two SELECTs (a progress handler, like app.db's)
+_PROGRESS_OPS = 1000  # SQLite VM instructions between two deadline checks
 
 
 class NetworkDataError(Exception):
@@ -186,10 +190,17 @@ def _refuse_wal(path: Path) -> None:
         raise NetworkDataError(f"{path} has a non-empty -wal file; checkpoint it and switch off WAL")
 
 
-def _read_rows(path: Path) -> tuple[list[tuple], list[tuple]]:
+def _read_rows(path: Path, deadline: float = READ_SECONDS) -> tuple[list[tuple], list[tuple]]:
+    """The raw rows. The progress handler interrupts SQL that runs past `deadline` seconds
+    (NetworkDataError, #35 comment); waiting for a lock is bounded by the busy timeout (5 s, as
+    before). Not bounded: a file system that hangs inside a read call (the handler only runs
+    between SQLite VM steps), and the hashing / stat calls around this function in
+    `load_network`, which repeats up to 3 times (review P2-6)."""
     uri = path.resolve().as_uri() + "?mode=ro"
     try:
-        con = sqlite3.connect(uri, uri=True)
+        con = sqlite3.connect(uri, uri=True, timeout=READ_BUSY_SECONDS)
+        ends = time.monotonic() + deadline
+        con.set_progress_handler(lambda: time.monotonic() > ends, _PROGRESS_OPS)
         try:
             locations = con.execute(
                 "SELECT city_name, coordinate, is_hub, connected_hubs FROM locations ORDER BY rowid"

@@ -36,6 +36,7 @@ class Settings:
     agent_budget: AgentBudget = field(default_factory=AgentBudget)  # per-turn agent budgets (AGENT_*)
     turn_concurrency: TurnConcurrency = field(default_factory=TurnConcurrency)  # running turns, whole server
     ping_interval: float = 2.0  # /api/debug/sse-ping spacing, seconds
+    tracing: bool = False  # OTEL_TRACING_ENABLED: OpenTelemetry spans to OTLP/HTTP (app/tracing.py, #35)
 
     @property
     def dev_login(self) -> bool:
@@ -77,4 +78,5 @@ class Settings:
             s.daily_token_budget = int(env["DAILY_TOKEN_BUDGET"].strip().replace("_", ""))
         s.agent_budget = AgentBudget.from_env(env)  # ValueError on a bad AGENT_* value: fail at startup
         s.turn_concurrency = TurnConcurrency.from_env(env)  # AGENT_MAX_ACTIVE_TURNS, AGENT_TURN_QUEUE_SECONDS
+        s.tracing = _flag(env.get("OTEL_TRACING_ENABLED"))
         return s

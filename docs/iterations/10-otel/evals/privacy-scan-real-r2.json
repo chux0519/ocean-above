@@ -1,0 +1,24 @@
+{
+ "spans": 691,
+ "texts_checked": 121,
+ "full_text_hits": 0,
+ "20char_fragment_hits": 3,
+ "fragments": [
+  "e nearest served cit",
+  "the nearest served c",
+  " the nearest served "
+ ],
+ "ids_checked": 39,
+ "id_hits": [],
+ "span_names": {
+  "airline.book": 7,
+  "booking.recheck": 7,
+  "core.routing": 56,
+  "agent.turn": 68,
+  "reply_guard": 235,
+  "airline.quote_route": 49,
+  "invoke_agent": 68,
+  "chat": 134,
+  "execute_tool": 67
+ }
+}
