@@ -128,6 +128,18 @@ def test_tool_calls_are_assembled_from_fragments(tmp_path):
     assert [r["name"] for r in rows] == ["quote_route", "find_city"]  # run in call order
 
 
+def test_usage_is_stored_in_the_providers_shape(tmp_path):
+    """llm_calls keeps DeepSeek's usage fields (the evals price cache hits and reasoning from them)."""
+    usage = {"prompt_tokens": 1000, "completion_tokens": 50, "total_tokens": 1050,
+             "prompt_tokens_details": {"cached_tokens": 640}, "completion_tokens_details": {"reasoning_tokens": 30},
+             "prompt_cache_hit_tokens": 640, "prompt_cache_miss_tokens": 360}
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(200, content=sse(
+        delta(content="Hi."), delta(finish="stop"), {"choices": [], "usage": usage})))
+    stored = w.calls[-1]["usage"]
+    assert stored == usage
+    assert w.calls[-1]["budget"]["charged_tokens"] == 1050
+
+
 def test_reasoning_content_is_kept_apart_and_passed_back_within_the_turn(tmp_path):
     def handler(request, n):
         if n == 0:

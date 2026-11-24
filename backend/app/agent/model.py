@@ -84,14 +84,22 @@ class Completion:
 
 
 def usage_dict(response: ModelResponse) -> dict | None:
-    """The provider's usage in the OpenAI shape budget.py reads; None when none was reported."""
+    """The provider's usage in its own wire shape (what llm_calls stored before ADR-001; budget.py
+    and the evals' cost read it): prompt / completion / total tokens, DeepSeek's cache hit / miss
+    counts, cached and reasoning token details. None when nothing was reported."""
     u = response.usage
     if not (u.input_tokens or u.output_tokens):
         return None
     out: dict[str, Any] = {"prompt_tokens": u.input_tokens, "completion_tokens": u.output_tokens,
                            "total_tokens": u.input_tokens + u.output_tokens}
-    if u.details:
-        out["details"] = dict(u.details)
+    details = dict(u.details or {})
+    for key in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens"):
+        if key in details:
+            out[key] = details[key]
+    if u.cache_read_tokens:
+        out["prompt_tokens_details"] = {"cached_tokens": u.cache_read_tokens}
+    if "reasoning_tokens" in details:
+        out["completion_tokens_details"] = {"reasoning_tokens": details["reasoning_tokens"]}
     return out
 
 
