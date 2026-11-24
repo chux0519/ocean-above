@@ -219,6 +219,11 @@ class _Span:
         return True
 
 
+# Phoenix (OpenInference) span kinds of our own spans; the SDK's spans carry GenAI semantic
+# conventions, which Phoenix maps to AGENT / LLM / TOOL itself.
+_KINDS = {"reply_guard": "GUARDRAIL"}
+
+
 @contextmanager
 def span(name: str, attributes: Mapping[str, Any] | None = None, *,
          start_time_ns: int | None = None) -> Iterator[Any]:
@@ -232,7 +237,8 @@ def span(name: str, attributes: Mapping[str, Any] | None = None, *,
     try:
         tracer = tracer_provider.get_tracer(SCOPE)
         manager = tracer.start_as_current_span(
-            name, attributes={k: v for k, v in (attributes or {}).items() if v is not None},
+            name, attributes={"openinference.span.kind": _KINDS.get(name, "CHAIN"),
+                              **{k: v for k, v in (attributes or {}).items() if v is not None}},
             start_time=start_time_ns, record_exception=True, set_status_on_exception=True)
         live = manager.__enter__()
     except Exception:

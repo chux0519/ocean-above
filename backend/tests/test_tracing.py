@@ -156,7 +156,8 @@ def test_off_span_calls_are_a_shared_no_op():
 
 # ============================================================ one quoted itinerary ==============
 def test_one_quote_turn_is_one_trace_with_nested_sdk_and_business_spans(world, traced):
-    agent = Agent(world.airline, FakeLLM(*QUOTE))
+    llm = FakeLLM(*QUOTE)
+    agent = Agent(world.airline, llm)
     stream_ids = {}
 
     async def go():
@@ -183,6 +184,11 @@ def test_one_quote_turn_is_one_trace_with_nested_sdk_and_business_spans(world, t
 
     run = one(spans, "invoke_agent ocean-above")  # Pydantic AI's agent run span
     assert parent_of(spans, run) is root
+    # the SDK groups by the conversation hash (Phoenix sessions); it never reaches the wire
+    assert run.attributes["gen_ai.conversation.id"] == attrs["session.id"] == attrs["ocean.conversation_hash"]
+    assert llm.bodies and attrs["ocean.conversation_hash"] not in json.dumps(llm.bodies)
+    assert root.attributes["openinference.span.kind"] == "CHAIN"
+    assert one(spans, "core.routing").attributes["openinference.span.kind"] == "CHAIN"
     chats = [s for s in spans if s.name.startswith("chat ")]
     assert len(chats) == 2 and all(parent_of(spans, c) is run for c in chats)
     tool = one(spans, "execute_tool quote_route")
@@ -202,6 +208,7 @@ def test_one_quote_turn_is_one_trace_with_nested_sdk_and_business_spans(world, t
     assert routing.attributes["ocean.routing.candidates"] >= 1
     guards = by_name(spans, "reply_guard")
     assert guards and all(g.attributes["ocean.guard.result"] == "pass" for g in guards)
+    assert all(g.attributes["openinference.span.kind"] == "GUARDRAIL" for g in guards)
     # no duplicate spans for one operation
     assert sorted({s.name for s in spans}) == sorted([
         "agent.turn", "invoke_agent ocean-above", "chat fake-llm", "execute_tool quote_route",

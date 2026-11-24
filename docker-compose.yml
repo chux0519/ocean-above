@@ -36,6 +36,23 @@ services:
     expose:
       - "8000"
 
+  # Optional local tracing UI (#35): only with `docker compose --profile tracing up`; never started by a
+  # plain `up`. Phoenix receives OTLP/HTTP on 6006 inside the compose network; its UI is published on
+  # loopback only (http://localhost:6006, no auth). Traces stay on this host, in the `phoenix` volume.
+  # The api exports only when OTEL_TRACING_ENABLED=1 and OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:6006
+  # are set in .env (see README "Tracing").
+  phoenix:
+    image: arizephoenix/phoenix:version-22.0.1
+    profiles: ["tracing"]
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix:/mnt/data
+    ports:
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
+
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -47,3 +64,6 @@ services:
       - "127.0.0.1:${OCEAN_PORT:-3000}:80"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  phoenix:

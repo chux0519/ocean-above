@@ -427,7 +427,7 @@ class Agent:
         # One trace per turn (#35): `agent.turn` is the root; the SDK's run / chat / tool spans
         # and the airline's spans nest under it. Correlation: the run id (SSE `X-Run-Id`) and
         # the user message id (app.db llm_calls / tool_calls rows) are attributes.
-        with tracing.span("agent.turn", {"ocean.run_id": run.id,
+        with tracing.span("agent.turn", {"ocean.run_id": run.id, "session.id": tracing.digest(conversation_id),
                                          "ocean.conversation_hash": tracing.digest(conversation_id),
                                          "ocean.reasoning_effort": reasoning_effort}) as span:
             await self._run_traced(run, text, reasoning_effort, queue, emit, not_stored, span)
@@ -616,8 +616,11 @@ class Agent:
     async def _run_steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
         settings = self.llm.settings(turn.reasoning_effort)
         # no SDK request limit: the steps budget (max 20 by env bounds) is the only one
+        # `conversation_id`: span metadata only (the SDK's `gen_ai.conversation.id`, Phoenix's
+        # session): the conversation hash, never the id; the wire is rebuilt by `_WireContext`
         async with self._runtime.iter(None, message_history=to_model_messages(messages), deps=turn,
-                                      model_settings=settings, usage_limits=UsageLimits(request_limit=None)) as run:
+                                      model_settings=settings, usage_limits=UsageLimits(request_limit=None),
+                                      conversation_id=tracing.digest(turn.conversation_id)) as run:
             async for node in run:
                 if _Runtime.is_model_request_node(node):
                     if turn.cancelled:  # R2: no LLM request after a Stop
