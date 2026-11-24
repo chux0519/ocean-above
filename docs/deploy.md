@@ -55,6 +55,10 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   messages), then start the old image.
 
 ## Deploy log
+- 2026-11-24 `73ba50e`: 10-otel (#35) — opt-in OpenTelemetry tracing, off on production (no `OTEL_*` env on the VPS;
+  `app.tracing.provider()` is None in the running container); api only; `docker compose config --services` on the
+  build host lists web, api, proxy (Phoenix only with `--profile tracing`). Health 200 after 8 s; public API e2e:
+  Guangzhou → Lima quote + confirmation $1,160.71, click books, replayed nonce 409, ticket lookup.
 - 2026-11-24 `0789110`: 11-followup (#55) — conversation load race, busy refusals refund the message slot, "Stop
   outcome unknown" notice; api + web. Health 200 after 10 s. Public check: a second message sent 1 s into a running turn
   of the same conversation waited for the lock and completed (both stored, usage +2); the refusal paths are covered by

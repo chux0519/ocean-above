@@ -1,0 +1,1023 @@
+# 10-otel T1 — STATE (2026-11-24)
+
+Issue #35 (Refs #31 P2), plan `docs/iterations/10-otel/plan.md`, branch `it10-otel`.
+
+## Done
+- `backend/app/tracing.py`: switch, OTLP/HTTP provider, redaction at the exporter, a span helper that does nothing when off.
+- Business spans in `agent/loop.py`, `airline/service.py`, `core/routing.py`. Pydantic AI's own spans (`include_content=False`) nest under them.
+- `core/network.py`: a deadline on `locations.db` reads (the #35 comment).
+- Tracing is wired into `api/settings.py` / `api/routes.py` (built at startup only when enabled, flushed at shutdown) and into the evals CLI.
+- Compose profile `tracing` (Phoenix 22.0.1) and `.env.example` entries.
+- 25 tests in `backend/tests/test_tracing.py`.
+- Evals: fake 31/31, and a real-model run with tracing on against a local Phoenix (results below). Two Phoenix screenshots and a privacy scan of everything the collector received.
+
+## Open decisions / for the coordinator
+1. **Loop changes beyond adding spans:**
+   - `Agent._run` is split into `_run` (opens the `agent.turn` span) and `_run_traced`, which is the old body unchanged.
+   - `_runtime.iter(...)` now gets `conversation_id=<hash>`. This is SDK span metadata only. A test proves it never reaches the request body.
+   - Two fields were added for tracing: `Run.error_code` and `_Turn.span` / `_Turn.fallback_kind`.
+   - Booking, locks, budgets and cancel semantics are unchanged. The full suite passes unchanged and the B1–B7 model tests pass.
+   - Your call whether this needs the Fable review the plan mentions.
+2. **Files outside T1's list:**
+   - `backend/evals/__main__.py`: 3 lines that turn tracing on from the env and flush it.
+   - `backend/evals/report.py`: one header suffix, "tracing on (OTLP)".
+   - Both are needed for the "real evals with tracing on" acceptance.
+3. **The `locations.db` read deadline changes behaviour slightly.** A read over 5 s, or waiting more than 5 s for a lock, now raises `NetworkDataError`; before, it waited without limit. Bookings already map `NetworkDataError` to `data_unavailable`, which is retryable.
+4. **Phoenix shows Total Cost $0.** It has no price for `deepseek-flash`. Token counts are shown, from the SDK's `gen_ai.usage.*`.
+5. **docker compose was not run here** (this machine has no docker). I checked the YAML with PyYAML: 4 services, `phoenix` only in profile `tracing`, volume `phoenix`. The image tag `arizephoenix/phoenix:version-22.0.1` exists on Docker Hub. Please run `docker compose config` and `docker compose --profile tracing config` on the homelab. A plain `docker compose config --services` must not list phoenix.
+6. **Production stays off.** No new env on the VPS. The legal text is unchanged.
+
+## Span inventory
+One trace per chat turn; root `agent.turn`. A booking click is its own trace (its own HTTP request), rooted at `airline.book`.
+
+| Span | Where | Parent | Attributes (all non-content) |
+|---|---|---|---|
+| `agent.turn` | `loop.Agent._run` | root | `ocean.run_id` (= SSE `X-Run-Id`), `ocean.message_id` (= app.db `llm_calls.request.turn` / `tool_calls.message_id`), `ocean.conversation_hash` and `session.id` (sha256[:16] of the conversation id), `ocean.reasoning_effort`, `ocean.outcome` (completed / fallback / cancelled / failed), `ocean.error_code`, `ocean.fallback_kind`, `ocean.budget.{steps,tool_calls,refused_calls,tokens,estimated_calls}`; events `llm.attempt_failed` {attempt, error type, retryable, released} |
+| `invoke_agent ocean-above` | Pydantic AI | `agent.turn` | GenAI semconv, aggregated usage; message *structure* only (roles, part types, tool names). Phoenix shows it as AGENT. A retried step restarts the run, so a retry shows up as a second `invoke_agent`. |
+| `chat <model>` | Pydantic AI | `invoke_agent` | model, provider, `gen_ai.usage.*`, finish reasons, time to first chunk, tool definitions (our static schemas). Phoenix shows it as LLM. |
+| `execute_tool <name>` | Pydantic AI | `invoke_agent` | tool name, call id + ours: `ocean.tool.code`, `ocean.tool.cards`, `ocean.tool.refused` (budget). Phoenix shows it as TOOL. |
+| `airline.quote_route` | `Airline.quote_route` | `execute_tool quote_route` | `ocean.result.code`, `ocean.quote.legs` |
+| `core.routing` | `routing.cheapest_route` | `airline.quote_route` or `booking.recheck` | `ocean.routing.algorithm` (`hub-candidates+enumeration`), `ocean.network.fingerprint`, `ocean.routing.candidates`, `ocean.routing.code`, `ocean.routing.legs` |
+| `reply_guard` | `Agent._release` (each released sentence) | `chat` / `invoke_agent` | `ocean.guard.chars`, `ocean.guard.result` (pass / fail), `ocean.guard.problems` (kinds only: number, city, date, time, id, booking_claim). Phoenix shows it as GUARDRAIL. |
+| `run.stop` | `Agent._log_stopped` | `agent.turn` | starts at the accepted Stop and ends when the stopped reply is stored; `ocean.stop.{stored, stop_to_end_ms, drain_ms, tokens_after_stop}`, `ocean.run_id` |
+| `airline.book` | `Airline.book` / `book_async` | root (HTTP click) | `ocean.book.status` (booked or the refusal code) |
+| `booking.recheck` | `Airline._recheck` (B6) | `airline.book` | `ocean.recheck.result` (same / changed), `ocean.recheck.reason` (fixed category before the colon, no city names), `ocean.network.fingerprint` |
+
+- There is no separate `agent.llm` / `agent.tool` span. The SDK's `chat` / `execute_tool` spans cover them, so we add attributes and events instead of duplicates.
+- Our own spans carry `openinference.span.kind`: CHAIN, and GUARDRAIL for `reply_guard`. Phoenix 22 maps the SDK's GenAI spans by itself, so `openinference-instrumentation-pydantic-ai` is **not** added.
+
+## Privacy: method and results
+- **By construction:**
+  - SDK spans run with `include_content=False`.
+  - Our attributes are codes, counts, durations, opaque ids (run id, message id) and the `locations.db` fingerprint. City names, text, nonces, user, conversation, quote and ticket ids are never set.
+- **At the exporter (`tracing.Redacting`):**
+  - An exception event keeps `exception.type` only; its message and stack trace are dropped.
+  - A status keeps its code only; the OTel SDK would put `Type: message` in the description.
+  - Content keys (`tool_arguments`, `tool_response`, `final_result`, `gen_ai.tool.call.arguments/result`, `gen_ai.system_instructions`) are dropped, even if content capture were ever switched on.
+- **Tests:**
+  - `test_privacy_scan_over_http_finds_no_sensitive_value` runs the whole HTTP flow: a Google-style user with an email, the cookie, a chat turn that quotes, and the confirm click with its nonce. It scans every span name, attribute, event, status and resource value. Needles:
+    - the user's text (which contains an email), the email and its local part, the user's name, user id, provider sub, conversation id;
+    - the cookie, the nonce and its body, the session and nonce secrets, the LLM key;
+    - the reply text, quote id, ticket id, origin and destination city, price and distance (raw and as displayed).
+  - Result: 0 hits.
+  - `test_exception_messages_and_status_descriptions_are_redacted`: a failure whose message holds an email and a key is exported as the type `RuntimeError` only.
+  - `test_content_keys_are_dropped_even_if_content_capture_were_on`.
+- **Real run:** `/tmp/oa-otel/scan_phoenix.py` read every span Phoenix stored for the real-model evals project (682 spans) through its REST API. It compared them against the 120 user texts and replies in `results.json` (whole text, and every 20-character window) and against the 39 quote, ticket, user, conversation and nonce ids.
+  - Full-text hits: 0. Id hits: 0.
+  - 7 window hits, all in `gen_ai.tool.definitions` / `llm.tools.*.json_schema`. These are our own static tool descriptions, which template replies quote too.
+  - Output: `evals/privacy-scan-real.json`.
+
+## Failure-mode tests (`backend/tests/test_tracing.py`)
+| Mode | Test | Result |
+|---|---|---|
+| Off by default | `test_off_builds_no_provider_imports_no_sdk_and_starts_no_thread` (a fresh process runs startup, a chat turn, the booking route and shutdown) | provider None; no `opentelemetry.sdk*` or `exporter*` module imported; no export thread; SDK runtime without `Instrumentation` |
+| Exporter raises on every export | `test_an_exporter_that_raises_changes_no_chat_or_booking_result` | same events, text, price, legs, ticket and ticket count as with tracing off |
+| Collector down (real OTLP exporter to a closed port) | `test_a_collector_that_is_down_changes_no_chat_or_booking_result` | same results; turn + booking < 3 s; shutdown within the export timeout (5 s) + margin |
+| Tracing layer itself broken (`get_tracer` raises) | `test_a_broken_tracing_layer_never_reaches_the_turn` | turn completes, card bookable |
+| Stop | `test_stop_shows_run_stop_under_a_cancelled_root` | `run.stop` child of a `cancelled` root, with its timings |
+| Guard fallback / LLM down | `test_a_guard_fallback_…`, `test_a_failed_llm_…` | `fallback` + `number`; `failed` + `llm_unavailable` + 3 attempt events |
+| `locations.db` read past its deadline | `test_a_locations_read_past_its_deadline_is_a_data_error_not_a_hang` | `NetworkDataError("… interrupted")` |
+| Non-local endpoint | `test_a_non_local_endpoint_…` | warning logged; still allowed, because a compose service name or private IP is local |
+
+Export is batched (queue 2048, newest dropped when full) in the SDK's thread. Nothing on the request path waits for it.
+
+## Dependencies (named in the plan)
+- `opentelemetry-sdk>=1.45,<2` and `opentelemetry-exporter-otlp-proto-http>=1.45,<2` (resolved 1.45.2).
+- `opentelemetry-api` was already in the lock through pydantic-ai-slim.
+- 12 new locked packages: `opentelemetry-{sdk, semantic-conventions, proto, exporter-otlp-proto-http, exporter-otlp-proto-common, exporter-otlp-common, exporter-http-transport}`, `protobuf`, `googleapis-common-protos`, `requests`, `urllib3`, `charset-normalizer`.
+- Unpacked in the venv: about 8 MB.
+  - protobuf 1.6 MB, charset-normalizer 1.3 MB, semconv 1.1 MB, urllib3 0.9 MB, otel sdk 0.85 MB, googleapis protos about 1 MB, requests 0.5 MB, otel proto 0.35 MB, exporter 0.3 MB.
+- Import cost only when tracing is on: about 15–35 ms (`-X importtime`). Off: none, because nothing is imported.
+- `openinference-instrumentation-pydantic-ai` was not added: Phoenix 22 renders the GenAI spans as AGENT / LLM / TOOL without it.
+
+## Evals (in `docs/iterations/10-otel/evals/`)
+- **fake-traced:** 31/31, 0 safety violations, tracing on to a local Phoenix (project `ocean-above-evals-fake`).
+- **real-traced:**
+  - Setup: deepseek-flash, effort high, N=1, `--max-cost 0.25`, tracing on to a local Phoenix (project `ocean-above-evals-real`), commit `4b73169`.
+  - Results: 30/31 (96.8%), 0 safety violations, 0% ReplyGuard fallback, **$0.0223**, LLM p50 1050 ms, turn p50 2.14 s.
+  - The one failure, `quote_details`: the model also called `request_booking` without being asked. That is model variance, not tracing (08 had 30/31 too).
+- **Fake run with tracing off:** 31/31.
+
+## Screenshots (Phoenix 22.0.1, local, ego-browser, 1440 wide)
+- `screenshots/phoenix-quote-real-1440.png`: a real DeepSeek quoted itinerary: `agent.turn` → `invoke_agent` → `chat deepseek-flash` → `execute_tool quote_route` → `airline.quote_route` → `core.routing` (attributes shown), then `chat` and the `reply_guard` spans.
+- `screenshots/phoenix-stopped-turn-1440.png`: a stopped turn (fake LLM): `agent.turn` → `invoke_agent` → `chat` → `reply_guard`, and `run.stop` (stop_to_end 2 ms, drain 0 ms, stored true).
+- Phoenix UI only, so no mobile shot: it is a developer tool and the app UI is unchanged.
+
+## How to verify
+```bash
+cd backend
+HYPOTHESIS_PROFILE=ci nice -n 10 uv run pytest -q tests/test_tracing.py   # 25 passed
+cd .. && bash tool/test_diff.sh && python3 tool/review_lint.py
+# local Phoenix without docker (not a project dependency):
+uv venv /tmp/oa-phoenix/.venv && uv pip install --python /tmp/oa-phoenix/.venv/bin/python arize-phoenix
+PHOENIX_WORKING_DIR=/tmp/oa-phoenix/data /tmp/oa-phoenix/.venv/bin/phoenix serve   # UI + OTLP on :6006
+cd backend && OTEL_TRACING_ENABLED=1 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:6006 NO_PROXY=127.0.0.1,localhost \
+  uv run python -m evals --mode fake
+```
+Tested source: commit `4b73169` for the code, plus this docs commit. Checks: `tool/test_diff.sh` "No new failures", lint ok, 902 + 25 backend tests.
+
+## Draft: design.md §4.11 观测（OpenTelemetry，#35）
+> 可选，默认关。`OTEL_TRACING_ENABLED=1` 时 `app/tracing.py` 建一个 TracerProvider，BatchSpanProcessor + OTLP/HTTP exporter（端点取标准变量 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`，默认 `http://localhost:4318`；非本地地址启动时告警）。关时不导入 OTel SDK，没有 provider、exporter 和后台线程，span 调用是共享的空操作。
+>
+> **Trace 结构**：每轮对话一个 trace，根 `agent.turn`（run_id = SSE `X-Run-Id`，message_id = app.db 记录，会话 id 的哈希，结果 completed / fallback / cancelled / failed，预算用量）。其下是 Pydantic AI 自己的 `invoke_agent` / `chat` / `execute_tool`（GenAI 语义约定，`include_content=False`），我们只补 SDK 没有的：`airline.quote_route` → `core.routing`（算法、locations.db 指纹、候选数、腿数）、`reply_guard`（每句放行的检查，pass/fail + 问题类别）、`run.stop`（从接受 Stop 到停止的回复落库，含 drain 时间）。工具结果码作为属性加在 SDK 的 `execute_tool` 上，LLM 失败重试作为 `agent.turn` 的事件，不另起重复 span。出票点击是独立的 HTTP 请求，自成 trace：`airline.book`（只有状态）→ `booking.recheck`（B6 结果类别、指纹）→ `core.routing`。
+>
+> **隐私**：span 里只有代码、计数、时长、不透明 id 和指纹；没有用户或模型的文字、prompt、工具参数和结果、城市名、邮箱、用户名、nonce、cookie、密钥。exporter 前一层 `Redacting` 再兜底：异常只留类型（去掉消息和堆栈），status 只留 code，内容类属性键一律删除。生产（VPS）保持关闭，隐私页无需改动；开启时只导出到本机或私网的 collector。
+>
+> **失败模式**：导出在 SDK 的后台线程里批量进行，队列满了就丢 span；collector 宕机、超时（单次 5 s）或 exporter 抛异常都只丢 span，对话和出票的结果与时延不变（测试：exporter 抛异常、端口关闭、tracing 层自身抛异常）。tracing 层自身的错误被 `span()` 吞掉，不会进入业务代码。关停时 flush，最多等一个导出超时。
+>
+> **Phoenix**：`docker compose --profile tracing up` 起 `arizephoenix/phoenix:version-22.0.1`，UI 只绑 loopback `http://localhost:6006`，数据在 `phoenix` 卷里；普通 `docker compose up` 不启动它。Phoenix 22 能直接把 GenAI span 识别为 AGENT / LLM / TOOL；我们自己的 span 带 `openinference.span.kind`（CHAIN / GUARDRAIL）。
+>
+> **locations.db 读取期限**（#35 评论）：`_read_rows` 的 busy timeout 是 5 s，加进度回调 5 s 截止（同 app.db），超时抛 `NetworkDataError`。出票时对应 `data_unavailable`，可重试。
+
+## Draft: README "Tracing" section
+```markdown
+## Tracing (optional, off by default)
+
+The API can export OpenTelemetry traces of each chat turn to a local [Phoenix](https://github.com/Arize-ai/phoenix):
+the agent run, every model call (tokens, latency) and tool call, the route search, the reply check, a user's Stop and
+the booking re-check. Spans carry codes, counts, durations and ids only — never message text, prompts, tool results,
+city names, emails, nonces, cookies or keys.
+
+With Docker:
+
+    # .env
+    OTEL_TRACING_ENABLED=1
+    OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:6006
+    # if HTTPS_PROXY is set: NO_PROXY=localhost,127.0.0.1,api,web,phoenix
+
+    docker compose --profile tracing up -d
+    # chat at http://localhost:3000, traces at http://localhost:6006
+
+A plain `docker compose up` does not start Phoenix, and without `OTEL_TRACING_ENABLED=1` nothing is traced or exported.
+Running the backend on the host instead: start Phoenix (`docker compose --profile tracing up -d phoenix`, or
+`pip install arize-phoenix && phoenix serve`) and set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006`. Evals
+(`python -m evals`) honour the same variables. If the collector is down, spans are dropped; chat and booking are
+unaffected.
+```
+
+## Next
+Coordinator: review the diff and the privacy scan, run the compose config check on the homelab, merge `design.md`
+§4.11 and the README section, and decide on the Fable review (open decision 1). Then release with tracing off and
+verify health and one quote.
+diff --git a/.env.example b/.env.example
+index 657686e..e8ec647 100644
+--- a/.env.example
++++ b/.env.example
+@@ -48,3 +48,13 @@ AGENT_MAX_TURN_SECONDS=90
+ AGENT_MAX_ACTIVE_TURNS=8
+ AGENT_TURN_QUEUE_SECONDS=5
+ AGENT_MAX_TURNS_PER_USER=2
++
++# Tracing (#35, README "Tracing"). Off unless set to 1; then spans (no message text, no PII) go to the
++# OTLP/HTTP endpoint below. With `docker compose --profile tracing up`: http://phoenix:6006 (UI on
++# http://localhost:6006). Running the backend on the host: http://localhost:6006. Keep it a local address.
++OTEL_TRACING_ENABLED=
++OTEL_EXPORTER_OTLP_ENDPOINT=
++# Host port of the Phoenix UI (tracing profile only). Default 6006.
++PHOENIX_PORT=6006
++# If HTTPS_PROXY is set, add phoenix to NO_PROXY so spans are not sent through the proxy:
++# NO_PROXY=localhost,127.0.0.1,api,web,phoenix
+diff --git a/backend/app/agent/loop.py b/backend/app/agent/loop.py
+index f61b6c5..011b78f 100644
+--- a/backend/app/agent/loop.py
++++ b/backend/app/agent/loop.py
+@@ -34,6 +34,7 @@ from pydantic_ai.messages import (FunctionToolResultEvent, PartDeltaEvent, PartS
+                                   TextPart, TextPartDelta, ThinkingPart, ThinkingPartDelta, ToolCallPart,
+                                   ToolCallPartDelta)
+ 
++from .. import tracing
+ from ..airline import ConversationBusy, NotFound
+ from .budget import AgentBudget, BudgetTracker, refusal
+ from .concurrency import ServerBusy, Threads, TurnConcurrency, TurnSlots
+@@ -67,6 +68,7 @@ TERMINAL = {"done": "completed", "cancelled": "cancelled", "error": "failed"}  #
+ FLOOD_FACTOR = 4  # a completion with more than max_tool_calls_per_step * this many calls runs none
+ SDK_TOOL_RETRIES = 1000  # the SDK's own per-tool retry cap; our budget ends a turn long before
+ _RAW = "__raw__"  # arguments the SDK could not parse, handed to Toolbox.run as the raw string
++_ACTIVE = object()  # `Agent(tracer_provider=...)` default: the provider of `app.tracing` (None: off)
+ 
+ 
+ @dataclass(frozen=True)
+@@ -127,6 +129,7 @@ class Run:
+     tokens_at_stop: int | None = None
+     terminal: str | None = None  # the terminal event sent (done / cancelled / error)
+     sent_first: bool = False  # the first event (it carries the run id) was sent
++    error_code: str | None = None  # the code of the terminal `error` event (tracing)
+ 
+ 
+ class TurnStream:
+@@ -173,6 +176,8 @@ class _Turn:
+     steps_task: asyncio.Future | None = None
+     cancelled: bool = False  # the user stopped the run (`Agent.cancel_run`)
+     in_flight: str | None = None  # the tool call whose worker thread is running
++    span: Any = tracing.NO_SPAN  # the turn's `agent.turn` span (#35; a no-op when tracing is off)
++    fallback_kind: str | None = None  # the template replaced the reply because of this (tracing)
+ 
+ 
+ def message_view(message: dict) -> dict:
+@@ -215,13 +220,17 @@ class Agent:
+                  lock_timeout: float | None = LOCK_TIMEOUT,
+                  concurrency: TurnConcurrency | None = None, drain_timeout: float = DRAIN_TIMEOUT,
+                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+-                 tracer_provider: Any = None):
++                 tracer_provider: Any = _ACTIVE):
+         """`budget`: the per-turn limits (design §4.8; default `AgentBudget()`). `max_steps` and
+         `turn_timeout` override its fields (tests, older callers). `concurrency`: the server-wide
+         limit on running turns (design §4.9; default `TurnConcurrency()`). `drain_timeout`: how
+         long a cut-short turn waits for its worker threads before it ends anyway.
+-        `tracer_provider`: an OpenTelemetry TracerProvider for the runtime's spans (entry point for
+-        #35). None (default): no instrumentation at all, nothing is traced or exported."""
++        `tracer_provider`: an OpenTelemetry TracerProvider for the runtime's spans (#35). Default:
++        the one `app.tracing` holds when the agent is built (none unless OTEL_TRACING_ENABLED);
++        None: no SDK instrumentation at all. The loop's own spans (`agent.turn`, `reply_guard`,
++        `run.stop`) always go to `app.tracing`'s provider."""
++        if tracer_provider is _ACTIVE:
++            tracer_provider = tracing.provider()
+         budget = budget or DEFAULT_BUDGET
+         if max_steps is not None:
+             budget = replace(budget, max_steps=max_steps)
+@@ -391,7 +400,7 @@ class Agent:
+     # ------------------------------------------------------------------ one turn -----------
+     async def _run(self, run: Run, text: str, reasoning_effort: str | None,
+                    queue: asyncio.Queue, on_not_stored: Callable[[], Any] | None = None) -> None:
+-        user_id, conversation_id = run.user_id, run.conversation_id
++        conversation_id = run.conversation_id
+         run.started = True
+ 
+         def emit(name: str, data: dict) -> None:
+@@ -404,6 +413,8 @@ class Agent:
+             if name in TERMINAL:
+                 run.terminal = name
+                 run.state = TERMINAL[name]
++                if name == "error":
++                    run.error_code = data.get("code")
+             queue.put_nowait(Event(name, data))
+ 
+         async def not_stored() -> None:
+@@ -413,6 +424,18 @@ class Agent:
+                 except Exception:
+                     log.exception("not-stored callback failed (conversation %s)", conversation_id)
+ 
++        # One trace per turn (#35): `agent.turn` is the root; the SDK's run / chat / tool spans
++        # and the airline's spans nest under it. Correlation: the run id (SSE `X-Run-Id`) and
++        # the user message id (app.db llm_calls / tool_calls rows) are attributes.
++        with tracing.span("agent.turn", {"ocean.run_id": run.id, "session.id": tracing.digest(conversation_id),
++                                         "ocean.conversation_hash": tracing.digest(conversation_id),
++                                         "ocean.reasoning_effort": reasoning_effort}) as span:
++            await self._run_traced(run, text, reasoning_effort, queue, emit, not_stored, span)
++
++    async def _run_traced(self, run: Run, text: str, reasoning_effort: str | None, queue: asyncio.Queue,
++                          emit: Callable[[str, dict], None], not_stored: Callable[[], Awaitable[None]],
++                          span: Any) -> None:
++        user_id, conversation_id = run.user_id, run.conversation_id
+         # The conversation lock first, then the user's own limit, then a server-wide slot: a
+         # second message of a busy conversation waits without taking a slot. Every refusal comes
+         # before anything is stored.
+@@ -456,6 +479,7 @@ class Agent:
+                 # R4 backstop (review P2-1): every stream ends with a terminal event, also when the
+                 # task was cancelled by a shutdown or a path above ended without one
+                 emit("error", {"code": "internal_error", "message": INTERNAL})
++            _trace_end(span, run)
+             self._retire(run)
+             queue.put_nowait(None)
+ 
+@@ -464,6 +488,12 @@ class Agent:
+         (log fields now; spans in #35)."""
+         latency = None if run.stop_requested is None else int((time.monotonic() - run.stop_requested) * 1000)
+         after = None if turn is None or run.tokens_at_stop is None else turn.budget.tokens - run.tokens_at_stop
++        # `run.stop`: from the accepted Stop to the stopped reply stored (#35)
++        start = None if run.stop_requested is None else tracing.monotonic_to_epoch_ns(run.stop_requested)
++        with tracing.span("run.stop", {"ocean.run_id": run.id, "ocean.stop.stored": turn is not None,
++                                       "ocean.stop.stop_to_end_ms": latency, "ocean.stop.drain_ms": drain_ms,
++                                       "ocean.stop.tokens_after_stop": after}, start_time_ns=start):
++            pass
+         log.info("agent.run.cancelled run=%s conversation=%s stored=%s stop_to_end_ms=%s tokens_after_stop=%s "
+                  "drain_ms=%s", run.id, run.conversation_id, turn is not None, latency, after, drain_ms)
+ 
+@@ -504,6 +534,8 @@ class Agent:
+         turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
+                      reasoning_effort)
+         turn.messages = messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
++        turn.span = tracing.current()  # `agent.turn` (set in `_run`)
++        turn.span.set_attribute("ocean.message_id", user_message["id"])
+         run.turn = turn
+         if run.state == "cancelling":  # stopped while the message was stored: no step starts
+             turn.cancelled = True
+@@ -584,8 +616,11 @@ class Agent:
+     async def _run_steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
+         settings = self.llm.settings(turn.reasoning_effort)
+         # no SDK request limit: the steps budget (max 20 by env bounds) is the only one
++        # `conversation_id`: span metadata only (the SDK's `gen_ai.conversation.id`, Phoenix's
++        # session): the conversation hash, never the id; the wire is rebuilt by `_WireContext`
+         async with self._runtime.iter(None, message_history=to_model_messages(messages), deps=turn,
+-                                      model_settings=settings, usage_limits=UsageLimits(request_limit=None)) as run:
++                                      model_settings=settings, usage_limits=UsageLimits(request_limit=None),
++                                      conversation_id=tracing.digest(turn.conversation_id)) as run:
+             async for node in run:
+                 if _Runtime.is_model_request_node(node):
+                     if turn.cancelled:  # R2: no LLM request after a Stop
+@@ -639,7 +674,11 @@ class Agent:
+         def body(name: str) -> Callable[..., Awaitable[str]]:
+             async def run(ctx: RunContext[_Turn], **_args: Any) -> str:
+                 # the arguments the model sent are taken raw from the completion in `_tool_call`
+-                return (await self._tool_call(ctx.deps, ctx.tool_call_id or "", name)).for_llm()
++                span = tracing.current()  # the SDK's `execute_tool` span: our result code on it
++                outcome = await self._tool_call(ctx.deps, ctx.tool_call_id or "", name)
++                span.set_attributes({"ocean.tool.code": outcome.code, "ocean.tool.cards": len(outcome.cards),
++                                     "ocean.tool.refused": (outcome.error or "").startswith("budget")})
++                return outcome.for_llm()
+             return run
+ 
+         tools = []
+@@ -718,6 +757,8 @@ class Agent:
+         """Persist the assistant message (the `done` moment: quote cards become bookable)."""
+         text = turn.text.rstrip()
+         if fallback is not None:
++            turn.fallback_kind = fallback[0]["kind"]
++            turn.span.set_attribute("ocean.fallback_kind", turn.fallback_kind)
+             text = fallback_reply(turn.outcomes)
+             turn.emit("replace", {"text": text})
+         elif CLICK_TO_BOOK not in text and any(
+@@ -759,7 +800,11 @@ class Agent:
+             piece = piece.lstrip()
+         elif first_of_step and not turn.text[-1].isspace() and not piece[:1].isspace():
+             piece = "\n\n" + piece  # text of a later step starts a new paragraph
+-        problems = turn.guard.check(turn.text + piece)
++        with tracing.span("reply_guard", {"ocean.guard.chars": len(turn.text) + len(piece)}) as span:
++            problems = turn.guard.check(turn.text + piece)
++            span.set_attribute("ocean.guard.result", "fail" if problems else "pass")
++            if problems:
++                span.set_attribute("ocean.guard.problems", sorted({p["kind"] for p in problems}))
+         if problems:
+             raise _GuardFailed(problems)
+         turn.text += piece
+@@ -884,6 +929,9 @@ class Agent:
+             await asyncio.shield(log_call(
+                 {"content": content, "error": str(error)[:300], "attempt": attempt + 1}, usage,
+                 output_chars=received, no_response=not isinstance(exc, TimeoutError) and received is None))
++            turn.span.add_event("llm.attempt_failed", {
++                "ocean.llm.attempt": attempt + 1, "ocean.llm.error": type(exc).__name__,
++                "ocean.llm.retryable": error.retryable, "ocean.llm.released": released})
+             if released or not error.retryable or attempt == self.retries:
+                 raise error from None
+             if (stop := turn.budget.out_of_tokens()) is not None:
+@@ -930,3 +978,16 @@ def _unique_call_ids(response: Any) -> None:
+ def _flooded(completion: Completion, budget: AgentBudget) -> bool:
+     """More tool calls in one completion than any honest step needs (P2-3)."""
+     return len(completion.tool_calls) > budget.max_tool_calls_per_step * FLOOD_FACTOR
++
++
++def _trace_end(span: Any, run: Run) -> None:
++    """The turn's outcome on its `agent.turn` span: completed / fallback (the template replaced
++    the reply) / cancelled / failed, plus the budget used (counts only)."""
++    turn = run.turn
++    if run.terminal == "done":
++        outcome = "fallback" if turn is not None and turn.fallback_kind else "completed"
++    else:
++        outcome = "cancelled" if run.terminal == "cancelled" else "failed"
++    span.set_attributes({"ocean.outcome": outcome, "ocean.error_code": run.error_code})
++    if turn is not None:
++        span.set_attributes({f"ocean.budget.{k}": v for k, v in turn.budget.snapshot().items()})
+diff --git a/backend/app/airline/service.py b/backend/app/airline/service.py
+index 3280576..230a0bb 100644
+--- a/backend/app/airline/service.py
++++ b/backend/app/airline/service.py
+@@ -20,8 +20,10 @@ import sqlite3
+ from dataclasses import dataclass, field
+ from datetime import datetime, timedelta, timezone
+ from decimal import Decimal
+-from typing import Any, Iterable
++from contextlib import contextmanager
++from typing import Any, Iterable, Iterator
+ 
++from .. import tracing
+ from ..core import places
+ from ..core.network import Network, NetworkDataError, NetworkProvider
+ from ..core.pricing import FORMULA, InvalidPathError, price_path
+@@ -131,6 +133,13 @@ class Airline:
+         """Cheapest route between two cities, stored as an immutable quote (status `quoted`).
+         Codes: ok, unknown_city, ambiguous_city, same_city, no_service, unreachable.
+         Raises NotFound when the conversation is not the user's."""
++        with tracing.span("airline.quote_route") as span:  # #35: code and counts only
++            result = self._quote_route(user_id, conversation_id, origin, destination)
++            span.set_attributes({"ocean.result.code": result.code, "ocean.quote.legs":
++                                 len(result.data.get("legs") or ()) if result.ok else None})
++            return result
++
++    def _quote_route(self, user_id: str, conversation_id: str, origin: str, destination: str) -> Result:
+         net = self.networks.current()
+         route = cheapest_route(net, origin, destination)
+         if isinstance(route, RouteError):
+@@ -277,13 +286,14 @@ class Airline:
+         and waits up to `lock_timeout` seconds for a running chat turn, then refuses with
+         conversation_busy (None waits without limit). On the event loop use `book_async`.
+         """
+-        quote = self._book_quote(user_id, quote_id)
+-        try:
+-            with self.locks.hold(quote["conversation_id"], timeout=lock_timeout):
+-                outcome = self._book_transaction(user_id, quote_id, nonce)
+-        except ConversationBusy:
+-            raise BookingError("conversation_busy") from None
+-        return _booking_result(outcome)
++        with tracing.span("airline.book") as span, _book_status(span):
++            quote = self._book_quote(user_id, quote_id)
++            try:
++                with self.locks.hold(quote["conversation_id"], timeout=lock_timeout):
++                    outcome = self._book_transaction(user_id, quote_id, nonce)
++            except ConversationBusy:
++                raise BookingError("conversation_busy") from None
++            return _booking_result(outcome)
+ 
+     async def book_async(self, user_id: str, quote_id: str, nonce: str, *,
+                          lock_timeout: float | None = BOOK_LOCK_TIMEOUT) -> dict:
+@@ -295,20 +305,21 @@ class Airline:
+         short read and the booking transaction run in worker threads. At most
+         `BOOK_MAX_PENDING_PER_USER` clicks of one user are in progress at once; more are refused
+         with conversation_busy (retryable, nothing changed)."""
+-        quote = await asyncio.to_thread(self._book_quote, user_id, quote_id)
+-        if self._booking.get(user_id, 0) >= BOOK_MAX_PENDING_PER_USER:
+-            raise BookingError("conversation_busy")
+-        self._booking[user_id] = self._booking.get(user_id, 0) + 1
+-        try:
+-            async with self.locks.hold_async(quote["conversation_id"], timeout=lock_timeout):
+-                outcome = await _to_thread_to_the_end(self._book_transaction, user_id, quote_id, nonce)
+-        except ConversationBusy:
+-            raise BookingError("conversation_busy") from None
+-        finally:
+-            self._booking[user_id] -= 1
+-            if not self._booking[user_id]:
+-                del self._booking[user_id]
+-        return _booking_result(outcome)
++        with tracing.span("airline.book") as span, _book_status(span):
++            quote = await asyncio.to_thread(self._book_quote, user_id, quote_id)
++            if self._booking.get(user_id, 0) >= BOOK_MAX_PENDING_PER_USER:
++                raise BookingError("conversation_busy")
++            self._booking[user_id] = self._booking.get(user_id, 0) + 1
++            try:
++                async with self.locks.hold_async(quote["conversation_id"], timeout=lock_timeout):
++                    outcome = await _to_thread_to_the_end(self._book_transaction, user_id, quote_id, nonce)
++            except ConversationBusy:
++                raise BookingError("conversation_busy") from None
++            finally:
++                self._booking[user_id] -= 1
++                if not self._booking[user_id]:
++                    del self._booking[user_id]
++            return _booking_result(outcome)
+ 
+     def _book_quote(self, user_id: str, quote_id: str) -> dict:
+         """B1 before any waiting: the quote must exist and be the user's."""
+@@ -436,6 +447,14 @@ class Airline:
+         city, coordinate, leg, distance and price equals the stored quote and the itinerary is
+         still the cheapest one; otherwise (None, what differs). Raises NetworkDataError when
+         the database cannot be read or is not valid right now."""
++        with tracing.span("booking.recheck") as span:  # #35: the result's category, never its text
++            fingerprint, problem = self._recheck_quote(quote)
++            span.set_attributes({"ocean.recheck.result": "same" if problem is None else "changed",
++                                 "ocean.recheck.reason": None if problem is None else _reason_kind(problem),
++                                 "ocean.network.fingerprint": fingerprint})
++            return fingerprint, problem
++
++    def _recheck_quote(self, quote: dict) -> tuple[str, None] | tuple[None, str]:
+         net = self.networks.current(strict=True)
+         legs = quote["legs"]
+         itinerary = _cities(legs)
+@@ -492,6 +511,23 @@ class Airline:
+ 
+ 
+ # ---------------------------------------------------------------------- helpers ---------------
++@contextmanager
++def _book_status(span: Any) -> Iterator[None]:
++    """`airline.book`'s only attribute: booked, or the refusal code (#35)."""
++    try:
++        yield
++    except BookingError as exc:
++        span.set_attribute("ocean.book.status", exc.code)
++        raise
++    span.set_attribute("ocean.book.status", "booked")
++
++
++def _reason_kind(problem: str) -> str:
++    """The fixed part of a re-check problem ("city no longer exists: X" -> "city no longer
++    exists"): no city names in spans."""
++    return problem.split(":", 1)[0]
++
++
+ def _booking_result(outcome: dict | BookingError) -> dict:
+     # A refusal may have changed the quote (expired / stale), so it is raised after COMMIT.
+     if isinstance(outcome, BookingError):
+diff --git a/backend/app/api/routes.py b/backend/app/api/routes.py
+index 81a49ea..c10fd75 100644
+--- a/backend/app/api/routes.py
++++ b/backend/app/api/routes.py
+@@ -18,6 +18,7 @@ from ..agent import Agent, ChatModel, LLMConfig, LLMNotConfigured, encode_stream
+ from ..agent.concurrency import executor_workers
+ from ..agent.loop import MAX_USER_CHARS, TITLE_CHARS
+ from ..agent.sse import HEADERS as SSE_HEADERS, MEDIA_TYPE as SSE_MEDIA_TYPE
++from .. import tracing
+ from ..airline import Airline, NotFound
+ from ..core.network import NetworkProvider
+ from ..store import Store
+@@ -350,6 +351,10 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
+         except LLMNotConfigured:
+             llm = None
+     app.state.llm = llm
++    # Tracing (#35): only when OTEL_TRACING_ENABLED; otherwise nothing is built or exported
++    app.state.tracer_provider = tracing.build() if settings.tracing else None
++    if app.state.tracer_provider is not None:
++        tracing.use(app.state.tracer_provider)
+     agent_kwargs = {"budget": settings.agent_budget, "concurrency": settings.turn_concurrency,
+                     **(agent_kwargs or {})}
+     app.state.agent = Agent(airline, llm, **agent_kwargs) if llm is not None else None
+@@ -377,6 +382,8 @@ async def shutdown(app: FastAPI) -> None:
+     close = getattr(getattr(app.state, "llm", None), "aclose", None)
+     if close is not None:
+         await close()
++    if getattr(app.state, "tracer_provider", None) is not None and tracing.provider() is app.state.tracer_provider:
++        await asyncio.to_thread(tracing.shutdown)  # flushes queued spans (bounded by the export timeout)
+ 
+ 
+ def mount(app: FastAPI) -> None:
+diff --git a/backend/app/api/settings.py b/backend/app/api/settings.py
+index 8f3d72a..0baa6f9 100644
+--- a/backend/app/api/settings.py
++++ b/backend/app/api/settings.py
+@@ -36,6 +36,7 @@ class Settings:
+     agent_budget: AgentBudget = field(default_factory=AgentBudget)  # per-turn agent budgets (AGENT_*)
+     turn_concurrency: TurnConcurrency = field(default_factory=TurnConcurrency)  # running turns, whole server
+     ping_interval: float = 2.0  # /api/debug/sse-ping spacing, seconds
++    tracing: bool = False  # OTEL_TRACING_ENABLED: OpenTelemetry spans to OTLP/HTTP (app/tracing.py, #35)
+ 
+     @property
+     def dev_login(self) -> bool:
+@@ -77,4 +78,5 @@ class Settings:
+             s.daily_token_budget = int(env["DAILY_TOKEN_BUDGET"].strip().replace("_", ""))
+         s.agent_budget = AgentBudget.from_env(env)  # ValueError on a bad AGENT_* value: fail at startup
+         s.turn_concurrency = TurnConcurrency.from_env(env)  # AGENT_MAX_ACTIVE_TURNS, AGENT_TURN_QUEUE_SECONDS
++        s.tracing = _flag(env.get("OTEL_TRACING_ENABLED"))
+         return s
+diff --git a/backend/app/core/network.py b/backend/app/core/network.py
+index ee06b25..7689d6a 100644
+--- a/backend/app/core/network.py
++++ b/backend/app/core/network.py
+@@ -10,12 +10,16 @@ import hashlib
+ import re
+ import sqlite3
+ import threading
++import time
+ from dataclasses import dataclass, field
+ from decimal import Decimal
+ from pathlib import Path
+ from typing import Any, Iterable, Mapping
+ 
+ _COORD_RE = re.compile(r"-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?\Z")
++READ_BUSY_SECONDS = 5.0  # SQLite busy timeout: waiting for a writer's lock on locations.db
++READ_SECONDS = 5.0  # operation deadline for the two SELECTs (a progress handler, like app.db's)
++_PROGRESS_OPS = 1000  # SQLite VM instructions between two deadline checks
+ 
+ 
+ class NetworkDataError(Exception):
+@@ -186,10 +190,14 @@ def _refuse_wal(path: Path) -> None:
+         raise NetworkDataError(f"{path} has a non-empty -wal file; checkpoint it and switch off WAL")
+ 
+ 
+-def _read_rows(path: Path) -> tuple[list[tuple], list[tuple]]:
++def _read_rows(path: Path, deadline: float = READ_SECONDS) -> tuple[list[tuple], list[tuple]]:
++    """The raw rows. Bounded (#35 comment): the busy timeout bounds waiting for a lock, the
++    progress handler interrupts SQL that runs past `deadline` seconds (NetworkDataError)."""
+     uri = path.resolve().as_uri() + "?mode=ro"
+     try:
+-        con = sqlite3.connect(uri, uri=True)
++        con = sqlite3.connect(uri, uri=True, timeout=READ_BUSY_SECONDS)
++        ends = time.monotonic() + deadline
++        con.set_progress_handler(lambda: time.monotonic() > ends, _PROGRESS_OPS)
+         try:
+             locations = con.execute(
+                 "SELECT city_name, coordinate, is_hub, connected_hubs FROM locations ORDER BY rowid"
+diff --git a/backend/app/core/routing.py b/backend/app/core/routing.py
+index c569bdb..8a8a008 100644
+--- a/backend/app/core/routing.py
++++ b/backend/app/core/routing.py
+@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Literal, Mapping
+ 
+ import networkx as nx
+ 
++from .. import tracing
+ from . import places
+ from .pricing import Leg, Priced, new_context, point_distance, price_path
+ 
+@@ -28,6 +29,7 @@ if TYPE_CHECKING:
+     from .network import Network
+ 
+ ALGORITHM = "hub all-pairs candidates (networkx) + endpoint enumeration; tie-break: legs, names"
++ALGORITHM_ID = "hub-candidates+enumeration"  # short name for the `core.routing` span (#35)
+ 
+ _UNIT_PLACES = 30  # integer edge weights are leg distances in units of 1e-30 km
+ 
+@@ -131,6 +133,18 @@ def _rank(priced: Priced) -> tuple[Decimal, int, tuple[str, ...]]:
+ 
+ def cheapest_route(net: "Network", origin: str, destination: str) -> Route | RouteError:
+     """Resolve both names and return the cheapest valid route, or a typed error."""
++    # `core.routing` (#35): algorithm, fingerprint, candidates, legs; no city names
++    with tracing.span("core.routing", {"ocean.routing.algorithm": ALGORITHM_ID,
++                                       "ocean.network.fingerprint": net.fingerprint.id}) as span:
++        result = _cheapest_route(net, origin, destination, span)
++        if isinstance(result, RouteError):
++            span.set_attribute("ocean.routing.code", result.code)
++        else:
++            span.set_attributes({"ocean.routing.code": "ok", "ocean.routing.legs": len(result.legs)})
++        return result
++
++
++def _cheapest_route(net: "Network", origin: str, destination: str, span) -> Route | RouteError:
+     fp = net.fingerprint.id
+     resolved = {
+         "origin": places.resolve(net, origin),
+@@ -160,6 +174,7 @@ def cheapest_route(net: "Network", origin: str, destination: str) -> Route | Rou
+         return RouteError("no_service", tuple(issues), cities=(a, b), fingerprint=fp)
+ 
+     candidates = candidate_paths(net, a, b)
++    span.set_attribute("ocean.routing.candidates", len(candidates))
+     if not candidates:
+         return RouteError("unreachable", cities=(a, b), fingerprint=fp)
+     best = min((price_path(net, path) for path in candidates), key=_rank)
+diff --git a/backend/app/tracing.py b/backend/app/tracing.py
+new file mode 100644
+index 0000000..3b669bc
+--- /dev/null
++++ b/backend/app/tracing.py
+@@ -0,0 +1,285 @@
++"""Opt-in OpenTelemetry tracing (#35, design §4.11).
++
++Off by default. `OTEL_TRACING_ENABLED=1` builds one TracerProvider with a batch OTLP/HTTP exporter
++(endpoint from the standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`,
++default `http://localhost:4318`). Off: the OpenTelemetry SDK is not even imported, so there is no
++provider, no exporter and no background thread; `span()` is a shared no-op.
++
++What goes into spans (privacy, design §4.11): ids that are already opaque (run id, message id),
++a hash of the conversation id, codes, counts, durations, token counts and the locations.db
++fingerprint. Never: the user's or the model's text, prompts, tool arguments or results, city
++names, emails, user names, nonces, cookies, keys. Pydantic AI's own spans run with
++`include_content=False`.
++
++Failure: export runs in the SDK's batch thread; a collector that is down or slow only drops
++spans (bounded queue). Chat and booking never wait for it, and a failing span call never
++reaches the caller (`span()` swallows errors from the tracing layer itself).
++
++The provider is process-wide state in this module (not OpenTelemetry's global provider, which
++can be set only once per process): `use()` installs one, `provider()` returns it.
++"""
++from __future__ import annotations
++
++import hashlib
++import ipaddress
++import logging
++import os
++import time
++from contextlib import contextmanager
++from typing import Any, Iterator, Mapping
++from urllib.parse import urlsplit
++
++log = logging.getLogger(__name__)
++
++ENABLED_VAR = "OTEL_TRACING_ENABLED"
++DEFAULT_ENDPOINT = "http://localhost:4318"
++SERVICE_NAME = "ocean-above-api"
++EXPORT_TIMEOUT_S = 5.0  # one OTLP request; the batch thread gives up after this
++MAX_QUEUE = 2048  # spans waiting for export; more are dropped, never waited for
++SCOPE = "ocean-above"
++
++_provider: Any = None  # the active TracerProvider, or None (tracing off)
++
++
++def enabled_in(env: Mapping[str, str] | None = None) -> bool:
++    env = os.environ if env is None else env
++    return (env.get(ENABLED_VAR) or "").strip().lower() in ("1", "true", "yes", "on")
++
++
++def traces_endpoint(env: Mapping[str, str] | None = None) -> str:
++    """The OTLP/HTTP traces URL per the OpenTelemetry spec: `..._TRACES_ENDPOINT` as is, else
++    `OTEL_EXPORTER_OTLP_ENDPOINT` + `/v1/traces`, else localhost."""
++    env = os.environ if env is None else env
++    exact = (env.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or "").strip()
++    if exact:
++        return exact
++    base = (env.get("OTEL_EXPORTER_OTLP_ENDPOINT") or "").strip() or DEFAULT_ENDPOINT
++    return base.rstrip("/") + "/v1/traces"
++
++
++def endpoint_is_local(url: str) -> bool:
++    """Loopback, a private address, or a single-label host (a compose service such as `phoenix`)."""
++    host = urlsplit(url).hostname or ""
++    if host == "localhost" or (host and "." not in host and ":" not in host):
++        return True
++    try:
++        address = ipaddress.ip_address(host)
++    except ValueError:
++        return False
++    return address.is_loopback or address.is_private
++
++
++def from_env(env: Mapping[str, str] | None = None, *, exporter: Any = None) -> Any:
++    """A TracerProvider when tracing is enabled in `env` (default: the process environment),
++    else None. `exporter` replaces the OTLP exporter (tests)."""
++    env = os.environ if env is None else env
++    return build(env, exporter=exporter) if enabled_in(env) else None
++
++
++def build(env: Mapping[str, str] | None = None, *, exporter: Any = None) -> Any:
++    """A TracerProvider exporting to the OTLP endpoint named in `env` (or to `exporter`)."""
++    env = os.environ if env is None else env
++    from opentelemetry.sdk.resources import Resource
++    from opentelemetry.sdk.trace import TracerProvider
++    from opentelemetry.sdk.trace.export import BatchSpanProcessor
++
++    if exporter is None:
++        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
++
++        endpoint = traces_endpoint(env)
++        if not endpoint_is_local(endpoint):
++            log.warning("tracing: OTLP endpoint %s is not a local address; spans leave this host",
++                        urlsplit(endpoint).hostname)
++        exporter = OTLPSpanExporter(endpoint=endpoint, timeout=EXPORT_TIMEOUT_S)
++    exporter = Redacting(exporter)
++    resource = Resource.create({"service.name": (env.get("OTEL_SERVICE_NAME") or "").strip() or SERVICE_NAME})
++    tracer_provider = TracerProvider(resource=resource)
++    tracer_provider.add_span_processor(BatchSpanProcessor(
++        exporter, max_queue_size=MAX_QUEUE, export_timeout_millis=int(EXPORT_TIMEOUT_S * 1000)))
++    log.info("tracing: on (OTLP/HTTP)")
++    return tracer_provider
++
++
++# Attributes that carry message or tool content if content capture were ever switched on
++# (`include_content=True`): dropped at the exporter whatever the setting.
++CONTENT_KEYS = frozenset({"tool_arguments", "tool_response", "final_result", "gen_ai.tool.call.arguments",
++                          "gen_ai.tool.call.result", "gen_ai.system_instructions"})
++
++
++class Redacting:
++    """An exporter wrapper, the last step before spans leave the process. An exception recorded
++    on a span keeps its type only (no message, no stack trace: a message can quote a provider
++    response, an id or a path), the status keeps its code only, and `CONTENT_KEYS` are dropped.
++    An error here drops the batch, never raises into the SDK's export thread."""
++
++    def __init__(self, inner: Any):
++        self.inner = inner
++
++    def export(self, spans: Any) -> Any:
++        from opentelemetry.sdk.trace.export import SpanExportResult
++
++        try:
++            clean = [_redacted(s) for s in spans]
++        except Exception:
++            log.warning("tracing: redaction failed; %d span(s) dropped", len(spans), exc_info=True)
++            return SpanExportResult.FAILURE
++        return self.inner.export(clean)
++
++    def shutdown(self) -> None:
++        self.inner.shutdown()
++
++    def force_flush(self, timeout_millis: int = 30000) -> bool:
++        flush = getattr(self.inner, "force_flush", None)
++        return True if flush is None else flush(timeout_millis)
++
++
++def _redacted(span: Any) -> Any:
++    from opentelemetry.sdk.trace import Event, ReadableSpan
++    from opentelemetry.trace import Status
++
++    events = [Event(e.name, {k: v for k, v in (e.attributes or {}).items() if k == "exception.type"},
++                    e.timestamp) if e.name == "exception" else e for e in span.events]
++    attributes = {k: v for k, v in (span.attributes or {}).items() if k not in CONTENT_KEYS}
++    return ReadableSpan(
++        name=span.name, context=span.context, parent=span.parent, resource=span.resource,
++        attributes=attributes, events=events, links=span.links, kind=span.kind,
++        status=Status(span.status.status_code), start_time=span.start_time, end_time=span.end_time,
++        instrumentation_scope=span.instrumentation_scope)
++
++
++def use(tracer_provider: Any) -> Any:
++    """Install `tracer_provider` (None: tracing off) for the business spans. Returns the one
++    before (tests restore it)."""
++    global _provider
++    before, _provider = _provider, tracer_provider
++    return before
++
++
++def provider() -> Any:
++    return _provider
++
++
++def shutdown() -> None:
++    """Flush and stop the active provider (app shutdown). Never raises."""
++    tracer_provider = use(None)
++    if tracer_provider is None:
++        return
++    try:
++        tracer_provider.shutdown()
++    except Exception:
++        log.warning("tracing: shutdown failed", exc_info=True)
++
++
++class _NoSpan:
++    """What `span()` yields when tracing is off: every call does nothing."""
++
++    def set_attribute(self, key: str, value: Any) -> None:
++        pass
++
++    def set_attributes(self, attributes: Mapping[str, Any]) -> None:
++        pass
++
++    def add_event(self, name: str, attributes: Mapping[str, Any] | None = None) -> None:
++        pass
++
++    def is_recording(self) -> bool:
++        return False
++
++
++NO_SPAN = _NoSpan()
++
++
++class _Span:
++    """A live span behind a guard: an error inside the tracing layer is logged, never raised."""
++
++    __slots__ = ("_span",)
++
++    def __init__(self, span: Any):
++        self._span = span
++
++    def set_attribute(self, key: str, value: Any) -> None:
++        if value is None:
++            return
++        try:
++            self._span.set_attribute(key, value)
++        except Exception:
++            log.debug("tracing: set_attribute failed", exc_info=True)
++
++    def set_attributes(self, attributes: Mapping[str, Any]) -> None:
++        for key, value in attributes.items():
++            self.set_attribute(key, value)
++
++    def add_event(self, name: str, attributes: Mapping[str, Any] | None = None) -> None:
++        try:
++            self._span.add_event(name, {k: v for k, v in (attributes or {}).items() if v is not None})
++        except Exception:
++            log.debug("tracing: add_event failed", exc_info=True)
++
++    def is_recording(self) -> bool:
++        return True
++
++
++# Phoenix (OpenInference) span kinds of our own spans; the SDK's spans carry GenAI semantic
++# conventions, which Phoenix maps to AGENT / LLM / TOOL itself.
++_KINDS = {"reply_guard": "GUARDRAIL"}
++
++
++@contextmanager
++def span(name: str, attributes: Mapping[str, Any] | None = None, *,
++         start_time_ns: int | None = None) -> Iterator[Any]:
++    """A child of the current span (or a new root) around the body; a no-op when tracing is off.
++    An exception from the body is recorded on the span and re-raised unchanged; an error of the
++    tracing layer itself never reaches the body or the caller."""
++    tracer_provider = _provider
++    if tracer_provider is None:
++        yield NO_SPAN
++        return
++    try:
++        tracer = tracer_provider.get_tracer(SCOPE)
++        manager = tracer.start_as_current_span(
++            name, attributes={"openinference.span.kind": _KINDS.get(name, "CHAIN"),
++                              **{k: v for k, v in (attributes or {}).items() if v is not None}},
++            start_time=start_time_ns, record_exception=True, set_status_on_exception=True)
++        live = manager.__enter__()
++    except Exception:
++        log.debug("tracing: span %s not started", name, exc_info=True)
++        yield NO_SPAN
++        return
++    try:
++        yield _Span(live)
++    except BaseException as exc:
++        _exit(manager, type(exc), exc, exc.__traceback__)
++        raise
++    else:
++        _exit(manager, None, None, None)
++
++
++def _exit(manager: Any, *exc_info: Any) -> None:
++    try:
++        manager.__exit__(*exc_info)
++    except Exception:
++        log.debug("tracing: span end failed", exc_info=True)
++
++
++def current() -> Any:
++    """The current span (an SDK tool span, say) behind the same guard, or `NO_SPAN`."""
++    if _provider is None:
++        return NO_SPAN
++    try:
++        from opentelemetry import trace
++
++        live = trace.get_current_span()
++    except Exception:
++        return NO_SPAN
++    return _Span(live) if live.is_recording() else NO_SPAN
++
++
++def monotonic_to_epoch_ns(moment: float) -> int:
++    """A `time.monotonic()` moment as wall-clock nanoseconds (a span's start in the past)."""
++    return time.time_ns() - int((time.monotonic() - moment) * 1e9)
++
++
++def digest(value: str) -> str:
++    """A short, stable hash of an opaque id (the conversation), so traces of one conversation
++    can be grouped without exporting the id."""
++    return hashlib.sha256(value.encode()).hexdigest()[:16]
+diff --git a/backend/evals/__main__.py b/backend/evals/__main__.py
+index f007ccd..57070c8 100644
+--- a/backend/evals/__main__.py
++++ b/backend/evals/__main__.py
+@@ -8,6 +8,7 @@ import sys
+ from datetime import date
+ from pathlib import Path
+ 
++from app import tracing
+ from app.agent import ChatModel, LLMConfig, LLMNotConfigured
+ from app.agent.config import EFFORTS
+ 
+@@ -68,14 +69,16 @@ async def main(argv: list[str]) -> int:
+         done += 1
+         print(f"[{done}/{len(cases) * args.n}] {res.case}#{res.index} {'ok' if res.passed else 'FAILED'}", flush=True)
+ 
++    tracing.use(tracing.from_env())  # OTEL_TRACING_ENABLED=1: every run's turns are traced (#35)
+     try:
+         results = await run_all(cases, args.n, mode=args.mode, llm=llm, effort=args.effort,
+                                 parallel=args.parallel if args.mode == "real" else 1, progress=progress)
+     finally:
+         if llm is not None:
+             await llm.aclose()
++        await asyncio.to_thread(tracing.shutdown)
+     meta = {"mode": args.mode, "model": model, "effort": effort, "n": args.n, "date": date.today().isoformat(),
+-            "commit": commit()}
++            "commit": commit(), "tracing": tracing.enabled_in()}
+     summary = summarize(cases, results, meta)
+     text = markdown(summary, cases, results)
+     print(text)
+diff --git a/backend/evals/report.py b/backend/evals/report.py
+index 9c1b7d4..8700505 100644
+--- a/backend/evals/report.py
++++ b/backend/evals/report.py
+@@ -125,7 +125,7 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
+     lines = [
+         f"# LLM eval report — {s['mode']} mode",
+         "",
+-        f"- Date: {s['date']} · commit `{s['commit']}`",
++        f"- Date: {s['date']} · commit `{s['commit']}`" + (" · tracing on (OTLP)" if s.get("tracing") else ""),
+         f"- Model: `{s['model']}` · reasoning effort: **{s['effort']}** · {s['n']} run(s) per case · "
+         f"{len(cases)} cases · {s['runs']} runs · {s['turns']} chat turns",
+         f"- Cost: **${s['cost_usd']:.4f}** ({s['llm_calls']} LLM calls; tokens: {s['usage']['hit']:,} cached in / "
+diff --git a/backend/pyproject.toml b/backend/pyproject.toml
+index 6e4c3c7..251202f 100644
+--- a/backend/pyproject.toml
++++ b/backend/pyproject.toml
+@@ -13,6 +13,8 @@ dependencies = [
+     # pydantic-ai imports for embeddings / realtime only; the chat model needs just `openai`.
+     "pydantic-ai-slim==2.71.0",
+     "openai>=3.31,<4",
++    "opentelemetry-sdk>=1.45,<2",
++    "opentelemetry-exporter-otlp-proto-http>=1.45,<2",
+ ]
+ 
+ [dependency-groups]
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 607ea20..18e1710 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -36,6 +36,23 @@ services:
+     expose:
+       - "8000"
+ 
++  # Optional local tracing UI (#35): only with `docker compose --profile tracing up`; never started by a
++  # plain `up`. Phoenix receives OTLP/HTTP on 6006 inside the compose network; its UI is published on
++  # loopback only (http://localhost:6006, no auth). Traces stay on this host, in the `phoenix` volume.
++  # The api exports only when OTEL_TRACING_ENABLED=1 and OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:6006
++  # are set in .env (see README "Tracing").
++  phoenix:
++    image: arizephoenix/phoenix:version-22.0.1
++    profiles: ["tracing"]
++    restart: unless-stopped
++    logging: *logging
++    environment:
++      PHOENIX_WORKING_DIR: /mnt/data
++    volumes:
++      - phoenix:/mnt/data
++    ports:
++      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
++
+   proxy:
+     image: caddy:2-alpine
+     restart: unless-stopped
+@@ -47,3 +64,6 @@ services:
+       - "127.0.0.1:${OCEAN_PORT:-3000}:80"
+     volumes:
+       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
++
++volumes:
++  phoenix:
