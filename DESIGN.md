@@ -151,7 +151,7 @@ lucide-react named imports (`icons.tsx`).
 | app | `Shell` | sidebar (brand, Chat / My tickets / History, page slot, account), phone top bar (menu, name, page action), drawer as a modal dialog with the page behind `inert` |
 | app | `AccountPanel` | name, email or sign-in method, usage, theme switch, Sign out, Privacy / Terms |
 | app | `ConversationList` | New chat, "Recent" rows (title + preview); portalled into the sidebar |
-| app | composer | textarea grows to about 8 lines; Enter sends, Shift+Enter adds a line, never while an IME composes; round send button; reminder line |
+| app | composer | textarea grows to about 8 lines; Enter sends, Shift+Enter adds a line, never while an IME composes; round send button; reminder line. While a reply runs, Send becomes **Stop** (same round primary button, filled 14 px square, label "Stop"; "Stopping" and disabled after the click). A stopped reply ends with a quiet `ink-2` marker "■ Stopped" (no colour, not an error); its quote cards show no Confirm button and the line "Stopped before confirmation — ask again to book". Stop before the message was stored: "■ Stopped — your message was not sent" under the composer, input kept (09-stop, #48) |
 | app | `Route` (in `route-card.tsx`) | the signature: origin (filled node) → each transfer city (hollow node, "Transfer") → destination; "Flight {distance}" on each segment; Total distance; Total price (24 px) |
 | app | `QuoteCardView` | badge ("Quote · not booked" / "Awaiting your confirmation" / "✓ Booked" / "Expired" / "Out of date", `aria-live`), Valid until or countdown, Route, Confirm booking (ink pill, 48 px), booking error strip, Get a new quote, calculation details (collapsed) |
 | app | `TicketCardView` | "✓ Ticket t_…" badge, booked time, Route |

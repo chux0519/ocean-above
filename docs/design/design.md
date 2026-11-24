@@ -300,6 +300,7 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
   | `replace` | 整条文本替换为代码模板 | 某句校验失败 |
   | `ping` | 心跳 | 每 15 秒（防止 Cloudflare 断开空闲连接） |
   | `done` / `error` | 消息 id、各卡片的服务端状态 | 结束 |
+  | `cancelled` | 停止后存下的回复（或 `null`：用户消息还没存） | 用户按 Stop 后的终止事件 |
 - 卡片按钮在 `done` 之前禁用；之后的按钮状态（可订 / 已出票 / 已过期）一律以服务端当前 quote 状态为准，
   包括断线重连后拉到的历史卡片。
 - 断线：后端照常跑完一轮并落库，前端重连后拉会话即可看到完整结果。
@@ -374,8 +375,13 @@ ReplyGuard → `delta`），在 `CallToolsNode` 上执行工具。§4.2 的伪�
 - 重试：provider SDK 自身不重试（`max_retries=0`）；loop 在一步还没放出文字时按 §4.6 重试，每一步各有 2 次，每次尝试都记 `llm_calls`
   并计费，从上下文重开 run。模型流里的任何异常都算一次失败的调用；模型调用之外的异常仍是 `internal_error`。
 - 结束原因：读服务商原始 `finish_reason`；没有时当作断流（可重试），不当作 `stop`。
-- 取消：`Agent.cancel(user, conversation)` 取消本轮步骤任务；模型流立即关闭，不再有新的请求和工具调用；已开始的工具线程跑完、drain
-  后才落库（模板，`cancelled`）并释放锁和名额。Stop 接口和界面、被打断的工具结果是否结算见 #48。
+- 取消（#48）：只有 Stop 接口（`POST /api/conversations/{id}/runs/{run_id}/cancel`）能停止一轮；断开 SSE 不算（照常跑完落库）。
+  每轮有 app 自己的 `run_id`（响应头 `X-Run-Id` + 第一个事件），进程内登记（单 worker；多 worker 需要共享的取消标志或按会话粘性路由）。
+  状态 `queued → running → finishing → completed / failed`，或 `→ cancelling → cancelled`，终态由终止事件决定（R4）。
+  排队时 Stop：什么都不存、退还当天额度。之后的 Stop：不再发起 LLM 请求、重试和工具调用，模型流立即关闭；已开始的工具线程跑完、
+  drain 后，只存已通过 ReplyGuard 的文字和已完成工具的卡片（`status = cancelled`，卡片不 presented、无 nonce），没结果的工具调用存为
+  `cancelled` 行（下一轮上下文里是 `{"code":"cancelled"}` + 一条 system 说明）。Stop 在落库阶段或之后到达不改变任何东西。
+  将来可选模式：`after_turn`（当前步结束后停）。规则 R1–R8 见 state_invariants.md。
 - Tracing：默认不装 instrumentation、无 exporter、无 logfire；`Agent(tracer_provider=…)` 给 #35 用（不带消息内容）。
 
 ## 5. 路线、距离、价格
@@ -458,6 +464,8 @@ stateDiagram-v2
   该航段仍存在，规范函数算出的距离和价格与存档字符串相等；起终点的最便宜路线仍是这条。否则 quote → `stale`，
   提示重新报价，用户需重新确认。
 - **B7 原子性**：`BEGIN IMMEDIATE` 事务内完成检查、写票、改 quote 状态；聊天和出票接口共用会话锁；uvicorn 单 worker。
+- **Stop（#48，R6）**：被用户停止的轮次不产生出票权限：它的 quote / 确认卡随 `cancelled` 消息存储但不 presented（无 nonce、不可点），
+  quote 保持 `quoted` 直到过期；用户需要在新的轮次里重新询价或请求确认。Stop 不出票，也不撤销已出的票或已展示的报价。
 
 如何回答 take-home 的「怎么保证未经确认不出票」：出票只有一个接口，只接受用户点击带来的 nonce，而 nonce 只在
 完整路线 / 距离 / 价格的卡片发给用户之后才签发；LLM 能做的只是让这张卡片出现。自然语言里的「好的，订吧」
@@ -554,6 +562,9 @@ erDiagram
   （写新文件再 rename）。读不到时出票返回 `data_unavailable`（可重试），不把报价判为 stale。
 - `app.db` 在 `data/` 目录，不进 git（含用户邮箱、全部对话）。
 - 用户：`(auth_provider, provider_sub)` 唯一；固定账号是 `auth_provider = "dev"`。
+
+v4（#48）：`messages.status`（`completed` | `cancelled`，旧行默认 `completed`）。迁移只向前；旧版本镜像遇到更新的 schema 拒绝启动，
+回滚步骤见 deploy.md（先备份，或 `DROP COLUMN status` + `user_version = 3`）。
 
 ## 8. API
 

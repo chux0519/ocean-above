@@ -46,6 +46,14 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   --build-arg HTTPS_PROXY=http://192.168.1.13:7890 --build-arg NO_PROXY=localhost,127.0.0.1`.
 - 2026-11-23: compose skeleton (PR #9) verified there: build OK, `/health` 200 through Caddy, `/` → `/login` 200.
 
+## Schema changes
+- **App.db schema v4 (09-stop, #48).** The first start of this release migrates app.db to v4 (`messages.status`, old
+  rows = `completed`; one transaction). Older images refuse a newer schema (`RuntimeError: … has schema 4, this code
+  knows 3`) and do not start. Release: `release_vps.sh` copies `app.db` to `/tmp/app.db.pre-<commit>` before `up -d`.
+  Rollback to a v3 image: stop the API, then either restore the copy (loses rows written since) or downgrade in place:
+  `ALTER TABLE messages DROP COLUMN status; PRAGMA user_version = 3;` (stopped replies then read as normal assistant
+  messages), then start the old image.
+
 ## Deploy log
 - 2026-11-24 `963c9be`: 08-runtime — agent runtime on Pydantic AI Slim 2.71 (ADR-001, #49); api image only. The script's
   6 s health check hit the startup window (502), public health was 200 seconds later; the check now retries for up to

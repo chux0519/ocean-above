@@ -4,6 +4,11 @@ Natural-language flight booking for the airline Ocean Above. The agent's generic
 dispatch, cancellation) is Pydantic AI Slim ([ADR-001](docs/design/adr-001-agent-runtime.md)); booking, the reply
 guard, history and budgets are our own code. Roadmap: [docs/roadmap.md](docs/roadmap.md).
 
+Users can **Stop** a reply while it is generated: the server cancels the agent run (no further model or tool work)
+and keeps only the text and cards produced so far, marked as stopped; nothing from a stopped reply can be booked.
+Closing the tab does not stop a reply — it finishes and appears on reload. API: contract v1.6 in
+[docs/api/contract.md](docs/api/contract.md).
+
 ## Run locally
 
 Requirements: Docker with Compose v2.24+ (or OrbStack / Docker Desktop), and an OpenAI-compatible LLM key.

@@ -24,6 +24,6 @@ if [ "$(git rev-parse HEAD)" != "$OLD" ]; then
   R "cat > /tmp/oa.bundle && cd $VPS_DIR && git fetch -q /tmp/oa.bundle main && git merge -q --ff-only FETCH_HEAD && rm -f /tmp/oa.bundle" < "$B"
   rm -f "${B:?}"
 fi
-R "cd $VPS_DIR && sudo -n cp data/app.db /tmp/app.db.pre-$NEW"
+R "cd $VPS_DIR && for f in app.db app.db-wal app.db-shm; do [ -e data/\$f ] && sudo -n cp data/\$f /tmp/\$f.pre-$NEW; done; true"  # WAL files too
 for s in $SERVICES; do docker save "ocean-above-$s" | gzip -1 | R "gunzip | sudo -n docker load"; done
 R "cd $VPS_DIR && sudo -n docker compose -p ocean-above up -d --no-build --pull never && for i in \$(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:18765/api/health && { echo \"health 200 after \${i}x2s\"; break; }; sleep 2; [ \$i = 30 ] && { echo 'health FAILED after 60 s'; exit 1; }; done; git log --oneline -1"
