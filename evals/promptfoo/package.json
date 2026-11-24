@@ -1,0 +1,12 @@
+{
+  "name": "ocean-above-promptfoo",
+  "private": true,
+  "description": "Optional Promptfoo view of the backend/evals benchmark (#47). Not a dependency of the app or of pytest.",
+  "scripts": {
+    "eval": "promptfoo eval",
+    "view": "promptfoo view"
+  },
+  "devDependencies": {
+    "promptfoo": "0.126.0"
+  }
+}
