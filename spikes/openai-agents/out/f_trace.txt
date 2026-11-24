@@ -1,0 +1,50 @@
+
+=== default
+  default_exporter_endpoint: https://api.openai.com/v1/traces/ingest
+  default_exporter_would_send: 9
+  custom_processor_spans: {}
+  custom_span_parented: []
+  generation_input_present: False
+  generation_input_sample: None
+  usage_on_span: None
+  outbound_connections: ['127.0.0.1:63986']
+
+=== replaced
+  default_exporter_endpoint: https://api.openai.com/v1/traces/ingest
+  default_exporter_would_send: 0
+  custom_processor_spans: {'generation': 2, 'custom': 1, 'function': 1, 'turn': 2, 'agent': 1, 'task': 1}
+  custom_span_parented: [True]
+  generation_input_present: False
+  generation_input_sample: None
+  usage_on_span: {'requests': 1, 'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120, 'input_tokens_details': {'cache_write_tokens': 0, 'cached_tokens': 0, 'cache_write_tokens_details': None}, 'output_tokens_details': {'reasoning_tokens': 0}}
+  outbound_connections: ['127.0.0.1:63988']
+
+=== env_disabled
+  default_exporter_endpoint: https://api.openai.com/v1/traces/ingest
+  default_exporter_would_send: 0
+  custom_processor_spans: {}
+  custom_span_parented: []
+  generation_input_present: False
+  generation_input_sample: None
+  usage_on_span: None
+  outbound_connections: ['127.0.0.1:63992']
+
+=== runconfig_disabled
+  default_exporter_endpoint: https://api.openai.com/v1/traces/ingest
+  default_exporter_would_send: 0
+  custom_processor_spans: {}
+  custom_span_parented: []
+  generation_input_present: False
+  generation_input_sample: None
+  usage_on_span: None
+  outbound_connections: ['127.0.0.1:63994']
+
+=== sensitive_on
+  default_exporter_endpoint: https://api.openai.com/v1/traces/ingest
+  default_exporter_would_send: 0
+  custom_processor_spans: {'generation': 2, 'custom': 1, 'function': 1, 'turn': 2, 'agent': 1, 'task': 1}
+  custom_span_parented: [True]
+  generation_input_present: True
+  generation_input_sample: [{"content": "You are the booking assistant of the airline Ocean Above. You help users find flights, book them and look up the tickets they bought. Today is 202
+  usage_on_span: {'requests': 1, 'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120, 'input_tokens_details': {'cache_write_tokens': 0, 'cached_tokens': 0, 'cache_write_tokens_details': None}, 'output_tokens_details': {'reasoning_tokens': 0}}
+  outbound_connections: ['127.0.0.1:63996']

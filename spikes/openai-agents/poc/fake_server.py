@@ -34,6 +34,8 @@ def chunk(delta: dict | None = None, finish: str | None = None, usage: dict | No
     return out
 
 
+_IDS = iter(range(1, 10**9))
+
 USAGE = {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
          "prompt_cache_hit_tokens": 0, "prompt_cache_miss_tokens": 100}
 
@@ -74,7 +76,7 @@ def tool_calls(calls: list[tuple[str, str]], *, split: int = 3, interval: float 
     async def run(write: Writer) -> None:
         await write(chunk({"role": "assistant", "content": content}))
         for i, (name, args) in enumerate(calls):
-            await write(chunk({"tool_calls": [{"index": i, "id": f"call_{i}", "type": "function",
+            await write(chunk({"tool_calls": [{"index": i, "id": f"call_{next(_IDS)}", "type": "function",
                                                "function": {"name": name, "arguments": ""}}]}))
             for k in range(0, len(args), split):
                 await write(chunk({"tool_calls": [{"index": i, "function": {"arguments": args[k:k + split]}}]}))
@@ -170,7 +172,10 @@ class FakeServer:
 
         # watch for the client going away while we stream
         async def watch() -> None:
-            data = await reader.read(1)
+            try:
+                data = await reader.read(1)
+            except ConnectionError:  # RST instead of FIN
+                data = b""
             if not data:
                 req.closed_at = time.monotonic()
 

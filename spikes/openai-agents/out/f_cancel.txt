@@ -1,0 +1,30 @@
+
+=== 6/4a cancel('immediate') while the model streams text (infinite stream), n = 9
+  cancel -> stream_events() ends (ms): [0.5, 0.3, 0.3, 0.3, 0.3, 0.9, 1.3, 1.1, 1.4] median 0.5
+  cancel -> server sees TCP close (ms): [0.4, 0.3, 0.2, 0.3, 0.3, 0.8, 1.2, 1.0, 1.2] median 0.4
+  per run (requests to server, on_llm_end calls, usage.requests, usage.total_tokens, is_complete, chunks server wrote): [(1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11), (1, 0, 0, 0, True, 11)]
+
+=== 6/4b cancel('immediate') while tool-call arguments are still streaming
+  raw events seen before cancel took effect: ['response.created', 'response.function_call_arguments.delta', 'response.output_item.added']
+  close latency 0.4 ms; requests 1; tools executed 0; threads started 0
+
+=== 4c cancel('after_turn') while the model streams a tool call
+  item events: ['cancel(after_turn)', 'tool_called', 'tool_output']
+  requests 1 (2nd scripted reply never requested: True); tools executed [('quote_route', 'ok')]; final_output=None; usage.requests=1 total_tokens=120
+  new_items: ['ToolCallItem', 'ToolCallOutputItem']  (tool call + its output kept; history stays well-formed)
+
+=== 4d cancel('after_turn') while the model streams its final text
+  deltas received 8; final_output='one two three four five six seven eight '; requests 1; server finished the response itself: True
+
+=== 5 cancel('immediate') while a tool runs in a worker thread (tool sleeps 1.5 s, then writes the quote)
+  item events: ['tool_called']
+  stream_events() ended 1.0 ms after cancel; worker threads still running then: 1
+  Threads.drain(): True after 1204 ms; thread finished its work: quote_route
+  outcome reached the SDK: 0 (the awaiting coroutine was cancelled; the thread was not)
+  requests to model: 1 (no LLM call after cancel); tool_output event: False
+
+=== 12/6 ReplyGuard refuses a sentence -> result.cancel() -> upstream closed, nothing unchecked emitted
+  our events: [('delta', 'Sure. '), ('replace', 'template')]
+  guard problems: [{"kind": "number", "value": "123.45"}, {"kind": "city", "value": "Paris"}, {"kind": "city", "value": "Tokyo"}]
+  text received 58 chars; released 6 chars: 'Sure. '
+  server saw close: True; server finished response itself: False; chunks written 11

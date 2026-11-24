@@ -1,0 +1,74 @@
+
+=== 3/8 malformed and unknown tool calls (arguments streamed in 2-char fragments)
+  [fragments reassembled] error=none; requests=2
+      our Toolbox outcomes: [('quote_route', 'ok', '{"code": "ok", "quote_id": "q_9242f4b44c9cc3dd", "origin": "Paris", "destination": "Tokyo"')]
+      tool calls echoed back to the model: [('quote_route', '{"origin":"Paris","destination":"Tokyo"}')]
+      tool results the model got: ['{"code":"ok","quote_id":"q_9242f4b44c9cc3dd","origin":"Paris","destination":"Tokyo","legs":[{"from":"Paris","t']
+  [invalid JSON] error=none; requests=2
+      our Toolbox outcomes: [('quote_route', 'invalid_arguments', '{"code": "invalid_arguments", "message": "arguments are not valid JSON"}')]
+      tool calls echoed back to the model: [('quote_route', '{"origin": "Paris", "destination":')]
+      tool results the model got: ['{"code":"invalid_arguments","message":"arguments are not valid JSON"}']
+  [JSON not an object] error=none; requests=2
+      our Toolbox outcomes: [('find_city', 'invalid_arguments', '{"code": "invalid_arguments", "message": "arguments must be a JSON object"}')]
+      tool calls echoed back to the model: [('find_city', '["Paris"]')]
+      tool results the model got: ['{"code":"invalid_arguments","message":"arguments must be a JSON object"}']
+  [empty arguments] error=none; requests=2
+      our Toolbox outcomes: [('list_my_tickets', 'ok', '{"code": "ok", "count": 0, "filter": {}, "tickets": []}')]
+      tool calls echoed back to the model: [('list_my_tickets', '{}')]
+      tool results the model got: ['{"code":"ok","count":0,"filter":{},"tickets":[]}']
+  [unknown argument (user_id)] error=none; requests=2
+      our Toolbox outcomes: [('list_my_tickets', 'invalid_arguments', '{"code": "invalid_arguments", "message": "unknown argument(s): user_id; allowed: city, tic')]
+      tool calls echoed back to the model: [('list_my_tickets', '{"user_id":"u_someone_else"}')]
+      tool results the model got: ['{"code":"invalid_arguments","message":"unknown argument(s): user_id; allowed: city, ticket_id, booked_after, b']
+  [unknown tool] error=none; requests=2
+      our Toolbox outcomes: []
+      tool calls echoed back to the model: [('book_ticket', '{"quote_id":"q_1"}')]
+      tool results the model got: ["Tool 'book_ticket' not found."]
+  [invalid tool name] error=none; requests=2
+      our Toolbox outcomes: []
+      tool calls echoed back to the model: [('bad name!', '{}')]
+      tool results the model got: ["Tool 'bad name!' not found."]
+  [three calls, one completion] error=none; requests=2
+      our Toolbox outcomes: [('find_city', 'ok', '{"code": "ok", "city": "Paris", "served": true, "is_hub": true, "connected_hubs": ["Auckla'), ('find_city', 'unknown_city', '{"code": "unknown_city", "query": "Tokio", "suggestions": ["Tokyo"]}'), ('find_city', 'no_service', '{"code": "no_service", "city": "Abu Dhabi", "served": false, "is_hub": false, "connected_h')]
+      tool calls echoed back to the model: [('find_city', '{"name":"Paris"}'), ('find_city', '{"name":"Tokio"}'), ('find_city', '{"name":"Abu Dhabi"}')]
+      tool results the model got: ['{"code":"ok","city":"Paris","served":true,"is_hub":true,"connected_hubs":["Auckland","Beijing","Delhi","Dubai"', '{"code":"unknown_city","query":"Tokio","suggestions":["Tokyo"]}', '{"code":"no_service","city":"Abu Dhabi","served":false,"is_hub":false,"connected_hubs":[],"similar_names":[],"']
+
+=== 3b a FunctionTool whose on_invoke_tool raises
+  error=agents.exceptions.UserError: Error running tool boom: database exploded: secret detail  [key not in message]; requests=1; model was told: []
+
+=== 10 HTTP errors, timeouts, cut streams; openai client retries off, runner retry policy on
+  [500 twice then ok] requests=3 in 0.16s; deltas='ok then. '; final='ok then. '
+      error: none
+      usage: requests=3 total=120; raw per call=[{'completion_tokens': 20, 'prompt_tokens': 100, 'total_tokens': 120, 'prompt_cache_hit_tokens': 0, 'prompt_cache_miss_tokens': 100}]
+  [500 x3 (retries exhausted)] requests=3 in 0.17s; deltas=''; final=None
+      error: openai.InternalServerError: Error code: 500 - fake failure  [key not in message]
+      usage: requests=0 total=0; raw per call=[]
+  [400 (not retried)] requests=1 in 0.01s; deltas=''; final=None
+      error: openai.BadRequestError: Error code: 400 - bad request  [key not in message]
+      usage: requests=0 total=0; raw per call=[]
+  [401 (not retried)] requests=1 in 0.01s; deltas=''; final=None
+      error: openai.AuthenticationError: Error code: 401 - invalid key sk-fake-DO-NOT-LEAK-1234567890  [KEY LEAKED]
+      usage: requests=0 total=0; raw per call=[]
+  [429 then ok] requests=2 in 0.07s; deltas='ok then. '; final='ok then. '
+      error: none
+      usage: requests=2 total=120; raw per call=[{'completion_tokens': 20, 'prompt_tokens': 100, 'total_tokens': 120, 'prompt_cache_hit_tokens': 0, 'prompt_cache_miss_tokens': 100}]
+  [hang -> per-attempt timeout 0.5 s] requests=3 in 1.67s; deltas=''; final=None
+      error: agents.exceptions.ModelTimeoutError: Model call timed out after 0.5 seconds.  [key not in message]
+      usage: requests=0 total=0; raw per call=[]
+  [stream cut before any text, then ok] requests=2 in 0.08s; deltas='ok then. '; final='ok then. '
+      error: none
+      usage: requests=2 total=120; raw per call=[{'completion_tokens': 20, 'prompt_tokens': 100, 'total_tokens': 120, 'prompt_cache_hit_tokens': 0, 'prompt_cache_miss_tokens': 100}]
+  [stream cut after 3 words (text already streamed)] requests=1 in 0.01s; deltas='w0 w1 w2 '; final=None
+      error: openai.APIConnectionError: Connection error.  [key not in message]
+      usage: requests=0 total=0; raw per call=[]
+  [no usage chunk] requests=1 in 0.01s; deltas='fine. '; final='fine. '
+      error: none
+      usage: requests=1 total=0; raw per call=[None]
+
+=== 13 budgets
+  max_turns=3 with a model that always calls a tool: requests=3; tools run=3; error=MaxTurnsExceeded (MaxTurnsExceeded: True)
+  same with error_handlers['max_turns']: final_output='TEMPLATE REPLY (max_steps)'; error=None; handler saw ['MaxTurnsExceeded']
+  6 calls in one completion, per-step cap 4: executed=4 refused=2; every call answered: ['ok', 'ok', 'ok', 'ok', 'tool_budget_exceeded', 'tool_budget_exceeded']
+  token soft cap 60000, first call reports 70000: stopped=True; tools run=1; requests=1; final_output=None -> our template reply
+  flood of 20 calls, cancel('immediate') from on_llm_end: tools run=0; items=['tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called', 'tool_called']; requests=1
+  turn deadline 0.5 s on an endless stream: stopped after 0.50s; upstream closed 0.9 ms later; requests=1
