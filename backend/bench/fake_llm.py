@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from app.agent import Completion, TextDelta
+from app.agent import Completion, ScriptedLLM, TextDelta
 
 from .common import FAKE_REPLY
 
@@ -20,10 +20,11 @@ def user_text(origin: str, destination: str) -> str:
     return f"Quote {origin} | {destination}"
 
 
-class BenchLLM:
+class BenchLLM(ScriptedLLM):
     model = "bench-fake-llm"
 
     def __init__(self, delay: float = 0.0):
+        super().__init__()
         self.delay = delay
 
     async def stream(self, messages, tools, *, reasoning_effort=None):
@@ -38,6 +39,3 @@ class BenchLLM:
             return
         yield TextDelta(FAKE_REPLY)
         yield Completion(FAKE_REPLY, [], "stop", USAGE, "")
-
-    async def aclose(self) -> None:
-        return None

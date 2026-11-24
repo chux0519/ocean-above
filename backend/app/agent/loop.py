@@ -7,25 +7,38 @@ the four tools. Text is released sentence by sentence after the ReplyGuard trace
 and city in it; the first problem replaces the whole reply with a code template. The turn's
 quote cards become bookable only when `Airline.post_assistant_message` stores them (`done`).
 
+Runtime (ADR-001): Pydantic AI runs the model stream and dispatches the tool calls
+(`Agent.iter` + `node.stream`); this module decides everything else - budgets, retries and their
+charges, the guard, cards, app.db records, time limits, cancellation and the worker-thread drain.
+
 Nothing here can book: the loop talks to the airline through `Toolbox` (four tools, no booking)
 and `post_assistant_message`. Booking is the HTTP endpoint's call, caused by the user's click.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
-from contextlib import aclosing, contextmanager
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
+
+from pydantic_ai import Agent as _Runtime
+from pydantic_ai import InstrumentationSettings, RunContext, Tool, UsageLimits
+from pydantic_ai.capabilities import AbstractCapability, Instrumentation
+from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
+from pydantic_ai.messages import (FunctionToolResultEvent, PartDeltaEvent, PartStartEvent,
+                                  TextPart, TextPartDelta, ThinkingPart, ThinkingPartDelta, ToolCallPart,
+                                  ToolCallPartDelta)
 
 from ..airline import ConversationBusy, NotFound
 from .budget import AgentBudget, BudgetTracker, refusal
 from .concurrency import ServerBusy, Threads, TurnConcurrency, TurnSlots
+from .config import EFFORTS
 from .context import build_context
 from .guard import CityIndex, ReplyGuard, SentenceBuffer
-from .config import EFFORTS
-from .llm import LLM, Completion, LLMError, TextDelta
+from .model import ChatModel, Completion, LLMError, ThinkSplitter, before_response, llm_error, to_model_messages
 from .prompt import system_prompt
 from .templates import CLICK_TO_BOOK, fallback_reply
 from .tools import DEFAULT_STATUS, STATUS_TEXT, TOOL_SCHEMAS, MAX_RAW_ARGUMENTS, Outcome, Toolbox
@@ -47,6 +60,8 @@ NOT_STORED = "Something went wrong and your message was not saved. Please try ag
 USER_BUSY = ("Your other conversations are still working on earlier messages. "
              "Please wait for a reply there, then try again.")
 FLOOD_FACTOR = 4  # a completion with more than max_tool_calls_per_step * this many calls runs none
+SDK_TOOL_RETRIES = 1000  # the SDK's own per-tool retry cap; our budget ends a turn long before
+_RAW = "__raw__"  # arguments the SDK could not parse, handed to Toolbox.run as the raw string
 
 
 @dataclass(frozen=True)
@@ -69,6 +84,10 @@ class _GuardFailed(_Stopped):
     """The ReplyGuard refused the text."""
 
 
+class _RetryStep(Exception):
+    """The LLM call of a step failed before any of its text was released: call again."""
+
+
 class _UserBusy(Exception):
     """The user already has `max_turns_per_user` turns running."""
 
@@ -79,6 +98,9 @@ class _NotStored(Exception):
 
 @dataclass
 class _Turn:
+    """One turn's state. It is also the run's `deps`: the tools take the user and the
+    conversation from here, never from the model's arguments."""
+
     user_id: str
     conversation_id: str
     user_message: dict
@@ -90,6 +112,16 @@ class _Turn:
     cards: list[dict] = field(default_factory=list)
     outcomes: list[Outcome] = field(default_factory=list)
     threads: Threads = field(default_factory=Threads)  # blocking calls inside the time limit
+    # the tool calls of the current step (raw arguments), their results by tool_call_id, and how
+    # many of them already have their tool_calls row
+    step_calls: list[dict] = field(default_factory=list)
+    step_results: dict[str, Outcome] = field(default_factory=dict)
+    step_logged: int = 0
+    exhausted: bool = False  # a call was refused because the turn's calls were used up
+    messages: list[dict] = field(default_factory=list)  # the context, OpenAI shape (see `_WireContext`)
+    attempt: int = 0  # failed attempts of the current step's LLM call (reset when a call succeeds)
+    steps_task: asyncio.Future | None = None
+    cancelled: bool = False  # `Agent.cancel` was called
 
 
 def message_view(message: dict) -> dict:
@@ -98,18 +130,46 @@ def message_view(message: dict) -> dict:
             "cards": list(message["cards"]), "created_at": message["created_at"]}
 
 
+class _RawArguments(AbstractCapability[Any]):
+    """Arguments that are not a JSON object reach the tool as the raw string (`Toolbox.run`
+    answers `invalid_arguments`, as before) instead of the SDK's own retry prompt."""
+
+    async def before_tool_validate(self, ctx, *, call, tool_def, args):  # type: ignore[override]
+        if isinstance(args, dict):
+            return args
+        try:
+            value = json.loads(args) if isinstance(args, str) and args.strip() else {}
+        except (ValueError, RecursionError):
+            value = None
+        return value if isinstance(value, dict) else {_RAW: args if isinstance(args, str) else ""}
+
+
+class _WireContext(AbstractCapability[Any]):
+    """Every request carries the loop's own context (`_Turn.messages`: app.db history plus this
+    turn's steps, in the OpenAI shape) rather than the SDK's copy of it. So the wire is what it
+    was before ADR-001: tool calls in their wire-safe form (`wire_tool_call`, review #11), our
+    JSON for every tool result (also `unknown_tool` and budget refusals), and the reasoning of
+    earlier steps passed back verbatim."""
+
+    async def before_model_request(self, ctx, request_context):  # type: ignore[override]
+        return replace(request_context, messages=to_model_messages(ctx.deps.messages))
+
+
 class Agent:
-    def __init__(self, airline: Any, llm: LLM, *, budget: AgentBudget | None = None,
+    def __init__(self, airline: Any, llm: ChatModel, *, budget: AgentBudget | None = None,
                  max_steps: int | None = None,
                  ping_interval: float = 15.0, retries: int = 2, backoff: float = 0.5,
                  llm_timeout: float = 60.0, turn_timeout: float | None = None,
                  lock_timeout: float | None = LOCK_TIMEOUT,
                  concurrency: TurnConcurrency | None = None, drain_timeout: float = DRAIN_TIMEOUT,
-                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+                 tracer_provider: Any = None):
         """`budget`: the per-turn limits (design §4.8; default `AgentBudget()`). `max_steps` and
         `turn_timeout` override its fields (tests, older callers). `concurrency`: the server-wide
         limit on running turns (design §4.9; default `TurnConcurrency()`). `drain_timeout`: how
-        long a cut-short turn waits for its worker threads before it ends anyway."""
+        long a cut-short turn waits for its worker threads before it ends anyway.
+        `tracer_provider`: an OpenTelemetry TracerProvider for the runtime's spans (entry point for
+        #35). None (default): no instrumentation at all, nothing is traced or exported."""
         budget = budget or DEFAULT_BUDGET
         if max_steps is not None:
             budget = replace(budget, max_steps=max_steps)
@@ -135,6 +195,16 @@ class Agent:
         self._index: tuple[str, CityIndex] | None = None
         self._tasks: set[asyncio.Task] = set()
         self._user_turns: dict[str, int] = {}  # user id -> running turns (event loop only)
+        self._running: dict[str, _Turn] = {}  # conversation id -> its running turn
+        capabilities: list[Any] = [_RawArguments(), _WireContext()]
+        if tracer_provider is not None:
+            capabilities.append(Instrumentation(InstrumentationSettings(
+                tracer_provider=tracer_provider, include_content=False)))
+        self._runtime: _Runtime[_Turn, str] = _Runtime(
+            llm.chat, deps_type=_Turn, tools=self._sdk_tools(), capabilities=capabilities,
+            # tool calls that come with text are run (no early end on text); the loop returns
+            # after a step without tool calls, so the SDK's End node is never reached
+            retries=SDK_TOOL_RETRIES, end_strategy="graceful", name="ocean-above")
 
     @property
     def max_steps(self) -> int:
@@ -181,6 +251,19 @@ class Agent:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return self._events(queue)
+
+    def cancel(self, user_id: str, conversation_id: str) -> bool:
+        """Cancel the running turn of the user's conversation (the runtime side of #48's Stop).
+        The model's HTTP stream is closed and no further LLM request or tool call starts. Tool
+        threads that already started run to their end and are drained before the turn stores
+        its reply (the template, problem `cancelled`) and releases the conversation lock and its
+        slot. False when this user has no running turn in that conversation. Event loop only."""
+        turn = self._running.get(conversation_id)
+        if turn is None or turn.user_id != user_id or turn.steps_task is None or turn.steps_task.done():
+            return False
+        turn.cancelled = True
+        turn.steps_task.cancel()
+        return True
 
     async def wait_idle(self) -> None:
         """Wait for every running turn (shutdown, tests)."""
@@ -273,23 +356,34 @@ class Agent:
                            earlier_user_texts=context.user_texts[:-1], today=today)
         turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
                      reasoning_effort)
-        messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
+        turn.messages = messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
 
+        self._running[conversation_id] = turn
         try:
             try:
-                async with asyncio.timeout(self.turn_timeout):
-                    fallback = await self._steps(turn, messages)
-            finally:
-                await self._drain(turn)
-        except TimeoutError:
-            fallback = [{"kind": "turn_timeout", "value": str(self.turn_timeout)}]
-        except LLMError as exc:
-            fallback = [{"kind": "llm_error", "value": str(exc)[:200]}]
-        except Exception as exc:  # a bug or a store error in the middle of the turn
-            if not turn.outcomes and not turn.text:
-                raise
-            log.exception("chat turn failed after producing output (conversation %s)", conversation_id)
-            fallback = [{"kind": "internal_error", "value": type(exc).__name__}]
+                try:
+                    async with asyncio.timeout(self.turn_timeout):
+                        turn.steps_task = asyncio.ensure_future(self._steps(turn, messages))
+                        fallback = await turn.steps_task
+                finally:
+                    await self._drain(turn)
+            except asyncio.CancelledError:
+                task = asyncio.current_task()
+                if not turn.cancelled or (task is not None and task.cancelling()):
+                    raise  # shutdown, not `cancel()`
+                fallback = [{"kind": "cancelled", "value": ""}]
+            except TimeoutError:
+                fallback = [{"kind": "turn_timeout", "value": str(self.turn_timeout)}]
+            except LLMError as exc:
+                fallback = [{"kind": "llm_error", "value": str(exc)[:200]}]
+            except Exception as exc:  # a bug or a store error in the middle of the turn
+                if not turn.outcomes and not turn.text:
+                    raise
+                log.exception("chat turn failed after producing output (conversation %s)", conversation_id)
+                fallback = [{"kind": "internal_error", "value": type(exc).__name__}]
+        finally:
+            if self._running.get(conversation_id) is turn:
+                del self._running[conversation_id]
         if fallback is not None and fallback[0]["kind"] in ("max_steps", "token_budget", "tool_budget"):
             log.warning("chat turn stopped by its budget (conversation %s): %s %s", conversation_id,
                         fallback[0]["kind"], turn.budget.snapshot())
@@ -299,63 +393,138 @@ class Agent:
             return
         await self._finish(turn, fallback)
 
+    # ------------------------------------------------------------------ the steps ----------
     async def _steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
         """The LLM / tool steps of a turn. Returns None when the LLM's text can stay, otherwise
         the problems that make the template reply replace it.
+
+        One Pydantic AI run drives the steps: it streams each LLM call and dispatches its tool
+        calls (one at a time, in call order, see `_sdk_tools`). `messages` is our copy of the
+        context in the OpenAI shape (estimates, llm_calls records); a failed LLM call that is
+        retried restarts the run from it.
 
         Budgets (design §4.8): a step starts only while steps and tokens are left; each tool call
         runs only while calls are left for the step and the turn. A call that is not admitted is
         never executed: it gets a `tool_budget_exceeded` result (stored like any tool call, so
         every tool call of the completion has its result and the stored history stays well-formed).
         Once the turn's calls are used up and a call was refused, the turn ends with the template."""
-        while (stop := turn.budget.stop_before_step()) is None:
+        while True:
             try:
-                completion = await self._llm_step(turn, messages)
-            except _Stopped as stopped:  # guard failure, or no retry left within the token cap
-                return stopped.problems
-            if not completion.tool_calls:
-                if completion.finish_reason != "stop":  # "length", "content_filter", ...
-                    return [{"kind": "truncated", "value": str(completion.finish_reason)}]
-                if not turn.text.strip():
-                    return [{"kind": "empty_reply", "value": ""}]
-                return None
-            if _flooded(completion, self.budget):
-                # far more calls than a step may run (06 review P2-3): none runs and none is
-                # stored one by one; the logged completion is marked so the next context skips it
-                refused = len(completion.tool_calls)
-                turn.budget.refused_calls += refused
-                log.warning("chat turn: a completion with %d tool calls; none run (conversation %s)",
-                            refused, turn.conversation_id)
-                return [{"kind": "tool_budget", "value": str(refused)}]
-            messages.append(completion.assistant_message())
-            turn_exhausted = False
-            for call in completion.tool_calls:
-                refused = turn.budget.admit_tool_call()
-                if refused is None:
-                    turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
-                    outcome = await turn.threads.run(self._tools.run, turn.user_id, turn.conversation_id,
-                                                     call["name"], call["arguments"])
-                else:
-                    turn_exhausted = turn_exhausted or refused == "per_turn"
-                    payload = refusal(refused, self.budget)
-                    outcome = Outcome(call["name"], str(call["arguments"])[:MAX_RAW_ARGUMENTS], payload["code"], payload,
-                                      error=f"budget: {refused}")
-                # The outcome and its cards belong to the turn as soon as the tool returned, before
-                # the row is written: if the time limit lands on the write, the reply still
-                # carries the card that the stored row (written while draining) describes (P2-5).
-                turn.outcomes.append(outcome)
-                if refused is None:  # a refusal is no record a reply may quote
-                    turn.guard.add_record(outcome.payload)
-                for card in outcome.cards:
-                    turn.cards.append(card)
-                    turn.emit("card", {"card": card})
-                messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
-                await turn.threads.run(
-                    self.store.add_tool_call, turn.user_id, turn.user_message["id"], outcome.name,
-                    outcome.args, outcome.payload, error=outcome.error, latency_ms=outcome.latency_ms)
-            if turn_exhausted:
-                return [{"kind": "tool_budget", "value": str(self.budget.max_tool_calls_per_turn)}]
-        return [stop]
+                return await self._run_steps(turn, messages)
+            except _RetryStep:  # the step's retry count is on the turn (`turn.attempt`)
+                pass
+
+    async def _run_steps(self, turn: _Turn, messages: list[dict]) -> list[dict] | None:
+        settings = self.llm.settings(turn.reasoning_effort)
+        # no SDK request limit: the steps budget (max 20 by env bounds) is the only one
+        async with self._runtime.iter(None, message_history=to_model_messages(messages), deps=turn,
+                                      model_settings=settings, usage_limits=UsageLimits(request_limit=None)) as run:
+            async for node in run:
+                if _Runtime.is_model_request_node(node):
+                    if turn.attempt == 0 and (stop := turn.budget.stop_before_step()) is not None:
+                        return [stop]  # (a retry belongs to the step already counted)
+                    try:
+                        completion = await self._llm_step(turn, messages, run, node)
+                    except _Stopped as stopped:  # guard failure, or no retry left within the token cap
+                        return stopped.problems
+                    if not completion.tool_calls:
+                        if completion.finish_reason != "stop":  # "length", "content_filter", ...
+                            return [{"kind": "truncated", "value": str(completion.finish_reason)}]
+                        if not turn.text.strip():
+                            return [{"kind": "empty_reply", "value": ""}]
+                        return None
+                    if _flooded(completion, self.budget):
+                        # far more calls than a step may run (06 review P2-3): none runs and none is
+                        # stored one by one; the logged completion is marked so the next context skips it
+                        refused = len(completion.tool_calls)
+                        turn.budget.refused_calls += refused
+                        log.warning("chat turn: a completion with %d tool calls; none run (conversation %s)",
+                                    refused, turn.conversation_id)
+                        return [{"kind": "tool_budget", "value": str(refused)}]
+                    messages.append(completion.assistant_message())
+                    turn.step_calls, turn.step_results, turn.step_logged = completion.tool_calls, {}, 0
+                elif _Runtime.is_call_tools_node(node):
+                    async with node.stream(run.ctx) as events:
+                        async for event in events:
+                            if isinstance(event, FunctionToolResultEvent) \
+                                    and event.part.tool_call_id not in turn.step_results:
+                                # a result our tools did not make: a name that is not one of our
+                                # tools, refused by the SDK before any tool ran. It is answered and
+                                # stored as before (`unknown_tool`, from Toolbox.run)
+                                await self._tool_call(turn, event.part.tool_call_id, event.part.tool_name or "")
+                    await self._log_tool_calls(turn, final=True)
+                    for call in turn.step_calls:
+                        outcome = turn.step_results[call["id"]]
+                        messages.append({"role": "tool", "tool_call_id": call["id"], "content": outcome.for_llm()})
+                    if turn.exhausted:
+                        return [{"kind": "tool_budget", "value": str(self.budget.max_tool_calls_per_turn)}]
+        # a step without tool calls returns above, before the run could reach its End node
+        raise AssertionError("the run ended without a step that returned")
+
+    # ------------------------------------------------------------------ tools --------------
+    def _sdk_tools(self) -> list[Tool]:
+        """The four tools as SDK tools over our own schemas and `Toolbox` (validation, structured
+        errors). Sequential: one call at a time, in the order the model made them, so the budget
+        admits them in order and the cards keep that order. `strict` off: the request carries the
+        schemas exactly as before."""
+        def body(name: str) -> Callable[..., Awaitable[str]]:
+            async def run(ctx: RunContext[_Turn], **_args: Any) -> str:
+                # the arguments the model sent are taken raw from the completion in `_tool_call`
+                return (await self._tool_call(ctx.deps, ctx.tool_call_id or "", name)).for_llm()
+            return run
+
+        tools = []
+        for schema in TOOL_SCHEMAS:
+            name = schema["function"]["name"]
+            tool = Tool.from_schema(body(name), name=name, description=schema["function"]["description"],
+                                    json_schema=schema["function"]["parameters"], takes_ctx=True, sequential=True)
+            tool.strict = False
+            tools.append(tool)
+        return tools
+
+    async def _tool_call(self, turn: _Turn, call_id: str, name: str) -> Outcome:
+        """Admit, run and record one tool call of the current step. The arguments are the model's
+        raw string (from the completion), validated by `Toolbox.run`. The blocking work runs in a
+        tracked worker thread: if the turn is cancelled meanwhile the thread still ends, and the
+        turn waits for it (`_drain`) before it releases its lock."""
+        call = next((c for c in turn.step_calls if c["id"] == call_id),
+                    {"id": call_id, "name": name, "arguments": ""})
+        refused = turn.budget.admit_tool_call()
+        if refused is None:
+            turn.emit("status", {"text": STATUS_TEXT.get(call["name"], DEFAULT_STATUS)})
+            outcome = await turn.threads.run(self._tools.run, turn.user_id, turn.conversation_id,
+                                             call["name"], call["arguments"])
+        else:
+            turn.exhausted = turn.exhausted or refused == "per_turn"
+            payload = refusal(refused, self.budget)
+            outcome = Outcome(call["name"], str(call["arguments"])[:MAX_RAW_ARGUMENTS], payload["code"], payload,
+                              error=f"budget: {refused}")
+        # The outcome and its cards belong to the turn as soon as the tool returned, before
+        # the row is written: if the time limit lands on the write, the reply still
+        # carries the card that the stored row (written while draining) describes (P2-5).
+        turn.outcomes.append(outcome)
+        if refused is None:  # a refusal is no record a reply may quote
+            turn.guard.add_record(outcome.payload)
+        for card in outcome.cards:
+            turn.cards.append(card)
+            turn.emit("card", {"card": card})
+        turn.step_results[call_id] = outcome
+        await self._log_tool_calls(turn)
+        return outcome
+
+    async def _log_tool_calls(self, turn: _Turn, *, final: bool = False) -> None:
+        """Store the tool_calls rows of the step in call order (context.py lines them up with
+        the completion), each as soon as it and every call before it have their outcome."""
+        while turn.step_logged < len(turn.step_calls):
+            outcome = turn.step_results.get(turn.step_calls[turn.step_logged]["id"])
+            if outcome is None:
+                if not final:
+                    return
+                raise RuntimeError("a tool call of the step got no result")
+            turn.step_logged += 1
+            await turn.threads.run(
+                self.store.add_tool_call, turn.user_id, turn.user_message["id"], outcome.name,
+                outcome.args, outcome.payload, error=outcome.error, latency_ms=outcome.latency_ms)
 
     async def _drain(self, turn: _Turn) -> None:
         """Wait for worker threads the time limit (or an error) left running. A thread cannot be
@@ -400,86 +569,138 @@ class Agent:
         turn.text += piece
         turn.emit("delta", {"text": piece})
 
-    async def _llm_step(self, turn: _Turn, messages: list[dict]) -> Completion:
-        """One LLM call with retries. Text is released as it streams. A failed call is retried
-        only while none of its text has been released."""
+    async def _llm_step(self, turn: _Turn, messages: list[dict], run: Any, node: Any) -> Completion:
+        """One LLM call (one attempt). Text is released as it streams. A failed call is logged
+        and charged; it is retried (`_RetryStep`, after the backoff) only while none of its text
+        has been released, retries are left for this step (`turn.attempt`, reset when a call
+        succeeds) and the turn still has tokens."""
+        attempt = turn.attempt
         request = {"turn": turn.user_message["id"], "messages": list(messages),
                    "tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
-                   "reasoning_effort": turn.reasoning_effort or getattr(self.llm, "reasoning_effort", None)}
-        for attempt in range(self.retries + 1):
-            started = time.monotonic()
-            buffer = SentenceBuffer()
-            completion: Completion | None = None
-            released = False
-            content = blank = ""
+                   "reasoning_effort": self.llm.effort(turn.reasoning_effort)}
+        started = time.monotonic()
+        buffer = SentenceBuffer()
+        think = ThinkSplitter()  # an inline <think> block (servers without reasoning_content)
+        thought = ""
+        released = False
+        content = blank = ""
+        received: int | None = None  # output characters, once any output arrived
 
-            def log_call(response: dict, usage: Any = None, *, output_chars: int | None = None,
-                         no_response: bool = False) -> asyncio.Future:
-                # every attempt counts against the turn's tokens, also failed ones and retries
-                charged, estimated = turn.budget.charge(usage, messages, output_chars=output_chars,
-                                                        no_response=no_response)
-                response = {**response, "budget": {"charged_tokens": charged, "estimated": estimated,
-                                                   "turn_tokens": turn.budget.tokens}}
-                # `tokens` = what the turn was charged, so the site's daily budget (§8.2) counts
-                # estimated calls the same way (06 review P2-9); `response.usage` keeps the report
-                return turn.threads.start(
-                    self.store.add_llm_call, turn.user_id, turn.conversation_id, request, response,
-                    latency_ms=int((time.monotonic() - started) * 1000), tokens=charged,
-                    model=getattr(self.llm, "model", None))
+        def log_call(response: dict, usage: Any = None, *, output_chars: int | None = None,
+                     no_response: bool = False) -> asyncio.Future:
+            # every attempt counts against the turn's tokens, also failed ones and retries
+            charged, estimated = turn.budget.charge(usage, messages, output_chars=output_chars,
+                                                    no_response=no_response)
+            response = {**response, "budget": {"charged_tokens": charged, "estimated": estimated,
+                                               "turn_tokens": turn.budget.tokens}}
+            # `tokens` = what the turn was charged, so the site's daily budget (§8.2) counts
+            # estimated calls the same way (06 review P2-9); `response.usage` keeps the report
+            return turn.threads.start(
+                self.store.add_llm_call, turn.user_id, turn.conversation_id, request, response,
+                latency_ms=int((time.monotonic() - started) * 1000), tokens=charged,
+                model=getattr(self.llm, "model", None))
 
-            try:
-                # aclosing: a guard failure or a timeout must close the HTTP stream right away
-                async with asyncio.timeout(self.llm_timeout), \
-                        aclosing(self.llm.stream(
-                            messages, TOOL_SCHEMAS, reasoning_effort=turn.reasoning_effort)) as stream:
+        def got(n: int) -> None:
+            # output seen so far, for a call that fails part-way; a complete call is charged from
+            # its final response instead (`Completion.output_chars`, the same count)
+            nonlocal received
+            received = (received or 0) + n
+
+        def show(text: str) -> None:
+            """Visible text: released sentence by sentence through the guard."""
+            nonlocal content, blank, released
+            content += text
+            for sentence in buffer.push(text):
+                if sentence.strip():
+                    self._release(turn, blank + sentence, not released)
+                    blank, released = "", True
+                else:
+                    blank += sentence  # white space is never sent on its own
+
+        try:
+            # the per-call time limit; leaving the block (a guard failure, the limit, a
+            # cancellation) closes the model's HTTP stream (on a real connection: at once)
+            async with asyncio.timeout(self.llm_timeout):
+                async with node.stream(run.ctx) as stream:
                     async for event in stream:
-                        if isinstance(event, TextDelta):
-                            content += event.text
-                            for sentence in buffer.push(event.text):
-                                if sentence.strip():
-                                    self._release(turn, blank + sentence, not released)
-                                    blank, released = "", True
-                                else:
-                                    blank += sentence  # white space is never sent on its own
-                        else:
-                            completion = event
-                if completion is None:
-                    raise LLMError("LLM stream ended without a completion", retryable=True,
-                                   received=len(content))
+                        text = ""
+                        if isinstance(event, PartStartEvent):
+                            part = event.part
+                            if isinstance(part, TextPart):
+                                text = part.content
+                            elif isinstance(part, ThinkingPart):
+                                got(len(part.content))
+                            elif isinstance(part, ToolCallPart):
+                                got(len(part.tool_name) + len(part.args_as_json_str() if part.args else ""))
+                        elif isinstance(event, PartDeltaEvent):
+                            delta = event.delta
+                            if isinstance(delta, TextPartDelta):
+                                text = delta.content_delta
+                            elif isinstance(delta, ThinkingPartDelta):
+                                got(len(delta.content_delta or ""))
+                            elif isinstance(delta, ToolCallPartDelta):
+                                args = delta.args_delta
+                                got(len(delta.tool_name_delta or "")
+                                    + len(args if isinstance(args, str) else json.dumps(args or {})))
+                        if not text:
+                            continue
+                        got(len(text))
+                        text, inline = think.feed(text)
+                        thought += inline
+                        show(text)
+                    response = stream.response
+                _unique_call_ids(response)
+                text, inline = think.finish()
+                thought += inline
+                show(text)
+                completion = Completion.from_response(response, content)
+                completion.reasoning += thought
+                if completion.finish_reason is None:  # the stream ended early (no finish reason)
+                    raise LLMError("LLM stream ended without a finish_reason", retryable=True,
+                                   received=completion.output_chars, usage=completion.usage)
                 rest = buffer.flush()
                 if rest.strip():
                     self._release(turn, blank + rest, not released)
-            except _GuardFailed as failed:
-                # the stream was cut by us; how much (hidden) output it produced is unknown
-                await asyncio.shield(log_call({"content": content, "guard_problems": failed.problems,
-                                               "aborted": True}))
-                raise
-            except asyncio.CancelledError:
-                # the turn's time limit (or shutdown) interrupted this call: it is still recorded
-                # and charged (06 review P2-4); `_drain` waits for the record to be written
-                log_call({"content": content, "aborted": "turn_timeout"})
-                raise
-            except (LLMError, TimeoutError) as exc:
-                if isinstance(exc, LLMError):
-                    error, usage = exc, exc.usage
-                    received = exc.received if exc.received is not None else (len(content) or None)
-                else:  # this call's own time limit: the stream was open, its output unknown
-                    error, usage, received = LLMError("LLM call timed out", retryable=True), None, None
-                await asyncio.shield(log_call(
-                    {"content": content, "error": str(error)[:300], "attempt": attempt + 1}, usage,
-                    output_chars=received, no_response=isinstance(exc, LLMError) and received is None))
-                if released or not error.retryable or attempt == self.retries:
-                    raise error from None
-                if (stop := turn.budget.out_of_tokens()) is not None:
-                    raise _Stopped([stop]) from None  # no retry past the token cap (P2-2)
-                await self._sleep(self.backoff * 2 ** attempt)
-                continue
-            record = completion.as_record()
-            if _flooded(completion, self.budget):
-                record["tool_calls_not_run"] = True  # build_context skips this completion
-            await asyncio.shield(log_call(record, completion.usage, output_chars=completion.output_chars))
-            return completion
-        raise LLMError("unreachable", retryable=False)  # pragma: no cover
+        except _GuardFailed as failed:
+            # the stream was cut by us; how much (hidden) output it produced is unknown
+            await asyncio.shield(log_call({"content": content, "guard_problems": failed.problems,
+                                           "aborted": True}))
+            raise
+        except asyncio.CancelledError:
+            # the turn's time limit, a cancellation or shutdown interrupted this call: it is still
+            # recorded and charged (06 review P2-4); `_drain` waits for the record to be written
+            log_call({"content": content, "aborted": "cancelled" if turn.cancelled else "turn_timeout"})
+            raise
+        except Exception as exc:  # every other failure of the call is a failed, logged, charged call (review P2-2)
+            if isinstance(exc, TimeoutError):  # this call's own time limit: output unknown
+                error, usage, received = LLMError("LLM call timed out", retryable=True), None, None
+            else:
+                if not isinstance(exc, (LLMError, ModelAPIError, UnexpectedModelBehavior)):
+                    # not a known provider failure (an SDK parser error on an odd chunk, or a bug
+                    # here): retried like a broken stream, with the original kept in the log
+                    log.warning("LLM call failed with %s (conversation %s)", type(exc).__name__,
+                                turn.conversation_id, exc_info=exc)
+                if received is None and not before_response(exc):
+                    received = 0  # a response body was read, with no output in it (e.g. not SSE)
+                error = llm_error(exc, received=received, scrub=self.llm.config.api_key)
+                usage = error.usage
+                received = error.received if error.received is not None else (len(content) or None)
+            await asyncio.shield(log_call(
+                {"content": content, "error": str(error)[:300], "attempt": attempt + 1}, usage,
+                output_chars=received, no_response=not isinstance(exc, TimeoutError) and received is None))
+            if released or not error.retryable or attempt == self.retries:
+                raise error from None
+            if (stop := turn.budget.out_of_tokens()) is not None:
+                raise _Stopped([stop]) from None  # no retry past the token cap (P2-2)
+            await self._sleep(self.backoff * 2 ** attempt)
+            turn.attempt = attempt + 1
+            raise _RetryStep() from None
+        turn.attempt = 0
+        record = completion.as_record()
+        if _flooded(completion, self.budget):
+            record["tool_calls_not_run"] = True  # build_context skips this completion
+        await asyncio.shield(log_call(record, completion.usage, output_chars=completion.output_chars))
+        return completion
 
     def _city_index(self) -> CityIndex:
         """City names for the guard, from the airline's current network (rebuilt when
@@ -488,6 +709,22 @@ class Agent:
         if self._index is None or self._index[0] != net.fingerprint.id:
             self._index = (net.fingerprint.id, CityIndex(net.cities))
         return self._index[1]
+
+
+def _unique_call_ids(response: Any) -> None:
+    """Some OpenAI-compatible servers repeat a tool_call_id within one completion (`call_0` twice);
+    the SDK refuses such a response. Repeats get a suffix (`call_0~2`), in place, so the step runs
+    as it did before ADR-001 (review P2-1). The ids are ours to choose: they only pair a call with
+    its result."""
+    seen: set[str] = set()
+    for part in response.parts:
+        if isinstance(part, ToolCallPart) and part.tool_call_id:
+            call_id, n = part.tool_call_id, 1
+            while call_id in seen:
+                n += 1
+                call_id = f"{part.tool_call_id}~{n}"
+            part.tool_call_id = call_id
+            seen.add(call_id)
 
 
 def _flooded(completion: Completion, budget: AgentBudget) -> bool:

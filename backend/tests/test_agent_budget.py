@@ -328,7 +328,7 @@ def test_defaults_match_the_issue_and_keep_the_old_limits(world):
     assert (agent.max_steps, agent.turn_timeout, agent.budget) == (6, 90.0, b)
     agent, _ = make(world, budget=AgentBudget(max_steps=3), max_steps=2, turn_timeout=5)
     assert agent.budget == AgentBudget(max_steps=2, max_turn_seconds=5)
-    from app.agent.llm import MAX_TOKENS
+    from app.agent.model import MAX_TOKENS
     assert MAX_TOKENS == b.max_output_tokens_per_call
 
 

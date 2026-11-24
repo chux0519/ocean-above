@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Sequence
 
-from app.agent import Completion, TextDelta
+from app.agent import Completion, ScriptedLLM as _Scripted, TextDelta
 
 
 class Use:
@@ -19,7 +19,7 @@ class Use:
 Step = "list[str | Use] | Callable[[list[dict]], list[str | Use]]"
 
 
-class ScriptedLLM:
+class ScriptedLLM(_Scripted):
     """Plays one scripted step per LLM call; a step is a list of text chunks and `Use` calls, or a
     function `messages -> list` (to read a value out of an earlier tool result). Running out of
     steps is an error: the case script and the agent disagree about the trajectory."""
@@ -27,6 +27,7 @@ class ScriptedLLM:
     model = "scripted-fake"
 
     def __init__(self, steps: Sequence[Any]):
+        super().__init__()
         self.steps = list(steps)
         self.calls = 0
         self.efforts: list[str | None] = []

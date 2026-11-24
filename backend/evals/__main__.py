@@ -8,7 +8,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from app.agent import LLMConfig, LLMNotConfigured, OpenAIChatClient
+from app.agent import ChatModel, LLMConfig, LLMNotConfigured
 from app.agent.config import EFFORTS
 
 from .cases import CASES
@@ -56,7 +56,7 @@ async def main(argv: list[str]) -> int:
         except LLMNotConfigured:
             print("no LLM key: set LLM_API_KEY / DEEPSEEK_API_KEY or OCEAN_ENV_FILE", file=sys.stderr)
             return 2
-        llm, model, effort = OpenAIChatClient(config), config.model, args.effort or config.reasoning_effort
+        llm, model, effort = ChatModel(config), config.model, args.effort or config.reasoning_effort
     elif args.estimate:
         print("fake mode costs nothing")
         return 0
