@@ -260,6 +260,13 @@ class FakeServer:
                 yield from calls(("find_city", '{"city": "Paris"}'))
             else:
                 yield from text("Saw the error.")
+        elif scenario == "spoof":  # the model tries to act for another user
+            if tools_seen == 0:
+                yield from calls(("list_my_tickets", '{"user_id": "u_someone_else"}'))
+            elif tools_seen == 1:
+                yield from calls(("list_my_tickets", '{}'))
+            else:
+                yield from text("Listed.")
         elif scenario == "unknown_tool":
             if tools_seen == 0:
                 yield from calls(("book_ticket", '{"quote_id": "q_1"}'))
@@ -293,12 +300,14 @@ class FakeServer:
         elif scenario == "hang":
             yield chunk({"role": "assistant", "content": ""})
             yield "HANG"
+        elif scenario == "hang0":
+            yield "HANG"
         elif scenario == "drop":
             yield chunk({"role": "assistant", "content": "Partial"})
             yield "DROP"
         elif scenario == "no_finish":
             yield chunk({"role": "assistant", "content": "No finish reason"})
         elif scenario == "guard":
-            yield from text("The price is $9,999.00.", " Dubai is close.", " More text.")
+            yield from text("Hello there. ", "The price is $9,999.00.", " Dubai is close.", " More text.")
         else:
             yield from text("Unknown scenario.")

@@ -106,7 +106,7 @@ def _tool_fn(name: str):
         raw = json.dumps(kwargs, ensure_ascii=False)
         outcome = ctx.deps.toolbox.run(ctx.deps.user_id, ctx.deps.conversation_id, name, raw)
         ctx.deps.outcomes.append(outcome)
-        ctx.deps.tool_log.append({"name": name, "args": kwargs, "code": outcome.code,
+        ctx.deps.tool_log.append({"name": name, "args": kwargs, "code": outcome.code, "user_id": ctx.deps.user_id,
                                   "thread": threading.current_thread().name,
                                   "t0": started, "t1": time.monotonic()})
         return outcome.for_llm()

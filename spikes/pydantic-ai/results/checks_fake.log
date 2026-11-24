@@ -1,0 +1,4 @@
+  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/poc/checks_fake.py", line 375
+    content_leak = any(("Paris" in json.dumps(dict(s.attributes or {}), default=str) or "tools2" in json.dumps(dict(s.attributes or {}), default=str) for s in spans)
+                      ^
+SyntaxError: '(' was never closed

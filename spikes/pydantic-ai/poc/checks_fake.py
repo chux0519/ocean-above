@@ -217,12 +217,21 @@ def slow(seconds: float) -> str:
     return "slow done"
 
 
-async def cancel_in_tool(scenario: str, mode: str, sequential: bool) -> dict:
+async def cancel_in_tool(scenario: str, mode: str, sequential: bool, tracked: bool = False) -> dict:
+    """tracked=True: the adapter runs the sync work through the backend's `Threads` (async tool),
+    and after the cancellation drains it before "releasing the lock" (design §4.9)."""
+    from app.agent.concurrency import Threads
     SRV.reset()
     SLOW_LOG.clear()
     w = World.create("slow")
     deps = deps_for(w)
-    agent = make_agent(model(), tools=backend_tools() + [Tool(slow)])
+    threads = Threads()
+
+    async def slow_tracked(seconds: float) -> str:
+        return await threads.run(slow, seconds)
+
+    tool = Tool(slow_tracked, name="slow") if tracked else Tool(slow)
+    agent = make_agent(model(), tools=backend_tools() + [tool])
     holder: dict[str, Any] = {}
 
     async def body() -> None:
@@ -251,8 +260,13 @@ async def cancel_in_tool(scenario: str, mode: str, sequential: bool) -> dict:
     except asyncio.CancelledError:
         outcome = "CancelledError"
     t_ret = time.monotonic()
+    drained = None
+    if tracked:
+        drained = await threads.drain(30)
+        t_ret = time.monotonic()  # the moment the lock / slot would be released
     await asyncio.sleep(1.5)  # let any abandoned thread finish
-    return {"scenario": scenario, "mode": mode, "sequential": sequential, "outcome": outcome,
+    return {"scenario": scenario, "mode": mode, "sequential": sequential, "tracked_and_drained": drained,
+            "outcome": outcome,
             "returned_after_cancel_ms": round((t_ret - t) * 1000),
             "threads": [{"ended_after_cancel_ms": None if "end" not in e else round((e["end"] - t) * 1000),
                          "returned_before_thread_ended": "end" in e and t_ret < e["end"]} for e in SLOW_LOG],
@@ -265,7 +279,10 @@ async def check_cancel_in_tool() -> dict:
             "single_task_cancel": await cancel_in_tool("slow_tool", "task.cancel", False),
             "two_parallel": await cancel_in_tool("two_slow", "run.cancel", False),
             "slow_then_find_city_parallel": await cancel_in_tool("slow_then_more", "run.cancel", False),
-            "slow_then_find_city_sequential": await cancel_in_tool("slow_then_more", "run.cancel", True)}
+            "slow_then_find_city_sequential": await cancel_in_tool("slow_then_more", "run.cancel", True),
+            "adapter_Threads_then_drain": await cancel_in_tool("slow_tool", "run.cancel", False, tracked=True),
+            "adapter_Threads_then_drain_sequential": await cancel_in_tool("slow_then_more", "run.cancel", True,
+                                                                          tracked=True)}
 
 
 # ------------------------------------------------------------------ 9 usage / limits --------
@@ -303,21 +320,27 @@ async def check_errors() -> dict:
     cases = [("http500 (2x 500 then 200), SDK default max_retries", "http500", settings()),
              ("http500 with max_retries=0", "http500", settings(max_retries=0)),
              ("http400", "http400", settings()),
-             ("hang, first_event_timeout=1", "hang", settings(first_event_timeout=1.0)),
+             ("hang after first chunk, first_event_timeout=1", "hang", settings(first_event_timeout=1.0)),
+             ("hang before any chunk, first_event_timeout=1", "hang0", settings(first_event_timeout=1.0)),
              ("hang, request_timeout=1", "hang", settings(request_timeout=1.0)),
              ("drop mid-stream", "drop", settings()),
              ("stream ends without finish_reason", "no_finish", settings())]
     for label, scenario, s in cases:
         SRV.reset()
         t = time.monotonic()
-        try:
-            r = await make_agent(model()).run(f"x [[{scenario}]]", deps=deps_for(w), model_settings=s)
-            outcome = f"ok: {r.output!r}"
+        texts: list[str] = []
+
+        async def on_text(x: str) -> None:
+            texts.append(x)
+        try:  # streaming, as production does
+            async with make_agent(model()).iter(f"x [[{scenario}]]", deps=deps_for(w), model_settings=s) as run:
+                await drive(run, on_text)
+            outcome = f"ok: {run.result.output!r}"
         except Exception as exc:
             outcome = err(exc)
             if isinstance(exc, ModelHTTPError):
                 outcome += f" (status_code={exc.status_code})"
-        out[label] = {"outcome": outcome, "http_attempts": len(SRV.requests),
+        out[label] = {"outcome": outcome, "http_attempts": len(SRV.requests), "text_streamed": "".join(texts),
                       "elapsed_s": round(time.monotonic() - t, 2)}
     SRV.reset()
     t = time.monotonic()
@@ -336,6 +359,7 @@ async def check_tracing() -> dict:
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
     from pydantic_ai import InstrumentationSettings
+    from pydantic_ai.capabilities.instrumentation import Instrumentation
 
     import importlib.util
     exporter = InMemorySpanExporter()
@@ -343,12 +367,12 @@ async def check_tracing() -> dict:
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     w = World.create("otel")
     SRV.reset()
-    agent = Agent(model(), deps_type=Deps, tools=backend_tools(),
-                  instrument=InstrumentationSettings(tracer_provider=provider, include_content=False))
+    agent = Agent(model(), deps_type=Deps, tools=backend_tools(), capabilities=[
+        Instrumentation(InstrumentationSettings(tracer_provider=provider, include_content=False))])
     await agent.run("x [[tools2]]", deps=deps_for(w), model_settings=settings())
     spans = exporter.get_finished_spans()
     attrs = {k for s in spans for k in (s.attributes or {})}
-    content_leak = any("Paris" in json.dumps(dict(s.attributes or {}), default=str) for s in spans)
+    content_leak = any(("Paris" in json.dumps(dict(s.attributes or {}), default=str) or "tools2" in json.dumps(dict(s.attributes or {}), default=str) for s in spans)
     return {"logfire_installed": importlib.util.find_spec("logfire") is not None,
             "logfire_api_installed": importlib.util.find_spec("logfire_api") is not None,
             "spans": [s.name for s in spans], "attribute_keys": sorted(attrs)[:40],
@@ -441,7 +465,7 @@ async def check_budgets() -> dict:
                     if len(calls) > budget.max_tool_calls_per_step * 4:
                         stop = {"kind": "tool_budget", "value": str(len(calls))}
                         break  # leave before any tool runs
-    out["flood_20_calls"] = {"stop": stop, "executed": executed, "refused": len(refused),
+    out["flood_20_calls"] = {"stop": stop, "executed": list(executed), "refused": len(refused),
                              "llm_requests": len(SRV.requests)}
     tracker = BudgetTracker(budget)
     executed.clear(); refused.clear(); SRV.reset()
@@ -469,15 +493,17 @@ async def check_deps() -> dict:
     deps = deps_for(w)
     # the model tries to name another user: the backend's validation refuses unknown arguments
     try:
-        await agent.run("x [[badargs]]", deps=deps, model_settings=settings())
+        await agent.run("x [[spoof]]", deps=deps, model_settings=settings())
     except Exception:
         pass
     sent_schema = SRV.requests[0]["body"]["tools"]
     return {"tool_parameters_sent_to_model": {t["function"]["name"]: sorted(t["function"]["parameters"]["properties"])
                                               for t in sent_schema},
-            "deps_user_id_used_by_tool": deps.tool_log[0]["args"] if deps.tool_log else None,
-            "unknown_argument_result": deps.outcomes[0].payload if deps.outcomes else None,
-            "other_user_exists": bool(other)}
+            "model_args": [e["args"] for e in deps.tool_log],
+            "user_id_the_tools_used": [e["user_id"] for e in deps.tool_log],
+            "world_user": w.user_id, "other_user": other,
+            "tool_codes": [o.code for o in deps.outcomes],
+            "unknown_argument_result": deps.outcomes[0].payload if deps.outcomes else None}
 
 
 async def main() -> None:
