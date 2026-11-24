@@ -15,6 +15,10 @@ for v in base pa; do
   kb=$(du -sk "$sp" | cut -f1)
   echo "$v packages=$n site_packages_kb=$kb"
 done
+for v in base pa; do
+  sp=$("$T/$v/bin/python" -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+  echo "$v site_packages_tar_gz_kb=$(tar -C "$sp" -czf - . | wc -c | awk '{print int($1/1024)}')"
+done
 echo "added packages:"
 comm -13 <(uv pip list -q --python "$T/base/bin/python" | tail -n +3 | awk '{print $1}' | sort) \
          <(uv pip list -q --python "$T/pa/bin/python" | tail -n +3 | awk '{print $1}' | sort) | tr '\n' ' '; echo

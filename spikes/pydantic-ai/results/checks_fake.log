@@ -1,163 +1,163 @@
 Task exception was never retrieved
-future: <Task finished name='Task-106' coro=<StreamReader.read() done, defined at /Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py:671> exception=ConnectionResetError(54, 'Connection reset by peer')>
+future: <Task finished name='Task-106' coro=<StreamReader.read() done, defined at <home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py:671> exception=ConnectionResetError(54, 'Connection reset by peer')>
 Traceback (most recent call last):
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 713, in read
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 713, in read
     await self._wait_for_data('read')
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 545, in _wait_for_data
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 545, in _wait_for_data
     await self._waiter
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/selector_events.py", line 1013, in _read_ready__data_received
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/selector_events.py", line 1013, in _read_ready__data_received
     data = self._sock.recv(self.max_size)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ConnectionResetError: [Errno 54] Connection reset by peer
 Task exception was never retrieved
-future: <Task finished name='Task-160' coro=<StreamReader.read() done, defined at /Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py:671> exception=ConnectionResetError(54, 'Connection reset by peer')>
+future: <Task finished name='Task-160' coro=<StreamReader.read() done, defined at <home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py:671> exception=ConnectionResetError(54, 'Connection reset by peer')>
 Traceback (most recent call last):
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 713, in read
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 713, in read
     await self._wait_for_data('read')
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 545, in _wait_for_data
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 545, in _wait_for_data
     await self._waiter
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/selector_events.py", line 1013, in _read_ready__data_received
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/selector_events.py", line 1013, in _read_ready__data_received
     data = self._sock.recv(self.max_size)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ConnectionResetError: [Errno 54] Connection reset by peer
 Task exception was never retrieved
 future: <Task finished name='Task-471' coro=<<async_generator_athrow without __name__>()> exception=ModelConnectionError('Connection error.')>
 Traceback (most recent call last):
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_exceptions.py", line 12, in map_exceptions
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_exceptions.py", line 12, in map_exceptions
     yield
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_backends/anyio.py", line 39, in read
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_backends/anyio.py", line 39, in read
     return await self._stream.receive(max_bytes=max_bytes)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 1441, in receive
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 1441, in receive
     raise ClosedResourceError from None
 anyio.ClosedResourceError
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 95, in map_httpcore_exceptions
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 95, in map_httpcore_exceptions
     yield
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 263, in __aiter__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 263, in __aiter__
     async for part in self._httpcore_stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/connection_pool.py", line 427, in __aiter__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/connection_pool.py", line 427, in __aiter__
     async for chunk in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 320, in __aiter__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 320, in __aiter__
     raise exc
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 312, in __aiter__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 312, in __aiter__
     async for chunk in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 188, in _receive_response_body
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 188, in _receive_response_body
     event = await self._receive_event(timeout=timeout)
             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 200, in _receive_event
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 200, in _receive_event
     data = await self._network_stream.read(self.READ_NUM_BYTES, timeout=timeout)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_backends/anyio.py", line 36, in read
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_backends/anyio.py", line 36, in read
     with map_exceptions(exc_map):
          ^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
     self.gen.throw(value)
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_exceptions.py", line 16, in map_exceptions
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_exceptions.py", line 16, in map_exceptions
     raise to_exc(exc) from exc
 httpcore2.ReadError
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 172, in _iter_events
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 172, in _iter_events
     async for sse in self._decoder.aiter_bytes(self.response.aiter_bytes()):
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 383, in aiter_bytes
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 383, in aiter_bytes
     async for chunk in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_models.py", line 1007, in aiter_bytes
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_models.py", line 1007, in aiter_bytes
     async for raw_bytes in raw_stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_models.py", line 1063, in aiter_raw
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_models.py", line 1063, in aiter_raw
     async for raw_stream_bytes in stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_client.py", line 160, in __aiter__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_client.py", line 160, in __aiter__
     async for chunk in stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 262, in __aiter__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 262, in __aiter__
     with map_httpcore_exceptions():
          ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
     self.gen.throw(value)
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 112, in map_httpcore_exceptions
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 112, in map_httpcore_exceptions
     raise mapped_exc(message) from exc
 httpx2.ReadError
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_errors.py", line 27, in map_api_errors
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_errors.py", line 27, in map_api_errors
     yield
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_chat_streaming.py", line 76, in _get_event_iterator
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_chat_streaming.py", line 76, in _get_event_iterator
     async for chunk in MapStreamDecodeErrors(self._validate_response(), self._model_name):
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_decode_errors.py", line 70, in __anext__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_decode_errors.py", line 70, in __anext__
     return await anext(self._iterator)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 851, in __anext__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 851, in __anext__
     return await anext(self._source_iter)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 167, in __aiter__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 167, in __aiter__
     async for item in self._iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 187, in __stream__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 187, in __stream__
     async for sse in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 177, in _iter_events
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 177, in _iter_events
     raise APIConnectionError(request=self.response.request) from err
 openai.APIConnectionError: Connection error.
 
 The above exception was the direct cause of the following exception:
 
 Traceback (most recent call last):
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 463, in _stream_response_text
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 463, in _stream_response_text
     async with aclosing(_stream_text_deltas()) as deltas_iter:
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 386, in __aexit__
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 386, in __aexit__
     await self.thing.aclose()
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 458, in _stream_text_deltas
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 458, in _stream_text_deltas
     async with _utils.group_by_temporal(_stream_text_deltas_ungrouped(), debounce_by) as group_iter:
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 231, in __aexit__
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 231, in __aexit__
     await self.gen.athrow(value)
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 696, in group_by_temporal
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 696, in group_by_temporal
     await _cleanup_temporal_group(context.task, context.aiterator)
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 562, in _cleanup_temporal_group
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 562, in _cleanup_temporal_group
     task.result()
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 433, in _stream_text_deltas_ungrouped
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 433, in _stream_text_deltas_ungrouped
     async for event in self:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 581, in _pull_shared
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 581, in _pull_shared
     event = await anext(events_iterator)
             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/combined.py", line 734, in wrap_run_event_stream
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/combined.py", line 734, in wrap_run_event_stream
     async for event in stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/abstract.py", line 1203, in wrap_run_event_stream
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/abstract.py", line 1203, in wrap_run_event_stream
     async for event in stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/abstract.py", line 1203, in wrap_run_event_stream
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/abstract.py", line 1203, in wrap_run_event_stream
     async for event in stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_run_context.py", line 152, in dispatch_event_stream
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_run_context.py", line 152, in dispatch_event_stream
     async for event in stream:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 613, in _events_iter
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 613, in _events_iter
     event = await anext(base_iter)
             ^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 552, in _model_events
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 552, in _model_events
     event = await anext(events)
             ^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_continuation.py", line 635, in _iterator_with_cancel_guard
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_continuation.py", line 635, in _iterator_with_cancel_guard
     async for event in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 851, in __anext__
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 851, in __anext__
     return await anext(self._source_iter)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_continuation.py", line 698, in _get_event_iterator
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_continuation.py", line 698, in _get_event_iterator
     async for event in sub:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3185, in iterator_with_cancel_guard
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3185, in iterator_with_cancel_guard
     async for event in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3160, in iterator_with_part_end
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3160, in iterator_with_part_end
     async for event in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3135, in iterator_with_final_event
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3135, in iterator_with_final_event
     async for event in iterator:
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_chat_streaming.py", line 75, in _get_event_iterator
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_chat_streaming.py", line 75, in _get_event_iterator
     with map_api_errors(self._model_name, self._model_id_namespace):
          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/Users/yongsheng/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
     self.gen.throw(value)
-  File "/Volumes/ZT/repos/llc2026/ocean-above-it08-poc-pa/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_errors.py", line 33, in map_api_errors
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_errors.py", line 33, in map_api_errors
     raise map_connection_error(e, model_name) from e
 pydantic_ai.exceptions.ModelConnectionError: Connection error.
 == 3_8_tool_errors (0.1s)

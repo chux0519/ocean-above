@@ -98,4 +98,4 @@
  ],
  "turn2_reply": "The confirmation card is ready: please check the route, distance and price on it, then click \"Confirm booking\" to issue the ticket."
 }
-== outbound ["('192.168.1.13', 7890)"]
+== outbound ["('<lan-proxy>', 7890)"]
