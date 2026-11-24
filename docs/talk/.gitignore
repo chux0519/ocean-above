@@ -1,1 +1,3 @@
 png/
+# the root ignores data/ (app.db); the talk pages need their data files
+!data/
