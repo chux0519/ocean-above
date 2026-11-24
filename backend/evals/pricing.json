@@ -1,0 +1,17 @@
+{
+ "version": "2026-11-24",
+ "currency": "USD",
+ "unit": "per 1M tokens",
+ "note": "Output tokens include reasoning tokens (both providers report reasoning inside completion_tokens). A model without a known price has cost `unknown` and is compared by tokens.",
+ "prices": [
+  {"provider": "deepseek", "model": "deepseek-flash",
+   "input_cache_hit": 0.006, "input_cache_miss": 0.3, "output": 1.2,
+   "reasoning": "billed as output",
+   "basis": "list price, peak rate (off-peak is half); the rate the 03-10 eval reports used",
+   "source": "DeepSeek API pricing page, read 2026-11-23"},
+  {"provider": "bailian", "model": "deepseek-v4.1-flash-1017", "price": "unknown",
+   "basis": "owner's Bailian token plan: plan pricing may differ from the list price, which is not applied"},
+  {"provider": "bailian", "model": "qwen3.8-flash", "price": "unknown",
+   "basis": "owner's Bailian token plan: plan pricing may differ from the list price, which is not applied"}
+ ]
+}

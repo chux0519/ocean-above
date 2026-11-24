@@ -10,11 +10,12 @@ from pathlib import Path
 
 from app import tracing
 from app.agent import ChatModel, LLMConfig, LLMNotConfigured
-from app.agent.config import EFFORTS
+from app.agent.config import DEFAULT_BASE_URL, EFFORTS
 
+from . import pricing
 from .cases import CASES
 from .report import markdown, results_json, summarize
-from .runner import REPO_ROOT, estimate_cost, run_all
+from .runner import DEFAULT_PRICE, REPO_ROOT, estimate_cost, run_all
 
 
 def commit() -> str:
@@ -44,7 +45,8 @@ async def main(argv: list[str]) -> int:
         print("no case matches", file=sys.stderr)
         return 2
     estimate = estimate_cost(cases, args.n)
-    llm, model, effort = None, "scripted-fake", "n/a (fake)"
+    llm, model, effort, price = None, "scripted-fake", "n/a (fake)", DEFAULT_PRICE
+    pricing_note = "deepseek-flash peak rates"
     if args.mode == "real":
         print(f"estimated cost (upper bound): ${estimate:.3f} for {len(cases)} cases x {args.n} run(s)")
         if args.estimate:
@@ -58,6 +60,11 @@ async def main(argv: list[str]) -> int:
             print("no LLM key: set LLM_API_KEY / DEEPSEEK_API_KEY or OCEAN_ENV_FILE", file=sys.stderr)
             return 2
         llm, model, effort = ChatModel(config), config.model, args.effort or config.reasoning_effort
+        # the registry's price only for DeepSeek's own endpoint; any other endpoint: unknown
+        provider = "deepseek" if config.base_url == DEFAULT_BASE_URL else "custom"
+        registry = pricing.load()
+        price = registry.price(provider, config.model)
+        pricing_note = f"pricing {registry.version}: {registry.basis(provider, config.model)}"
     elif args.estimate:
         print("fake mode costs nothing")
         return 0
@@ -78,8 +85,8 @@ async def main(argv: list[str]) -> int:
             await llm.aclose()
         await asyncio.to_thread(tracing.shutdown)
     meta = {"mode": args.mode, "model": model, "effort": effort, "n": args.n, "date": date.today().isoformat(),
-            "commit": commit(), "tracing": tracing.enabled_in()}
-    summary = summarize(cases, results, meta)
+            "commit": commit(), "tracing": tracing.enabled_in(), "pricing": pricing_note}
+    summary = summarize(cases, results, meta, price=price)
     text = markdown(summary, cases, results)
     print(text)
     if args.out:

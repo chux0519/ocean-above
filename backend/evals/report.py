@@ -8,9 +8,10 @@ from typing import Any
 
 from app.agent.budget import AgentBudget
 
+from . import pricing
 from .cases import CASES, Case, Turn
 from .checks import INVARIANTS, REFUSED, align
-from .runner import RunResult, spelled_numbers
+from .runner import DEFAULT_PRICE, RunResult, spelled_numbers
 
 TOOLS = ("find_city", "quote_route", "request_booking", "list_my_tickets")
 # Real-model thresholds. Safety invariants allow no violation at all.
@@ -37,13 +38,28 @@ def percentile(values: list[float], q: float) -> float:
     return values[min(len(values) - 1, int(len(values) * q))] if values else 0.0
 
 
-def summarize(cases: list[Case], results: list[RunResult], meta: dict[str, Any]) -> dict[str, Any]:
+def _sum_cost(values: list[float | None]) -> float | None:
+    return None if any(v is None for v in values) else sum(values)  # type: ignore[arg-type]
+
+
+def booking_unrequested(step: Turn) -> bool:
+    """The turn does not ask for a confirmation card: `request_booking` is forbidden, or the
+    turn's expected calls (when it has any) do not include it."""
+    return "request_booking" in step.forbid or (
+        bool(step.tools) and not any(e.tool == "request_booking" for alt in step.tools for e in alt))
+
+
+def summarize(cases: list[Case], results: list[RunResult], meta: dict[str, Any], *,
+              price: pricing.Price | None = DEFAULT_PRICE) -> dict[str, Any]:
+    """`price`: the configuration's price (None: unknown, the cost is reported as unknown)."""
     by_name = {c.name: c for c in cases}
     tools = {t: ToolStats() for t in TOOLS}
+    unrequested = 0  # turns where request_booking was called although nobody asked to book
     for r in results:
         case = by_name[r.case]
         chat = [s for s in case.steps if isinstance(s, Turn)]
         for step, turn in zip(chat, r.turns):
+            unrequested += booking_unrequested(step) and any(c.tool == "request_booking" for c in turn.tools)
             for call in turn.tools:
                 stats = tools.setdefault(call.tool, ToolStats())
                 stats.actual += 1
@@ -67,13 +83,18 @@ def summarize(cases: list[Case], results: list[RunResult], meta: dict[str, Any])
             "group": c.group, "runs": len(runs), "passed": sum(r.passed for r in runs),
             "fallback": sum(t.outcome == "fallback" for r in runs for t in r.turns),
             "turns": sum(len(r.turns) for r in runs),
-            "tokens": sum(r.usage["hit"] + r.usage["miss"] + r.usage["out"] for r in runs),
-            "cost": sum(r.cost() for r in runs),
+            "tokens": sum(r.tokens for r in runs),
+            "cost": _sum_cost([r.cost(price) for r in runs]),
             "max_turn_tokens": max((t.turn_tokens for r in runs for t in r.turns), default=0),
         }
     latency = [ms for r in results for ms in r.llm_latency_ms]
     turn_latency = [t.latency_s for t in turns]
-    usage = {k: sum(r.usage[k] for r in results) for k in ("hit", "miss", "out", "reasoning")}
+    first_token = [t.first_token_s for t in turns if t.first_token_s is not None]
+    usage = {k: sum(r.usage[k] for r in results) for k in pricing.USAGE_KEYS}
+    passed = sum(r.passed for r in results)
+    cost_usd = _sum_cost([r.cost(price) for r in results])
+    llm_calls = sum(r.llm_calls for r in results)
+    retries = sum(r.retries for r in results)
     summary = {
         **meta,
         "runs": len(results),
@@ -85,12 +106,23 @@ def summarize(cases: list[Case], results: list[RunResult], meta: dict[str, Any])
         "invariant_violations": {name: violations.get(name, 0) for name in INVARIANTS},
         "tools": {t: {**asdict(s), "success": s.success} for t, s in tools.items()},
         "per_case": per_case,
-        "usage": usage, "llm_calls": sum(r.llm_calls for r in results),
-        "cost_usd": sum(r.cost() for r in results),
+        "unrequested_request_booking": unrequested,
+        "passed_runs": passed,
+        "usage": usage, "tokens": usage["input"] + usage["output"], "llm_calls": llm_calls,
+        "retries": retries, "retry_rate": retries / llm_calls if llm_calls else 0.0,
+        "cost_usd": cost_usd,  # None: the price is unknown
+        "tokens_per_run": (usage["input"] + usage["output"]) / len(results) if results else None,
+        "tokens_per_success": (usage["input"] + usage["output"]) / passed if passed else None,
+        "usage_per_success": {k: v / passed for k, v in usage.items()} if passed else None,
+        "cost_per_run": cost_usd / len(results) if cost_usd is not None and results else None,
+        "cost_per_success": cost_usd / passed if cost_usd is not None and passed else None,
         "llm_latency_ms": {"p50": percentile(latency, 0.5), "p90": percentile(latency, 0.9),
-                           "max": max(latency, default=0)},
+                           "p95": percentile(latency, 0.95), "max": max(latency, default=0)},
         "turn_tokens": _turn_tokens(turns, kinds),
-        "turn_latency_s": {"p50": round(percentile(turn_latency, 0.5), 2), "p90": round(percentile(turn_latency, 0.9), 2)},
+        "turn_latency_s": {"p50": round(percentile(turn_latency, 0.5), 2), "p90": round(percentile(turn_latency, 0.9), 2),
+                           "p95": round(percentile(turn_latency, 0.95), 2)},
+        "first_token_s": {"p50": round(percentile(first_token, 0.5), 2), "p95": round(percentile(first_token, 0.95), 2),
+                          "turns": len(first_token)},
     }
     summary["verdict"] = verdict(summary)
     return summary
@@ -119,6 +151,10 @@ def _pct(x: float | None) -> str:
     return "–" if x is None else f"{x * 100:.1f}%"
 
 
+def usd(x: float | None) -> str:
+    return "unknown" if x is None else f"${x:.4f}"
+
+
 def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult]) -> str:
     s = summary
     ok = lambda b: "PASS" if b else "**FAIL**"
@@ -128,12 +164,14 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
         f"- Date: {s['date']} · commit `{s['commit']}`" + (" · tracing on (OTLP)" if s.get("tracing") else ""),
         f"- Model: `{s['model']}` · reasoning effort: **{s['effort']}** · {s['n']} run(s) per case · "
         f"{len(cases)} cases · {s['runs']} runs · {s['turns']} chat turns",
-        f"- Cost: **${s['cost_usd']:.4f}** ({s['llm_calls']} LLM calls; tokens: {s['usage']['hit']:,} cached in / "
-        f"{s['usage']['miss']:,} uncached in / {s['usage']['out']:,} out, of which {s['usage']['reasoning']:,} reasoning)"
-        + (" — fake mode: not real usage" if s["mode"] == "fake" else " — peak rates, deepseek-flash"),
+        f"- Cost: **{usd(s['cost_usd'])}** ({s['llm_calls']} LLM calls, {s.get('retries', 0)} failed / retried; "
+        f"tokens: {s['usage']['input']:,} in, of which {s['usage']['cached']:,} cached / {s['usage']['output']:,} out, "
+        f"of which {s['usage']['reasoning']:,} reasoning)"
+        + (" — fake mode: not real usage" if s["mode"] == "fake" else f" — {s.get('pricing', 'deepseek-flash peak rates')}"),
         f"- Latency: LLM call p50 {s['llm_latency_ms']['p50']:.0f} ms, p90 {s['llm_latency_ms']['p90']:.0f} ms, "
         f"max {s['llm_latency_ms']['max']:.0f} ms; whole chat turn p50 {s['turn_latency_s']['p50']} s, "
-        f"p90 {s['turn_latency_s']['p90']} s",
+        f"p95 {s['turn_latency_s']['p95']} s; first streamed text p50 {s['first_token_s']['p50']} s, "
+        f"p95 {s['first_token_s']['p95']} s",
         f"- Tokens per chat turn (charged against the {s['turn_tokens']['cap']:,} soft cap): p50 "
         f"{s['turn_tokens']['p50']:,}, p90 {s['turn_tokens']['p90']:,}, max {s['turn_tokens']['max']:,}; "
         f"turns above 75% of the cap: {s['turn_tokens']['near_cap']}, at or above it: {s['turn_tokens']['over_cap']}; "
@@ -146,6 +184,9 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
         f"| Trajectory pass rate | {_pct(s['trajectory_pass'])} | ≥ {_pct(TRAJECTORY_THRESHOLD)} | {ok(s['verdict']['trajectory'])} |",
         f"| ReplyGuard fallback rate | {_pct(s['fallback_rate'])} | ≤ {_pct(FALLBACK_MAX)} | {ok(s['verdict']['fallback_rate'])} |",
         f"| Safety invariant violations | {sum(s['invariant_violations'].values())} | 0 | {ok(s['verdict']['invariants'])} |",
+        "",
+        f"Turns with an unrequested `request_booking` (a confirmation card nobody asked for; never a booking): "
+        f"{s['unrequested_request_booking']}.",
         "",
         "## Tool-call accuracy",
         "",
@@ -175,18 +216,26 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
     ]
     for name, c in s["per_case"].items():
         lines.append(f"| {name} | {c['group']} | {c['passed']}/{c['runs']} | {c['fallback']}/{c['turns']} | "
-                     f"{c['tokens']:,} | {c['max_turn_tokens']:,} | ${c['cost']:.4f} |")
+                     f"{c['tokens']:,} | {c['max_turn_tokens']:,} | {usd(c['cost'])} |")
+    lines += ["", *failures_markdown(cases, results)]
+    return "\n".join(lines) + "\n"
+
+
+def failures_markdown(cases: list[Case], results: list[RunResult], *, heading: str = "##", per_case: int = 2) -> list[str]:
+    """The failed runs, at most `per_case` per case: crash, invariants, and per failed turn the tool
+    calls and the reply."""
+    lines: list[str] = []
     failed = [r for r in results if not r.passed]
-    lines += ["", f"## Failures ({len(failed)} of {len(results)} runs)", ""]
+    lines += [f"{heading} Failures ({len(failed)} of {len(results)} runs)", ""]
     if not failed:
-        lines.append("None.")
+        lines += ["None.", ""]
     by_name = {c.name: c for c in cases}
     shown = Counter()
     for r in failed:
-        if shown[r.case] >= 2:
+        if shown[r.case] >= per_case:
             continue
         shown[r.case] += 1
-        lines += [f"### {r.case} (run {r.index})", ""]
+        lines += [f"{heading}# {r.case} (run {r.index})", ""]
         if r.crashed:
             lines += ["Crashed:", "```", r.crashed.strip(), "```"]
         for violation, details in r.invariants.items():
@@ -197,7 +246,7 @@ def markdown(summary: dict[str, Any], cases: list[Case], results: list[RunResult
                 tools = ", ".join(f"{c.tool}({c.args}) -> {c.code}" for c in turn.tools) or "no tool call"
                 lines += [f"- turn {step.user!r}: {', '.join(why)}", f"  - tools: {tools}", f"  - reply ({turn.outcome}): {turn.text!r}"]
         lines.append("")
-    return "\n".join(lines) + "\n"
+    return lines
 
 
 def results_json(summary: dict[str, Any], results: list[RunResult]) -> str:

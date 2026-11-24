@@ -9,10 +9,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agent.budget import AgentBudget
+
 from .fake import (Use, ambiguous_reply, confirm_card_reply, last_quote_id, no_service_issues, no_service_reply,
                    quote_reply, quote_reply_zh, same_city_reply, say, tickets_reply, unknown_reply)
 
 QUOTE_ID = "$QUOTE"  # in an expected argument: the newest quote id of the conversation
+
+
+def nth_quote(i: int) -> str:
+    """In an expected argument: the conversation's i-th quote id (0 = the first), as it was before
+    the turn (\"book the second one\")."""
+    return f"$QUOTE#{i}"
 
 
 @dataclass(frozen=True)
@@ -48,10 +56,20 @@ class Click:
 
 
 @dataclass(frozen=True)
+class EditDb:
+    """The flight data changes between turns: SQL statements run on the run's private copy of
+    locations.db (the airline notices the new fingerprint on its next read)."""
+
+    sql: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Case:
     name: str
     group: str
-    steps: tuple[Turn | Click, ...]
+    steps: tuple[Turn | Click | EditDb, ...]
+    budget: AgentBudget | None = None  # per-turn limits for this case (None: the defaults)
+    tool_failures: tuple[tuple[str, int], ...] = ()  # (tool, n): its first n calls fail (tool_failed)
 
 
 NO_BOOKING = frozenset({"request_booking"})

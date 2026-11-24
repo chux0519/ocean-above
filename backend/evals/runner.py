@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import sqlite3
 import tempfile
 import time
 import traceback
@@ -17,13 +18,17 @@ from app.airline import Airline
 from app.core.network import NetworkProvider
 from app.store import Store
 
-from .cases import Case, Click, Turn
+from . import pricing
+from .cases import Case, Click, EditDb, Turn
 from .checks import SPELLED_NUMBER, ToolRecord, TurnRun, invariant_violations, turn_failures
 from .fake import ScriptedLLM
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# USD per 1M tokens: deepseek-flash peak rates on 2026-11-23 (off-peak is half).
-PRICE = {"hit": 0.006, "miss": 0.3, "out": 1.2}
+# the price of the production model (pricing.json); the default of the cost estimate
+DEFAULT_PRICE = pricing.load().price("deepseek", "deepseek-flash")
+# tool name -> the airline method behind it (for injected tool failures)
+AIRLINE_METHOD = {"find_city": "find_city", "quote_route": "quote_route", "request_booking": "request_booking",
+                  "list_my_tickets": "list_tickets"}
 STREAM_EVENTS = {"user_message", "status", "card", "delta", "replace", "ping", "done", "error"}
 
 
@@ -35,23 +40,44 @@ class RunResult:
     turn_failures: list[list[str]] = field(default_factory=list)  # per chat turn
     invariants: dict[str, list[str]] = field(default_factory=dict)
     crashed: str | None = None
-    usage: dict[str, int] = field(default_factory=lambda: {"hit": 0, "miss": 0, "out": 0, "reasoning": 0})
+    # provider-neutral token usage (pricing.USAGE_KEYS): input includes cached, output includes reasoning
+    usage: dict[str, int] = field(default_factory=lambda: dict.fromkeys(pricing.USAGE_KEYS, 0))
     llm_calls: int = 0
+    retries: int = 0  # LLM calls that failed (the loop retried them or gave up)
     llm_latency_ms: list[int] = field(default_factory=list)
+    config: str = ""  # the benchmark configuration that played it ("" outside a benchmark)
 
     @property
     def passed(self) -> bool:
         return not self.crashed and not self.invariants and not any(self.turn_failures)
 
-    def cost(self) -> float:
-        return sum(self.usage[k] * PRICE[k] for k in PRICE) / 1e6
+    @property
+    def tokens(self) -> int:
+        return self.usage["input"] + self.usage["output"]
+
+    def cost(self, price: "pricing.Price | None" = DEFAULT_PRICE) -> float | None:
+        """USD, or None when the price is unknown."""
+        return pricing.cost(price, self.usage)
 
 
-def estimate_cost(cases: list[Case], n: int) -> float:
-    """A deliberately high estimate: 2 LLM calls per chat turn, ~2.5k input and ~0.6k output tokens
-    each at the cache-miss rate (measured in T3: ~$0.0003 per turn at effort none, ~$0.0004 high)."""
+# per chat turn, deliberately high: 2 LLM calls of ~2.5k input and ~0.6k output tokens each
+# (measured in T3: ~$0.0003 per turn at effort none, ~$0.0004 high)
+EST_CALLS_PER_TURN, EST_INPUT_PER_CALL, EST_OUTPUT_PER_CALL = 2, 2500, 600
+
+
+def estimate_tokens(cases: list[Case], n: int) -> int:
+    """An upper-bound guess of the tokens of `n` runs of `cases` (input + output)."""
     turns = sum(isinstance(s, Turn) for c in cases for s in c.steps)
-    return turns * n * 2 * (2500 * PRICE["miss"] + 600 * PRICE["out"]) / 1e6
+    return turns * n * EST_CALLS_PER_TURN * (EST_INPUT_PER_CALL + EST_OUTPUT_PER_CALL)
+
+
+def estimate_cost(cases: list[Case], n: int, price: "pricing.Price | None" = DEFAULT_PRICE) -> float | None:
+    """The estimate above at the cache-miss rate; None when the price is unknown."""
+    if price is None:
+        return None
+    turns = sum(isinstance(s, Turn) for c in cases for s in c.steps)
+    return turns * n * EST_CALLS_PER_TURN * (EST_INPUT_PER_CALL * price.input_cache_miss
+                                             + EST_OUTPUT_PER_CALL * price.output) / 1e6
 
 
 def _quote_ids(store: Store, user: str, conv: str) -> list[str]:
@@ -83,8 +109,31 @@ def _stream_problem(events: list) -> str | None:
     return None
 
 
-async def play(case: Case, index: int, llm: Any, workdir: Path, *, effort: str | None = None) -> RunResult:
-    result = RunResult(case.name, index)
+def _flaky(method, fails: int):
+    """`method`, raising for its first `fails` calls (an injected tool failure)."""
+    left = [fails]
+
+    def call(*args, **kwargs):
+        if left[0] > 0:
+            left[0] -= 1
+            raise RuntimeError("injected tool failure (eval)")
+        return method(*args, **kwargs)
+    return call
+
+
+def _edit_db(path: Path, statements: tuple[str, ...]) -> None:
+    con = sqlite3.connect(path)
+    try:
+        with con:
+            for sql in statements:
+                con.execute(sql)
+    finally:
+        con.close()
+
+
+async def play(case: Case, index: int, llm: Any, workdir: Path, *, effort: str | None = None,
+               config: str = "") -> RunResult:
+    result = RunResult(case.name, index, config=config)
     try:
         await _play(case, result, llm, workdir, effort)
     except Exception:  # a crash is a failed run, not a failed report
@@ -97,7 +146,10 @@ async def _play(case: Case, result: RunResult, llm: Any, workdir: Path, effort: 
     shutil.copyfile(REPO_ROOT / "locations.db", db)
     store = Store(workdir / "app.db")
     airline = Airline(store, NetworkProvider(db))
-    agent = Agent(airline, llm)
+    for tool, fails in case.tool_failures:
+        method = AIRLINE_METHOD[tool]
+        setattr(airline, method, _flaky(getattr(airline, method), fails))
+    agent = Agent(airline, llm, budget=case.budget)
     user = store.upsert_user("eval", f"{case.name}-{result.index}", "Eval")["id"]
     conv = store.create_conversation(user)["id"]
     index = CityIndex(airline.networks.current().cities)
@@ -111,10 +163,18 @@ async def _play(case: Case, result: RunResult, llm: Any, workdir: Path, effort: 
                 await asyncio.to_thread(airline.book, user, *target)
             clicks.append((step_no, target is not None, len(airline.tickets(user)) - before))
             continue
+        if isinstance(step, EditDb):  # the flight data changes between turns (a stale quote)
+            await asyncio.to_thread(_edit_db, db, step.sql)
+            continue
         quotes = _quote_ids(store, user, conv)
-        turn = TurnRun(step.user, quote_before=quotes[-1] if quotes else None, tickets_before=before)
+        turn = TurnRun(step.user, quote_before=quotes[-1] if quotes else None, tickets_before=before,
+                       quotes_before=quotes)
         started = time.monotonic()
-        events = [e async for e in agent.stream_turn(user, conv, step.user, reasoning_effort=effort)]
+        events = []
+        async for event in agent.stream_turn(user, conv, step.user, reasoning_effort=effort):
+            if event.name == "delta" and turn.first_token_s is None:
+                turn.first_token_s = time.monotonic() - started
+            events.append(event)
         turn.message_id = events[0].data["id"]
         await agent.wait_idle()
         turn.latency_s = time.monotonic() - started
@@ -150,13 +210,11 @@ async def _play(case: Case, result: RunResult, llm: Any, workdir: Path, effort: 
             turn.llm_steps += 1
             turn.turn_tokens = max(turn.turn_tokens, charged or 0)
     for call in calls:
-        usage = (call["response"] or {}).get("usage") or {}
-        hit = usage.get("prompt_cache_hit_tokens", 0)
-        result.usage["hit"] += hit
-        result.usage["miss"] += usage.get("prompt_tokens", 0) - hit
-        result.usage["out"] += usage.get("completion_tokens", 0)
-        result.usage["reasoning"] += (usage.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)
+        response = call["response"] or {}
+        for key, value in pricing.normalize_usage(response.get("usage")).items():
+            result.usage[key] += value
         result.llm_calls += 1
+        result.retries += "error" in response
         if call["latency_ms"] is not None:
             result.llm_latency_ms.append(call["latency_ms"])
 
