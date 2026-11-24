@@ -23,7 +23,7 @@ concurrency limits stay our own code.
 | 1 | #49 SDK POC, ADR, runtime migration | 08-runtime | — | ADR-001: Pydantic AI Slim (2026-11-24); migration in progress |
 | 2 | #48 backend run cancellation + Stop UI | 09-stop | #49 accepted | queued |
 | 3 | #35 OpenTelemetry + local Phoenix | 10-otel | #49, #48 accepted | queued |
-| 4 | #47 multi-model benchmark, optional Promptfoo (deepseek-flash vs qwen3.8-flash on Bailian) | 11-bench | #49, #48 (traces from #35) | queued |
+| 4 | #47 multi-model benchmark, optional Promptfoo (deepseek-flash official vs deepseek-v4.1-flash-1017 and qwen3.8-flash on Bailian; tokens when price unknown) | 11-bench | #49, #48 (traces from #35) | queued |
 | — | #41 SQLite limits + benchmark, PostgreSQL criteria | 08-runtime (parallel) | — | done (PR #51, docs/design/sqlite-concurrency.md) |
 | — | #11 / #12 thinking level, BYOK, thinking bench | bonus | — | not scheduled |
 
