@@ -13,7 +13,7 @@ vi.mock("@/components/shell", () => ({
     <>{children({ user: {}, refreshUser, sidebarSlot: document.body, closeNav: () => {} })}</>,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }), usePathname: () => "/chat" }));
-import ChatPage, { SETTLE_POLL_MS, STOP_GRACE_MS } from "@/app/chat/page";
+import ChatPage, { SETTLE_POLL_MS, STOP_GRACE_MS, STOP_UNKNOWN } from "@/app/chat/page";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const enc = new TextEncoder();
@@ -29,7 +29,7 @@ const stoppedMessage = (stoppedTurn.at(-1)!.data as { message: Message }).messag
 const RUN = userMessage.run_id;
 
 /** A fake server: one conversation; the message stream is pushed by the test; abort errors the stream. */
-function server({ headersLate = false, convoLate = false, empty = false } = {}) {
+function server({ headersLate = false, convoLate = false, empty = false, cancelFails = false } = {}) {
   const calls: string[] = [];
   let runStatus = "cancelling"; // what the cancel endpoint answers
   let releaseConvo: () => void = () => {};
@@ -54,7 +54,10 @@ function server({ headersLate = false, convoLate = false, empty = false } = {}) 
       const created = json({ ...conv, id: "c_new" });
       return convoLate ? new Promise<Response>((r) => { releaseConvo = () => r(created); }) : created;
     }
-    if (url.endsWith(`/runs/${RUN}/cancel`)) return json({ run_id: RUN, status: runStatus });
+    if (url.endsWith(`/runs/${RUN}/cancel`)) {
+      if (cancelFails) throw new TypeError("Failed to fetch"); // offline: no acknowledgement
+      return json({ run_id: RUN, status: runStatus });
+    }
     if (url.endsWith("/messages")) {
       const body = new ReadableStream<Uint8Array>({
         start(c) {
@@ -243,6 +246,62 @@ describe("Stop", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument());
     expect(srv.calls.some((c) => c.endsWith("/cancel"))).toBe(false); // no run id was ever known
     expect(screen.queryByText(/Connection lost/)).toBeNull();
+  });
+
+  // #55 P2: the server accepted the request (the turn runs and is stored: disconnect != Stop, R1), but the response
+  // headers with the run id arrive only after the grace time. Guaranteed: the reader is closed, Send comes back, the
+  // UI never claims the reply was stopped, the input keeps its text, Reload shows the stored truth. Best effort only:
+  // the server run itself — it was never told about the Stop and may finish.
+  it("headers delayed past the grace time: the outcome is reported as unknown, never as stopped (#55)", async () => {
+    const srv = server({ headersLate: true });
+    render(<ChatPage />);
+    const input = await sendText("Fly me to Lima");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await act(async () => { vi.advanceTimersByTime(STOP_GRACE_MS + 10); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument());
+    expect(srv.calls.some((c) => c.endsWith("/cancel"))).toBe(false); // no run id: no cancel could be sent
+    expect(screen.getByTestId("stop-unknown")).toHaveTextContent(STOP_UNKNOWN);
+    expect(screen.getByTestId("stop-announce")).toHaveTextContent(STOP_UNKNOWN);
+    expect(screen.queryByTestId("stopped-marker")).toBeNull(); // not "Stopped"
+    expect(screen.getByTestId("stop-announce")).not.toHaveTextContent(/stopped\./i);
+    expect(screen.queryByTestId("error")).toBeNull();
+    expect(input).toHaveValue("Fly me to Lima"); // the message may or may not be stored: keep the text
+    // the run finished on the server: Reload shows the stored reply and clears the notice
+    vi.useRealTimers();
+    srv.setMessages([userMessage, { ...stoppedMessage, status: "completed", text: "The reply finished anyway." }]);
+    await userEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await screen.findByText("The reply finished anyway.");
+    expect(screen.queryByTestId("stop-unknown")).toBeNull();
+  });
+
+  it("run id known but the cancel request fails and the stream never ends: outcome unknown (#55)", async () => {
+    const srv = server({ cancelFails: true });
+    render(<ChatPage />);
+    await sendText("hi");
+    await srv.send("user_message", userMessage);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await act(async () => { vi.advanceTimersByTime(STOP_GRACE_MS + 10); });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument());
+    expect(srv.calls.some((c) => c.endsWith("/cancel"))).toBe(true);
+    expect(screen.getByTestId("stop-unknown")).toHaveTextContent(STOP_UNKNOWN);
+  });
+
+  it("an acknowledged Stop is not reported as unknown (#55)", async () => {
+    const srv = server();
+    render(<ChatPage />);
+    await sendText("hi");
+    await srv.send("user_message", userMessage);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(srv.calls.some((c) => c.endsWith("/cancel"))).toBe(true));
+    srv.setMessages([userMessage, stoppedMessage]);
+    srv.setRunStatus("cancelled");
+    await act(async () => { vi.advanceTimersByTime(STOP_GRACE_MS + 10); }); // the stream never ended by itself
+    await screen.findByTestId("stopped-marker");
+    expect(screen.queryByTestId("stop-unknown")).toBeNull();
+    expect(screen.getByTestId("stop-announce")).toHaveTextContent("Reply stopped.");
   });
 
   it("Stop while a new chat is being created sends nothing (review P2-4)", async () => {

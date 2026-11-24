@@ -271,7 +271,7 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
   - **出票声明规则**：本轮记录里没有用户点击出票或非空的查票结果时，「已出票 / booked / confirmed」类说法回退模板；
     `request_booking` 成功的轮次由代码在末尾追加固定的点击提示；
   - LLM 不可用且本轮没有任何产出 → SSE `error`，只保留用户消息；`finish_reason` 不是 `stop` → 模板；
-  - 整轮总时限 90 s、会话锁等待 10 s（超时 `conversation_busy`，消息不保存）；内联 `<think>` 块剥离；
+  - 整轮总时限 90 s、会话锁等待 10 s（超时 `conversation_busy`，消息不保存，额度退还）；内联 `<think>` 块剥离；
     给 LLM 的高精度值去掉，只给显示值。
   - 真模型实测（deepseek-flash，effort high，31 场景 / 50 轮）：50/50 原样放行，0 回退，0 虚假出票声明；费用约 $0.016。
 
@@ -286,7 +286,7 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 | 本轮工具调用或 token 超出预算 | 超出的工具调用不执行并回结构化拒绝；需要结束时模板回复（`tool_budget` / `token_budget`），见 §4.8 |
 | 全站对话轮次已满 | 最多等 5 s；仍满 → `server_busy`，消息不保存，额度退还，前端保留输入 |
 | app.db 锁等待 / 操作超时 | 回滚；HTTP 503 `data_unavailable`（出票可用同一 nonce 重试）；对话里走模板 / `internal_error` |
-| 同一用户已有 2 个轮次在跑 | `conversation_busy`（其他会话忙），什么都不存 |
+| 同一用户已有 2 个轮次在跑 | `conversation_busy`（其他会话忙），什么都不存，额度退还 |
 | 用户消息没能存入 app.db | `internal_error`（没有保存），额度退还 |
 
 ### 4.7 流式输出
@@ -350,7 +350,12 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
   两者都回滚并抛 `StoreUnavailable`。HTTP 一律 503 `data_unavailable`（出票：没写入任何东西，quote 和 nonce 不变，可重试）；
   对话轮次里走现有的 `internal_error` / 模板回退。
 - **每用户上限**：同一用户同时运行的轮次最多 `AGENT_MAX_TURNS_PER_USER`（默认 2，1–256），在会话锁之后、名额之前检查；
-  超出 → SSE `error conversation_busy`（文案说明是其他会话在忙），什么都不存，不退额度。
+  超出 → SSE `error conversation_busy`（文案说明是其他会话在忙），什么都不存，额度退还。
+- **额度口径（#55）**：每日消息上限数的是**存下来的用户消息**。凡是什么都没存、也没开始 LLM / 工具工作就被拒的轮次
+  （同会话锁等待超时、每用户上限、`server_busy`、排队时被 Stop、用户消息没存上、文本不合法），都退还它自己那一条预留，
+  只退一次（按预留 id 删除；退还开始后 Stop 已经晚了，返回 `finishing`）。预留仍在开流之前原子完成，名额和锁的获取顺序不变。
+  之前 `conversation_busy` 不退额度（按「放进来的尝试」计），而界面说「消息没有发送」，两者矛盾；改后 `/api/me` 的
+  `messages_today` 等于当天存下的用户消息数。测试：`backend/tests/test_busy_quota.py`（HTTP 层，查计数、预留行和消息）。
 - **出票点击不占线程等锁**：`book_async` 在事件循环上等会话锁（`hold_async`），拿到锁后才在工作线程里跑出票事务；请求被取消时
   也等事务线程结束再释放锁。每用户同时进行的点击最多 2 个，超出 → 409 `conversation_busy`（可重试，什么都没改）。
   出票事务开始前先加载已变化的 locations.db，事务内的 B6 严格复核只需重新哈希文件。
@@ -597,7 +602,7 @@ v4（#48）：`messages.status`（`completed` | `cancelled`，旧行默认 `comp
 - Google 只接受 `http://localhost` 或 https 域名作为 JavaScript 来源；用局域网 IP 访问时只能用固定账号。
 
 ### 8.2 限额（公开 demo 前必须有）
-- 每用户每日消息数上限、全站每日 token / 费用预算（按 `llm_calls.tokens` 累计），到顶后明确提示；
+- 每用户每日消息数上限（数存下来的用户消息，被拒的忙碌轮次退还，§4.9）、全站每日 token / 费用预算（按 `llm_calls.tokens` 累计），到顶后明确提示；
   LLM 服务商侧也设消费上限。
 
 ### 8.3 部署与交付

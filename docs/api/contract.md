@@ -1,4 +1,8 @@
-# API and card contract (v1.6, 2026-11-24)
+# API and card contract (v1.7, 2026-11-24)
+
+v1.7 (#55, no wire change): the daily message limit counts stored user messages, so `conversation_busy` from a chat
+turn now gives the day's message slot back like `server_busy` did. A Stop with no `X-Run-Id` yet cannot reach the
+server; the client says the outcome is unknown (see Stop).
 
 v1.6 (#48, additive): Stop. `X-Run-Id` header and `run_id` on the first SSE event, terminal `cancelled` event,
 `POST /api/conversations/{id}/runs/{run_id}/cancel`, `Message.status`.
@@ -120,7 +124,7 @@ posts `{"nonce": state.nonce}` to `/api/quotes/{id}/book`. While a stream is run
 | `done` | `{"message": Message}` | final assistant message incl. cards with current states |
 | `cancelled` | `{"run_id", "message": Message \| null}` | v1.6, terminal: the run was stopped by the cancel endpoint. `message` = the stored assistant message (`status: "cancelled"`); `null` when the Stop came before the user message was stored (no `user_message` event was sent, nothing is stored, the day's message slot is given back — keep the input text) |
 | `error` | `{"code","message"}` | stream ends; the user message is kept, **except** `conversation_busy` (another turn holds the conversation, or the user already has 2 turns running in
-other conversations), `internal_error` sent before `user_message` (the message could not be stored; slot refunded) and `server_busy` (too many turns site-wide; the day's message slot is given back): both are sent before `user_message`, nothing is stored — keep the input box text and retry |
+other conversations), `internal_error` sent before `user_message` (the message could not be stored) and `server_busy` (too many turns site-wide): these are sent before `user_message`, nothing is stored and the day's message slot is given back (v1.7: also for `conversation_busy`) — keep the input box text and retry |
 
 Every stream ends with exactly one of `done`, `cancelled`, `error`. The **first event** (whichever it is, also an
 `error` sent before `user_message`) carries `"run_id"` in its data; the same id is in the response header `X-Run-Id`,
@@ -149,3 +153,11 @@ changes a quote that was already shown with `done`.
 
 Client: on Stop, call this endpoint **and** abort the SSE fetch; then reload the conversation (authoritative) and show
 the reply as stopped — not as a network error.
+
+Stop before the run id is known (v1.7, #55; known limitation): the run id comes only from the server (`X-Run-Id`). If
+the response headers have not arrived when the client gives up (3 s after the click), no cancel can be sent; the
+closed request does not cancel the run, which may still finish and be stored. Likewise when the cancel request itself
+fails. With no cancel answer and no terminal event the client must say the outcome is **unknown** ("Stop may not have
+reached the server — the reply may still finish. Reload to see it.", with a Reload action), never "Stopped", and keep
+the input text. Stronger option, not built: a client-generated run id sent with the message, registered idempotently,
+with a cancel that may arrive before the run registers (a short-lived tombstone).

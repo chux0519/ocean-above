@@ -17,6 +17,8 @@ function send(res, status, body, headers = {}) {
 }
 
 // Scenario switches for screenshots/tests: POST /__mock {"book":"stale","message":"busy","tickets":"empty","history":"error","delay":800,"conversation":"error"}
+// #55: message: headers_late (the response headers come after 10 s: Stop has no run id); switch: {"slow":"<id>","ms":N}
+// (that conversation loads N ms late; every other conversation shows its own short exchange)
 // login: google|invite|dev (only that method; default = config fixture); message: limit|site_limit (429)|server_busy
 // confirm: multileg; scene: proposal; book: stale|expired|invalid_nonce|already_booked|conversation_busy|data_unavailable; message: busy|drop; tickets/history/conversation: empty|error
 let scn = {};
@@ -109,6 +111,17 @@ http.createServer(async (req, res) => {
   }
   if (p === "/api/conversations") return send(res, 200, { id: "c_new", title: "", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), preview: "" });
   if (/^\/api\/conversations\/[^/]+$/.test(p)) {
+    const id = p.split("/").pop();
+    if (scn.switch?.slow === id) await wait(scn.switch.ms ?? 3000);
+    const first = json("conversations").conversations[0]?.id;
+    if (scn.switch && id !== first) {
+      const meta = json("conversations").conversations.find((c) => c.id === id) ?? { id, title: "New chat" };
+      const at = "2026-11-23T08:00:00Z";
+      return send(res, 200, { ...meta, messages: [
+        { id: `m_${id}_1`, role: "user", text: `Question in “${meta.title}”`, cards: [], created_at: at },
+        { id: `m_${id}_2`, role: "assistant", text: `This is the reply in “${meta.title}”.`, cards: [], created_at: at, status: "completed" },
+      ] });
+    }
     if (scn.conversation === "error") return send(res, 503, { error: { code: "data_unavailable", message: "Could not load this conversation." } });
     if (scn.conversation === "empty") return send(res, 200, { ...conversation(), messages: [] });
     return send(res, 200, conversation());
@@ -124,6 +137,7 @@ http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       return res.end('event: error\ndata: {"code":"conversation_busy","message":"A reply is still being generated."}\n\n');
     }
+    if (scn.message === "headers_late") return void setTimeout(() => sseTurn(res), 10_000);
     if (scn.message === "drop") {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       res.write('event: user_message\ndata: {"id":"m_drop","role":"user","text":"hello","cards":[],"created_at":"2026-11-23T08:00:00Z"}\n\n');

@@ -291,8 +291,10 @@ class Agent:
         `reasoning_effort` overrides the LLM's thinking level for this turn (none / low / high /
         max; None = configured default). `on_not_stored`: a blocking callable run (in a worker
         thread, before the event is sent) when the turn ends before the user's message was
-        stored: refused with `server_busy`, or app.db failed to store the message
-        (`internal_error`) - the API gives the day's message slot back there. It runs even when
+        stored: refused with `conversation_busy` (lock timeout or the per-user turn cap) or
+        `server_busy`, stopped while queued, or app.db failed to store the message
+        (`internal_error`) - the API gives the day's message slot back there (#55, U1). It runs
+        at most once per turn. It runs even when
         nobody reads the stream. `on_server_busy` is its older name.
         `owner_checked`: the caller already checked (off the event loop) that the conversation is
         the user's, so this method reads nothing from app.db (06 review P2-9); the turn's own
@@ -455,10 +457,16 @@ class Agent:
             emit("cancelled", {"run_id": run.id, "message": None})
             self._log_stopped(run, None)
         except ConversationBusy:
+            # #55: the limit counts stored messages; nothing was stored and no LLM or tool work
+            # started, so the day's message slot is given back (U1), as for server_busy
+            run.state = "finishing"  # refused: a Stop from here on is too late (review P2-1)
+            await not_stored()
             emit("error", {"code": "conversation_busy", "message": BUSY})
         except _UserBusy:
+            run.state = "finishing"
             log.warning("chat turn refused: user already has %d turns running (conversation %s)",
                         self.slots.config.max_turns_per_user, conversation_id)
+            await not_stored()
             emit("error", {"code": "conversation_busy", "message": USER_BUSY})
         except ServerBusy:
             run.state = "finishing"  # refused: a Stop from here on is too late (review P2-1)
