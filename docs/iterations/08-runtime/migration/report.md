@@ -56,6 +56,9 @@
    未知工具补记、工具结果按调用顺序落库、取消接口。按文件：`llm.py` −282；`model.py` +296；`loop.py` 495 → 699；
    `scripted.py` +132；`__init__`/`context.py` 小改。
 
+评审修复（Fable，PR #53）之后：2665 行（+428，其中 `scripted.py` 145 行；不算它是 +283）。修复后真模型 N=1：30/31、安全违规 0、
+回退 0、$0.0229，见 [evals/real-after-review](evals/real-after-review/report.md) 和 STATE"评审发现 → 修法 → 测试"。
+
 ## 依赖与体积
 
 | 项 | main | 本分支 |
