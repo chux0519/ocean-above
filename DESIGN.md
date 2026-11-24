@@ -15,7 +15,7 @@ Demo: https://ocean-above.potafree.net (Google or invite-code login). The five t
   every leg, transfer city, distance and price. The click carries a one-time nonce the LLM never sees. Rules B1–B7 are
   model-tested; Stop never makes a card bookable.
 - **Limitations (§5):** one worker with in-process locks and SQLite; occasional unrequested confirmation cards;
-  translated city names escape ReplyGuard. Each has a next step.
+  translated city names escape ReplyGuard. Context compaction is character-based and best-effort (§5.5). Each has a next step.
 - **Key numbers:** 0 safety violations in every real-model run. Multi-model benchmark (N=3, 45 cases, §7.3):
   DeepSeek flash passes 96.3% (official API) and 98.5% (Bailian); Qwen3.8-flash 91.1%, about 2× the reasoning tokens.
   1,005 backend tests.
@@ -478,7 +478,40 @@ Next: prompt work measured with the multi-model benchmark (§7.3); add the resol
 result and localise the fallback template; an alias table for city names; show only the confirmation card in a
 one-message booking.
 
-### 5.5 Product scope (not required by the take-home)
+### 5.5 Context management
+
+**Implemented.** Each turn rebuilds the model context from app.db (`backend/app/agent/context.py`): stored
+messages, the tool calls of earlier turns with the compact results the model saw then, and, for turns kept in full,
+the model's reasoning. Nonces never enter it. Compaction is deterministic:
+- Above a soft budget of 40,000 characters, older turns are shortened: texts are cut to 300 characters and tool
+  results keep only their code and key fields (quote and ticket ids, cities, counts, status). The newest turns stay
+  in full.
+- Above a hard limit of 80,000 characters, the oldest turns are omitted (never the newest one). One system note
+  lists the quote and ticket ids they contained.
+- The system prompt is always sent. Nothing is deleted from app.db.
+- Per-turn limits back this up: 6 steps, 12 tool calls, 4,096 output tokens per call, a 60,000-token soft cap and
+  90 s (§2.3). The eval case `compaction_book_first` books a quote from a shortened turn.
+
+**Why it is enough here.** Measured turns use about 4.2k tokens at p50 and at most about 27k with long histories
+(06/08 evals). That is well inside the model's window for take-home-sized conversations.
+
+**Limitations.** This is best effort, not a guarantee against overflowing the context window:
+1. Characters only approximate model-specific tokens.
+2. The system prompt, tool schemas and the current turn's tool results also use the window.
+3. The newest turn plus the retained ids can exceed the budget in extreme cases.
+4. Shortened results lose business detail, e.g. a nearest-served suggestion or full quote legs.
+5. The whole history is re-read from SQLite on every turn.
+
+**Possible next steps (not implemented).**
+- Token-aware budgeting: count input tokens before each request against the model's window, an output reserve,
+  the tool schemas and a margin.
+- Structured conversation state: active quotes, confirmed city choices and relevant ticket ids, independent of the
+  transcript.
+- Compaction that keeps fields by record type.
+- A tool to fetch a persisted quote or ticket after compaction.
+- Paginated or checkpointed history instead of a full rebuild every turn.
+
+### 5.6 Product scope (not required by the take-home)
 
 No dates, timetables, seats, passengers, payment, refunds or changes; `locations.db` has none of this data and the app
 does not invent it. One ticket is one passenger with no date. The `airline/` interface keeps a place for these

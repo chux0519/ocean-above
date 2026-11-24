@@ -55,6 +55,9 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   messages), then start the old image.
 
 ## Deploy log
+- 2026-11-24 `c689e0f`: #59 (retry a failed tool once; resolved endpoint on unknown / ambiguous quotes) and the #47
+  benchmark code (evals only); api only. Health 200 after 8 s; public API e2e: Guangzhou → Lima quote + confirmation
+  $1,160.71, click books, replayed nonce 409, Abu Dhabi → nearest served Tirana.
 - 2026-11-24 `73ba50e`: 10-otel (#35) — opt-in OpenTelemetry tracing, off on production (no `OTEL_*` env on the VPS;
   `app.tracing.provider()` is None in the running container); api only; `docker compose config --services` on the
   build host lists web, api, proxy (Phoenix only with `--profile tracing`). Health 200 after 8 s; public API e2e:
