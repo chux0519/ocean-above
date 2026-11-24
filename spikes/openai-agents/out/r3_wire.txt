@@ -1,0 +1,3 @@
+[SDK as-is] error=None; reply="Hello! I'm the Ocean Above booking assistant — I can help you find flights, book"
+[with call_model_input_filter(wire_tool_call)] error=None; reply="Hello! I'm the booking assistant for Ocean Above — I can help you find flights, "
+cost this run: $0.00020

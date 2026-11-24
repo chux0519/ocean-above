@@ -1,0 +1,291 @@
+# POC：OpenAI Agents SDK 跑在 DeepSeek 上（#49 阶段 1，P-OA）
+
+日期 2026-11-24。分支 `it08-poc-oa`。代码 `spikes/openai-agents/`（独立 uv 项目，自己的 `pyproject.toml` + `uv.lock`；
+`backend/pyproject.toml` 和 `backend/app/**` 都没改）。原始输出在 `spikes/openai-agents/out/*.txt`，下面的摘录都出自那里。
+
+## 0. 测了什么、怎么测
+
+| 项 | 值 |
+|---|---|
+| SDK | `openai-agents==0.25.0`（PyPI 当前版本）；它带来 `openai==3.58.0`，底层 HTTP 是 **`httpx2` 2.16**（不是 backend 用的 `httpx`） |
+| 模型 | `OpenAIChatCompletionsModel(model="deepseek-flash", openai_client=AsyncOpenAI(base_url="https://api.deepseek.com", max_retries=0))`；思考级别同 `config.py`（默认 high） |
+| 工具 | 直接复用 `backend/app/agent/tools.py` 的 `TOOL_SCHEMAS` + `Toolbox`（四个工具，没有出票工具），airline、store、ReplyGuard、`build_context` 全是 backend 原代码（`sys.path` 引入） |
+| 数据 | 每个脚本用临时目录里的 app.db + `locations.db` 副本，跑完删除 |
+| 真模型 | `r1_real.py`、`r2_history.py`、`r3_wire.py`、`m_baseline.py`（key 由 `LLMConfig.from_env()` 从 `OCEAN_ENV_FILE` 读，不打印） |
+| 假服务器 | `poc/fake_server.py`：裸 asyncio socket 的 OpenAI 兼容 SSE 服务器，**在 TCP 层**记录客户端 FIN/RST 的时刻、已写出的 chunk 数、每个请求体；用于取消、错误、畸形参数、重试、预算 |
+| 每项检查的源码阅读 | `agents/result.py`（`cancel`）、`run_internal/run_loop.py`、`run_internal/model_retry.py`、`run_internal/tool_execution.py`、`models/openai_chatcompletions.py`、`models/chatcmpl_converter.py`、`models/reasoning_content_replay.py`、`tracing/setup.py`、`run_config.py`、`retry.py`、`tool.py` |
+
+**真模型花费：$0.0046**（`out/cost.json`：r1 $0.00227，r2 $0.00116（含一次重跑），m_baseline $0.00092，r3 $0.00020；
+按 `backend/evals/runner.py` 的价格表、DeepSeek 回报的 cache hit/miss 计算）。远低于 $0.15 上限。
+
+关键适配（全部在 `poc/common.py` / `poc/turn.py`，约 250 行，含假服务器之外的全部胶水）：
+- 工具：不用 `@function_tool`，直接构造 `FunctionTool(name, description, params_json_schema=我们的 schema, on_invoke_tool, strict_json_schema=False)`。
+  `on_invoke_tool(ctx, raw_arguments)` 拿到的是**原始参数字符串**，交给 `Toolbox.run()`（校验、执行、结构化错误都是原逻辑）；
+  同步调用走 `Threads.run()`（shield + 登记，可 drain）。
+- 受信上下文：`Runner.run_streamed(agent, input, context=TurnCtx(user_id, conversation_id, toolbox, threads, …))`。
+- 运行配置：`RunConfig(tool_execution=ToolExecutionConfig(max_function_tool_concurrency=1), tool_not_found_behavior="return_error_to_model", trace_include_sensitive_data=False)`。
+- 请求参数：`ModelSettings(temperature=0, max_tokens=4096, tool_choice="auto", include_usage=True, preserve_raw_usage=True, extra_body={"thinking": {...}, "reasoning_effort": ...})`。
+- 追踪：进程启动时 `set_trace_processors([我们的 processor])`。
+
+## 1. 逐条结果
+
+### 1 流式文本 —— 通过
+`r1_real.txt`（effort high，3 次）：SDK 事件 `raw:response.output_text.delta` 逐段到达，我们按句缓冲后放行。
+```
+first delta    : 0.92 s; first guarded release: 1.07 s; total 1.08 s
+reply          : "I can find and quote Ocean Above flights between two cities, set up bookings for you to confirm, and look up the tickets you've booked."
+```
+
+### 2 并行（一次完成多个工具调用）和多步串行 —— 通过
+```
+=== 2a parallel tool calls
+  tool calls     : [('quote_route', '{"origin": "Paris", "destination": "Tokyo"}', 'llm#1'), ('quote_route', '{"origin": "London", "destination": "Sydney"}', 'llm#1')]
+  our events     : ['status', 'status', 'card', 'card', 'delta', 'delta']
+  request 2 assistant msgs: [{'role': 'assistant', 'content': None, 'reasoning_content': '<75 chars>', 'tool_calls': 2}]
+=== 2b serial tool calls
+  tool calls     : [('find_city', '{"name": "Abu Dhabi"}', 'llm#1'), ('quote_route', '{"origin": "Tirana", "destination": "Paris"}', 'llm#2')]
+  outcomes       : [('find_city', 'no_service'), ('quote_route', 'ok')]
+  last request: [('user', False, 0), ('assistant', True, 1), ('tool', False, 0), ('assistant', True, 1), ('tool', False, 0)]
+```
+注意：SDK 默认**并发**执行同一完成里的所有工具调用。我们的设计是按顺序执行，所以设 `max_function_tool_concurrency=1`，
+适配层里再加一把 `asyncio.Lock`；假服务器上三个 `find_city`（Paris / Tokio / Abu Dhabi）按调用顺序执行、按顺序回给模型（`f_errors.txt`）。
+
+### 3 工具抛错 / 参数非法 —— 通过（需窄适配）
+- 参数非法（非 JSON、不是对象、未知参数如 `user_id`、空参数）：SDK **不预解析**原始 `FunctionTool` 的参数，`Toolbox` 照旧返回结构化错误给模型：
+  ```
+  [invalid JSON] our Toolbox outcomes: [('quote_route', 'invalid_arguments', ...'arguments are not valid JSON'...)]
+  [unknown argument (user_id)] ... 'unknown argument(s): user_id; allowed: city, ticket_id, booked_after, b...'
+  ```
+- 未知工具：默认 `tool_not_found_behavior="raise_error"` 会让整轮以 `ModelBehaviorError` 结束；设成 `"return_error_to_model"` 后模型收到 `Tool 'book_ticket' not found.`，本轮继续（与现状一致）。
+- `on_invoke_tool` 抛异常：**整轮失败**（`agents.exceptions.UserError: Error running tool boom: database exploded: secret detail`），而且消息带异常文本。
+  `@function_tool` 的默认 `failure_error_function` 只对装饰器生效。我们的 `Toolbox.run()` 本来就不抛（所有失败都是 Outcome），适配层再包一层 `try/except` 即可。
+
+### 4 `result.cancel()`：immediate 与 after_turn —— 通过
+`f_cancel.txt`：
+```
+=== 6/4a cancel('immediate') while the model streams text (infinite stream), n = 9
+  cancel -> stream_events() ends (ms): [0.5, 0.3, 0.3, 0.3, 0.3, 0.9, 1.3, 1.1, 1.4] median 0.5
+  cancel -> server sees TCP close (ms): [0.4, 0.3, 0.2, 0.3, 0.3, 0.8, 1.2, 1.0, 1.2] median 0.4
+=== 6/4b cancel('immediate') while tool-call arguments are still streaming
+  close latency 0.4 ms; requests 1; tools executed 0; threads started 0
+=== 4c cancel('after_turn') while the model streams a tool call
+  item events: ['cancel(after_turn)', 'tool_called', 'tool_output']
+  requests 1 (2nd scripted reply never requested: True); tools executed [('quote_route', 'ok')]; final_output=None
+  new_items: ['ToolCallItem', 'ToolCallOutputItem']
+=== 4d cancel('after_turn') while the model streams its final text
+  deltas received 8; final_output='one two three four five six seven eight '; requests 1
+```
+- immediate：取消 run task，事件流立即结束，`is_complete=True`；已写出的 chunk 之后不再有任何请求或工具。
+- after_turn：当前这一步的模型输出读完、它的工具照常执行，然后**不再开始下一次 LLM 请求**（`run_loop.py` 在两步之间检查 `_cancel_mode`）。
+  正好对应 #48 的 “graceful after_turn（可选）”。注意 after_turn 落在最后一步时等于没取消（4d 整段文本照常到达）。
+
+### 5 工具（`to_thread` 里的同步调用）执行中取消 —— 通过（依赖我们的 `Threads`）
+```
+=== 5 cancel('immediate') while a tool runs in a worker thread (tool sleeps 1.5 s, then writes the quote)
+  stream_events() ended 0.5 ms after cancel; worker threads still running then: 1
+  Threads.drain(): True after 1203 ms; thread finished its work: quote_route
+  outcome reached the SDK: 0 (the awaiting coroutine was cancelled; the thread was not)
+  requests to model: 1 (no LLM call after cancel); tool_output event: False
+```
+线程不能被杀：协程被取消、线程照常跑完（quote 已写进 app.db）。SDK 自己的 `@function_tool` 对同步函数用裸 `asyncio.to_thread`，
+**不登记、不可 drain**；所以迁移后工具必须走我们的 `Threads.run()`（现有 `concurrency.py`，不变），取消后 `drain()` 再落库、释放锁和名额，
+线程的结果（Outcome）可以从 `Threads` 的 future 取回，用来写 `tool_calls` 行（现状 `_drain` 的语义）。
+
+### 6 取消后上游 HTTP 流真的关闭，且不再请求 —— 通过
+证据是假服务器在 socket 上读到客户端的 EOF/RST（不是本地停止消费）：取消到服务器看到关闭中位 0.4 ms（n=9，见 4a）；
+9 次全部 `requests to server = 1`。源码：`openai_chatcompletions.py` 在 `CancelledError` 时 `_schedule_async_iterator_close(stream)`，
+后台关闭 `AsyncStream` → `httpx2` response → 连接。三种触发方式都验证了：显式 `cancel()`、ReplyGuard 失败后 `cancel()`（第 12 条）、
+整轮超时（`asyncio.timeout` 到期后 `cancel()`：`stopped after 0.50s; upstream closed 0.0 ms later; requests=1`）。
+对照：现有 `llm.py` 用 generator `aclose()`，同一假服务器上中位 0.1 ms（`m_baseline.txt`）。两者都是毫秒以下，差异无实际意义。
+
+### 7 DeepSeek thinking 参数、`reasoning_content` 保留 —— 通过（有一个模型名陷阱）
+- 传法：`ModelSettings(extra_body={"thinking": {"type": "enabled"}, "reasoning_effort": "high"})`；none → `{"thinking": {"type": "disabled"}}`。
+  请求体实测（`r1_real.txt`）：`thinking={'type': 'enabled'} reasoning_effort=high`；`thinking={'type': 'disabled'} reasoning_effort=None stream_options={'include_usage': True}`。
+  （也可以用 `ModelSettings(reasoning=Reasoning(effort=...))`，但 `max` / `none` 是 DeepSeek 专有值，用 `extra_body` 与 `config.py` 完全一致。）
+- 流里的 `delta.reasoning_content` 变成 `ReasoningItem`（`reasoning_summary_text.delta` 事件），**不会混进文本 delta**；同一轮下一次请求里
+  SDK 把它放回 assistant 消息的 `reasoning_content`（2a：`'reasoning_content': '<75 chars>'`）。
+- 陷阱：回放由 `default_should_replay_reasoning_content` 决定，**只在模型名含 "deepseek" 时回放**。`LLM_MODEL` 换成别的名字（代理、
+  自建网关）就不再回放；DeepSeek 文档要求带工具的请求回传之前的 `reasoning_content`（见 `context.py` 文档字符串），不回传可能被拒。迁移时显式传 `OpenAIChatCompletionsModel(should_replay_reasoning_content=lambda _: True)`（按配置）。
+- 不支持：内联 `<think>…</think>` 的服务器（现有 `_ThinkSplitter`）。DeepSeek 用独立字段，不受影响；要支持别的服务器需保留约 45 行过滤。
+
+### 8 增量 tool-call 拼装、畸形参数 —— 通过
+假服务器把参数切成 2 字符一片、id 和 name 只在第一片：拼装正确，原样回给模型（`('quote_route', '{"origin":"Paris","destination":"Tokyo"}')`）。
+畸形参数见第 3 条。差异：SDK 把畸形调用**原样**回放给模型（`('bad name!', '{}')`、`'{"origin": "Paris", "destination":'`），
+而现有 `wire_tool_call` 会改成 `invalid_tool` / `{}`，防止严格的服务商拒绝之后的所有请求。真 DeepSeek 实测**接受**原样回放
+（`r3_wire.txt`：两种方式都正常回复）；需要时用 `RunConfig(call_model_input_filter=...)` 套用 `wire_tool_call`，已验证可用（约 15 行）。
+
+### 9 usage（正常、取消时）—— 正常通过；取消时需窄适配
+- 正常：`preserve_raw_usage=True` 后 `on_llm_end(response).raw_usage` 是 DeepSeek 原始 usage（含 `prompt_cache_hit_tokens` / `miss` / `reasoning_tokens`），
+  `result.context_wrapper.usage` 有汇总，generation span 也带 usage。**必须**设 `include_usage=True`：SDK 只对官方 OpenAI 地址默认带 `stream_options`。
+- 取消 / ReplyGuard 截断 / 流中途断开 / 没有 usage chunk：SDK 的 usage 是 0，`on_llm_end` 不触发（4a：`usage.requests 0, total_tokens 0`；
+  `[no usage chunk] usage: requests=1 total=0; raw per call=[None]`）。现有 `BudgetTracker.charge()` 的估算规则（请求字符数 + 已收到输出字符数）照用，
+  适配层需自己从 delta 事件累计输出字符（文本、`reasoning_summary_text.delta`、`function_call_arguments.delta` 都有事件）。
+- 重试：`usage.requests` 把失败的尝试也计入（500,500,ok → `requests=3 total=120`），token 只来自成功那次。失败尝试按现规则计 0 / 估算，需我们自己记。
+
+### 10 重试与超时、错误怎么抛出 —— 通过（需窄适配：key 清洗、token 上限内才重试）
+`f_errors.txt`（`AsyncOpenAI(max_retries=0)`，重试交给 runner：`ModelSettings(retry=ModelRetrySettings(max_retries=2, backoff=..., policy=retry_policies.any(http_status([408,409,429,5xx]), network_error())))`）：
+```
+[500 twice then ok] requests=3 in 0.16s; final='ok then. '
+[500 x3 (retries exhausted)] requests=3; error: openai.InternalServerError: Error code: 500 - fake failure
+[400 (not retried)] requests=1; error: openai.BadRequestError
+[401 (not retried)] requests=1; error: openai.AuthenticationError: Error code: 401 - invalid key sk-fake-DO-NOT-LEAK-...  [KEY LEAKED]
+[429 then ok] requests=2
+[hang -> per-attempt timeout 0.5 s] requests=3 in 1.67s; error: agents.exceptions.ModelTimeoutError: Model call timed out after 0.5 seconds.
+[stream cut before any text, then ok] requests=2; final='ok then. '
+[stream cut after 3 words (text already streamed)] requests=1; deltas='w0 w1 w2 '; error: openai.APIConnectionError: Connection error.
+```
+- 已向用户流出文本后**不重试**（`model_retry.py`：`emitted_retry_unsafe_event` 是绝对否决）——和现有“已放行文本就不重试”一致。
+- 错误从 `stream_events()` 抛出，类型是 `openai.*Error` / `agents.exceptions.*`，适配层映射到现有的 `llm_error` / `turn_timeout` 回退。
+- **风险**：openai 客户端把错误响应体放进异常消息；服务商的 401 体如果回显 key，就会进日志。现有 `llm.py` 对 401/403 不读响应体。
+  适配层必须在记录 / 落库前清洗（`str(exc).replace(key, "***")`，或只记类型和状态码）。
+- 现有规则“token 软上限用完就不再重试”：`policy` 是可 async 的回调，闭包里查 `BudgetTracker.out_of_tokens()` 返回 `False` 即可（未单测，接口已确认）。
+- 注意 `AsyncOpenAI` 默认 `max_retries=2`：不设 0 会和 runner 的重试叠加（最多 9 次请求）。
+
+### 11 默认远程 trace 导出如何彻底关闭；自定义 processor 能否拿到 span —— 通过（默认值危险）
+`f_trace.txt`（每种模式一个子进程；默认导出器被替换成“只记录”，所以实测时也没有外发）：
+```
+=== default
+  default_exporter_endpoint: https://api.openai.com/v1/traces/ingest
+  default_exporter_would_send: 9
+=== replaced          (set_trace_processors([ours]))
+  default_exporter_would_send: 0
+  custom_processor_spans: {'generation': 2, 'custom': 1, 'function': 1, 'turn': 2, 'agent': 1, 'task': 1}
+  custom_span_parented: [True]
+  usage_on_span: {'requests': 1, 'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120, ...}
+=== env_disabled      (OPENAI_AGENTS_DISABLE_TRACING=1)   custom_processor_spans: {}
+=== runconfig_disabled (RunConfig(tracing_disabled=True)) custom_processor_spans: {}
+=== sensitive_on      generation_input_sample: [{"content": "You are the booking assistant of the airline Ocean Above. ...
+```
+- **默认开启**，发往 `api.openai.com`；`trace_include_sensitive_data` **默认 True**（环境变量 `OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA`，
+  默认 "true"），会把完整 prompt、用户消息、工具参数和结果放进 span。
+- 正确关法：进程启动时 `set_trace_processors([ours])`（替换掉默认的 `BatchTraceProcessor → BackendSpanExporter`），并 `trace_include_sensitive_data=False`。
+  `set_tracing_disabled(True)` / env / `RunConfig.tracing_disabled` 也能关，但会连我们的 processor 一起关掉——给 #35 用的是“替换”，不是“禁用”。
+  默认 provider 是懒加载（`tracing/setup.py`：“importing the SDK does not create network clients”），在第一次 run 之前替换即可，
+  建议加一个启动断言 + 测试：provider 里没有 `BackendSpanExporter`。
+- 自定义 `TracingProcessor` 拿到 agent / turn / task / generation（含 model、model_config、usage）/ function（工具名）span，
+  我们自己的 `custom_span("route.search")` 正确挂在 function span 下 → #35 写一个 span → OTLP 的 processor 即可。
+- 实测外连：r1 全程只有一个非本机连接（开发机的 HTTP 代理，DeepSeek 走它）；假服务器模式下只有 `127.0.0.1`。
+
+### 12 先过 ReplyGuard 再输出（逐段缓冲）—— 通过
+SDK 只交出原始 delta，何时发给前端完全由我们决定（`turn.py`：`SentenceBuffer` → `ReplyGuard.check(已放行 + 本句)` → `delta`）。
+失败时 `result.cancel()`，上游立即关闭，后面的文本既不会发出也不再生成：
+```
+=== 12/6 ReplyGuard refuses a sentence -> result.cancel() -> upstream closed, nothing unchecked emitted
+  our events: [('delta', 'Sure. '), ('replace', 'template')]
+  guard problems: [{"kind": "number", "value": "123.45"}, {"kind": "city", "value": "Paris"}, {"kind": "city", "value": "Tokyo"}]
+  text received 58 chars; released 6 chars: 'Sure. '
+  server saw close: True; server finished response itself: False
+```
+SDK 的 output guardrail 只在最终输出后跑，不能替代；我们没用它。真模型 7 轮全部原样放行（`guard: all sentences released`）。
+
+### 13 预算 —— SDK 只自带步数；其余窄适配层可做（已验证）
+| 预算 | SDK 自带？ | 做法（POC 已验证） |
+|---|---|---|
+| LLM 步数 | `max_turns` | 超出抛 `MaxTurnsExceeded`；或 `error_handlers={"max_turns": fn}` 返回我们的模板文本：`final_output='TEMPLATE REPLY (max_steps)'`，handler 看到 `MaxTurnsExceeded` |
+| 每步工具数 | 否 | `on_invoke_tool` 里计数，`RunHooks.on_llm_start` 归零；多出的不执行、回 `tool_budget_exceeded`：`executed=4 refused=2; every call answered: ['ok','ok','ok','ok','tool_budget_exceeded','tool_budget_exceeded']` |
+| 每轮工具数 | 否 | 同上（同一计数器，per_turn） |
+| 异常洪泛（> 4×每步上限） | 否 | `on_llm_end` 看 `response.output` 里 function_call 数，超出就 `result.cancel()`：`flood of 20 calls ... tools run=0; requests=1` |
+| token 软上限 | 否 | `on_llm_end` 累加 usage，超了 `cancel(mode="after_turn")`：本步工具照常跑完，不开始下一步（`stopped=True; tools run=1; requests=1`）；取消 / 截断的调用按现有估算规则计（第 9 条） |
+| 单次输出 token | `ModelSettings.max_tokens` | 源码里流式处理传 `raise_on_length_truncation=True`，截断时抛错 → 映射到 `truncated` 模板（未单独实测） |
+| 单次调用超时 | `ModelSettings.timeout` | `ModelTimeoutError`，可重试 |
+| 整轮时限 | 否 | 我们的 `asyncio.timeout` 包住事件消费，到期 `cancel()`，再 `Threads.drain()`（4.9 的语义不变） |
+| 全站 / 每用户并发、会话锁 | 否 | 原样保留在 SDK 外面（`concurrency.py`、`airline/locks.py` 不动） |
+
+### 14 受信 run context 注入 user_id / conversation_id —— 通过
+`context=` 的对象只在本进程里传给工具（`ToolContext.context`）、hooks 和 processor，不进模型请求：
+```
+14: user_id in any request body: False; conversation_id: False        (2a 和 2b 的全部请求体)
+tools sent: [('find_city', ['name']), ('quote_route', ['destination', 'origin']), ('request_booking', ['quote_id']), ('list_my_tickets', ['booked_after', 'booked_before', 'city', 'ticket_id'])]
+[unknown argument (user_id)] ... 'unknown argument(s): user_id; allowed: city, ticket_id, booked_after, b...'
+```
+工具 schema 没有任何身份参数；模型就算编出 `user_id`，`Toolbox` 也拒绝；执行时用的是 `ctx.user_id`。真模型被要求“列出别人的票”时直接拒绝、没调工具。
+`Airline.book` 不在任何工具里（工具表来自 `TOOL_SCHEMAS`）。
+
+### 15 历史从 app.db 重建后传入（不用 SDK Session）—— 通过
+`r2_history.txt`：第 1 轮用**现有 loop**（真 DeepSeek）落库；第 2 轮把用户消息存入后 `build_context()` 原样重建，
+`chat_to_items()`（约 25 行）转成 SDK 输入，SDK 跑第 2 轮：
+```
+turn 1 (current loop) events: ['user_message', 'status', 'card', 'status', 'card', 'delta', 'delta', 'delta', 'delta', 'done']
+build_context -> 6 chat messages: [('user', False, 0), ('assistant', True, 2), ('tool', False, 0), ('tool', False, 0), ('assistant', False, 0), ('user', False, 0)]
+chat_to_items -> 8 SDK items: ['user', 'reasoning', 'function_call', 'function_call', 'function_call_output', 'function_call_output', 'assistant', 'user']
+tool_call ids from app.db preserved: True (['call_tc_e2d9c78601222a6a', 'call_tc_ceade510a62d9c26'])
+reasoning_content passed back verbatim: True (1 assistant message(s))
+turn 2 tool calls: [('request_booking', '{"quote_id": "q_dd16f6c74b68e449"}')]
+turn 2 outcomes: [('request_booking', 'ok')]; cards: [('card', 'booking_request')]
+```
+`build_context` 和压缩规则不变；没有用 `Session`、`previous_response_id`、`conversation_id`（SDK 的服务端会话）。
+
+## 2. 测量
+
+| 指标 | 值 | 来源 |
+|---|---|---|
+| 依赖（backend 运行时，`uv export --no-dev`） | 23 → **46** 个包（+23）：openai, openai-agents, httpx2, httpcore2, httpx2-jsfetch, mcp, mcp-types, jsonschema(+specifications, referencing, rpds-py, attrs), requests(+urllib3, charset-normalizer), websockets, sse-starlette, python-multipart, griffelib, jiter, sniffio, truststore, pywin32（仅 Windows） | `out/measure.txt` |
+| `uv.lock` 行数 | 741 → 1563 | 同上 |
+| spike venv（SDK + httpx + networkx，macOS） | 41 个包，65 MB | 同上 |
+| 镜像增量估算 | 本机无 Docker，用估算：把两组依赖的 **Linux 轮子**（x86_64-manylinux_2_28，py3.12）`uv pip install --target`，再 `compileall`（Dockerfile 设了 `UV_COMPILE_BYTECODE=1`）：**54.6 MB → 110.2 MB，+55.6 MB**；最大的是 openai 27.5 MB（类型定义）、agents 11.8 MB、mcp 3.0 MB。基础镜像 `python:3.12-slim-bookworm` 不变，所以这就是层增量的估计 | 同上 |
+| 冷启动 import（墙钟，7 次，文件缓存热） | `import agents` **0.53–0.58 s**；`import openai` 0.19 s；`import app.agent`（现状）0.10 s；裸解释器 0.01 s。`-X importtime`：`agents.sandbox` 0.25 s、`agents.mcp` 0.17 s（都被急切导入，我们一个都不用） | 同上 |
+| 首 token（真 DeepSeek，effort high，同 prompt、同工具，交替 5 次） | 现有 client 中位 **0.88 s**，SDK 中位 **0.74 s**（区间 0.63–1.45 s，网络噪声主导，差异不显著）；r1 另 3 次 SDK：0.92 s | `m_baseline.txt`、`r1_real.txt` |
+| 取消 → 上游 TCP 关闭（假服务器，n=9） | SDK `cancel()` 中位 **0.4 ms**（另一次运行 0.8 ms）；现有 generator `aclose()` 中位 0.1 ms | `f_cancel.txt`、`m_baseline.txt` |
+| 每个 chunk 的 CPU（2000 chunk） | 现有 10 µs/chunk，SDK 56 µs/chunk（含事件对象转换）；一轮几百个 chunk 时 < 50 ms，可忽略 | `m_baseline.txt` |
+
+### 迁移后 `backend/app/agent` 行数估算（代码行 = 非空非注释行）
+现状：agent 包 1877 代码行（2237 总行）。
+
+| 文件 | 现在 | 删除 | 新增 | 保留 | 说明 |
+|---|---:|---:|---:|---:|---|
+| `llm.py` | 244 | ~224 | 0 | ~20 | 删 `OpenAIChatClient`、SSE 解析、tool-call 拼装、`_ThinkSplitter`、`Completion`/`TextDelta`/`LLMError`；留 `wire_tool_call`（`context.py` 和输入过滤器用）。若要继续支持内联 `<think>` 的服务器，再留 ~45 |
+| `loop.py` | 424 | ~140 | ~145 | ~285 | 删 `_llm_step`（重试、计费、流解析，78）、`_steps`（工具分派，56）、`_flooded`；新增 SDK 事件 → SSE 的消费循环（~70）、RunHooks（步数 / token / 洪泛 / `llm_calls` 记录，~60）、取消 / 截断调用的估算记录（~15）。锁、名额、错误映射、`_finish`、`_release`、`_drain` 保留 |
+| 新 `runtime.py` | 0 | 0 | ~120 | — | 模型工厂（AsyncOpenAI + OpenAIChatCompletionsModel + settings）、重试策略（含 token 上限）、四个 FunctionTool 适配 + 受信上下文、`chat_to_items`、trace 处理器安装 + 断言、错误清洗 |
+| `budget.py` | 163 | ~5 | 0 | ~158 | 计费估算、准入、配置都还要用 |
+| `concurrency.py` / `context.py` / `guard.py` / `tools.py` / `templates.py` / `prompt.py` / `config.py` / `sse.py` | 932 | 0 | ~5 | 932 | 不变（`config.py` 可能加 reasoning 回放开关） |
+| **合计** | **1877** | **~370** | **~270** | — | **净减约 100 行（−5%）**；只看运行时专用的 `llm.py + loop.py`：668 → ~570（−15%） |
+
+测试：`test_agent_llm.py`（379 行，测 httpx 流解析）可删；需要新增 SDK 适配测试（假服务器：关闭、畸形参数、reasoning 回放、重试策略、trace 断言，~150 行）
+和一个把现有 `FakeLLM` 脚本接到 SDK 的桥（`Model` 子类或 httpx2 MockTransport，~80 行），这样 `test_agent_loop.py`（903）、`test_runtime_review.py`（601）
+能基本原样保留。测试净减约 150 行。
+
+## 3. 结论：阶段 1 通过条件（plan.md）逐条
+
+| 通过条件 | 结论 | 证据 |
+|---|---|---|
+| 在 DeepSeek 上流式和多工具可用 | **满足** | 第 1、2、7、15 条（真模型） |
+| 取消能关闭上游流、不再调用新工具 | **满足** | 第 4、5、6 条：TCP 层关闭中位 0.4 ms，之后 0 个请求、0 个工具；已开始的线程由 `Threads.drain()` 等完 |
+| 能在我们的代码里在输出前做 ReplyGuard（逐段缓冲） | **满足** | 第 12 条 |
+| 能做每轮工具次数 / token / 步数 / 超时预算 | **满足**（只有步数和单次超时是 SDK 自带，其余是窄适配，均已在 POC 里跑通） | 第 13 条 |
+| 远程 trace 可关闭、可接自定义 processor | **满足**，但默认值是开 + 含敏感数据，必须在启动时替换并加断言测试 | 第 11 条 |
+| 迁移后维护的运行时代码明显减少，依赖增量可接受 | **部分满足 / 需协调者判断**：应用代码净减约 100 行（−5%；运行时专用部分 −15%），删掉的是最易错的部分（SSE 解析、tool-call 拼装、重试循环），取消和 trace span 基本白拿；代价是 +23 个包、镜像约 +56 MB、import +0.45 s、两套 HTTP 栈（backend 的 `google.py` 仍用 `httpx`，openai 用 `httpx2`） | 第 2 节 |
+
+**我的判断**：功能上 SDK 全部过关，没有发现阻断项；“明显减少维护代码”这一条不成立得很明显——减少的是复杂度最高的那 ~370 行，
+但新增的适配层约 270 行，净减少有限，而依赖和镜像几乎翻倍。是否采用取决于 ADR 怎么权衡“#48 / #35 少写的代码”与“依赖体积”。
+如果要更小的依赖面，同样的适配形状（FunctionTool → 我们自己的分派）可以用 `openai-python` 只替换模型客户端，但那样取消、重试、trace 都得自己写。
+
+## 4. 风险和需要窄适配层的地方（迁移 worker 的清单）
+
+1. **trace 默认外发 + 敏感数据默认开**：启动时 `set_trace_processors([...])`、`trace_include_sensitive_data=False`，加测试断言 provider 里没有 `BackendSpanExporter`；部署环境也可设 `OPENAI_AGENTS_TRACE_INCLUDE_SENSITIVE_DATA=false`。
+2. **工具并发**：`max_function_tool_concurrency=1` + 适配层的锁，保证按调用顺序执行、写 quote 的顺序和现在一样。
+3. **同步工具线程**：不用 `@function_tool`；`on_invoke_tool` → `Threads.run(Toolbox.run, …)`；取消 / 超时后 `drain`，从 future 取回 Outcome 写 `tool_calls` 行。
+4. **`on_invoke_tool` 不能抛**：抛了整轮失败且消息带异常文本；包一层 `try/except`。
+5. **未知工具**：`tool_not_found_behavior="return_error_to_model"`（默认会结束整轮）。
+6. **reasoning 回放依赖模型名**：显式 `should_replay_reasoning_content`，不要依赖名字里有 "deepseek"。
+7. **usage 缺口**：取消 / 截断 / 断流 / 无 usage chunk 时 SDK 给 0；继续用 `BudgetTracker.charge()` 估算，输出字符数从 delta 事件累计；失败的重试尝试也要我们自己记一行 `llm_calls`。
+8. **`include_usage=True` 必须显式设**（SDK 只对官方 OpenAI 地址默认开）。
+9. **错误消息里的 key**：openai 异常消息含响应体；记录 / 落库前清洗。
+10. **双重重试**：`AsyncOpenAI(max_retries=0)`，重试只交给 `ModelSettings.retry`；策略回调里加“token 软上限用完不重试”。
+11. **畸形调用的回放**：SDK 原样回放；DeepSeek 接受。换到严格服务商时用 `call_model_input_filter` 套 `wire_tool_call`（POC 已验证）。
+12. **`<think>` 内联**：SDK 不处理；DeepSeek 不需要，其他服务器需保留过滤或写入已知限制。
+13. **after_turn 不是“立即停”**：最后一步的文本照常生成；#48 的 Stop 用 immediate，after_turn 仅作可选模式。
+14. **版本漂移**：0.x 版本、接口变化快（`openai` 已到 3.x 且换了 `httpx2`）；锁定版本，升级时跑本 POC 的假服务器脚本作回归。
+15. **import 开销**：`agents` 急切导入 sandbox 和 mcp（约 0.4 s），只影响进程启动。
+
+## 5. 复现
+```bash
+cd spikes/openai-agents && uv sync --frozen
+cd poc
+../.venv/bin/python f_cancel.py      # 4 5 6 12（假服务器，免费）
+../.venv/bin/python f_errors.py      # 3 8 9 10 13
+../.venv/bin/python f_trace.py       # 11
+OCEAN_ENV_FILE=/path/to/.env ../.venv/bin/python r1_real.py      # 1 2 7 9 11 12 14（真 DeepSeek，约 $0.002）
+OCEAN_ENV_FILE=/path/to/.env ../.venv/bin/python r2_history.py   # 15（约 $0.0006）
+OCEAN_ENV_FILE=/path/to/.env ../.venv/bin/python r3_wire.py      # 畸形调用回放（约 $0.0002）
+OCEAN_ENV_FILE=/path/to/.env ../.venv/bin/python m_baseline.py 5 # 首 token / 关闭延迟 / CPU 对照（约 $0.001）
+```

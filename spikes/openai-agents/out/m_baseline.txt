@@ -1,0 +1,9 @@
+1 first text delta, real deepseek-flash effort high, n=5 each (interleaved):
+  current client: [0.88, 1.25, 0.68, 0.63, 1.05] median 0.88 s
+  SDK           : [0.74, 1.45, 0.66, 0.72, 1.32] median 0.74 s
+
+2 stop -> server sees TCP close, current client (generator aclose), n=9: [0.2, 0.1, 0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 0.2] median 0.1 ms   (SDK result.cancel(): see f_cancel.txt)
+
+3 per-chunk CPU (2000-chunk stream, client+server in one process): current client 10 µs/chunk (2000 deltas, 0.02s wall); SDK 56 µs/chunk (2000 deltas, 0.11s wall)
+
+cost this run: $0.00092

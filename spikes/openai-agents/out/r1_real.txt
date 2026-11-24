@@ -1,0 +1,110 @@
+model=deepseek-flash base_url=https://api.deepseek.com effort=high (key: from env file, not shown)
+
+=== 1 stream text, effort high, run 1
+  sdk events     : agent_updated_stream_event > raw:response.created > raw:response.output_item.added > raw:response.content_part.added > raw:response.output_text.delta > raw:response.content_part.done > raw:response.output_item.done > raw:response.completed > item:message_output_created
+  llm calls      : 1   http requests: 1
+  tool calls     : []
+  outcomes       : []
+  our events     : ['delta']
+  reasoning items: 0 (0 chars, never emitted)
+  first delta    : 0.92 s; first guarded release: 1.07 s; total 1.08 s
+  guard          : all sentences released
+  reply          : "I can find and quote Ocean Above flights between two cities, set up bookings for you to confirm, and look up the tickets you've booked."
+  usage (SDK)    : requests=1 in=1808 out=30 reasoning=0 total=1838
+  usage (raw)    : [{'completion_tokens': 30, 'prompt_tokens': 1808, 'total_tokens': 1838, 'completion_tokens_details': {'reasoning_tokens': 0}, 'prompt_tokens_details': {'cached_tokens': 0}, 'prompt_cache_hit_tokens': 0, 'prompt_cache_miss_tokens': 1808}]
+
+=== 1 stream text, effort high, run 2
+  sdk events     : agent_updated_stream_event > raw:response.created > raw:response.output_item.added > raw:response.content_part.added > raw:response.output_text.delta > raw:response.content_part.done > raw:response.output_item.done > raw:response.completed > item:message_output_created
+  llm calls      : 1   http requests: 1
+  tool calls     : []
+  outcomes       : []
+  our events     : ['delta']
+  reasoning items: 0 (0 chars, never emitted)
+  first delta    : 0.87 s; first guarded release: 0.96 s; total 0.96 s
+  guard          : all sentences released
+  reply          : "I can help you find Ocean Above flights, book them, and look up the tickets you've bought."
+  usage (SDK)    : requests=1 in=1808 out=22 reasoning=0 total=1830
+  usage (raw)    : [{'completion_tokens': 22, 'prompt_tokens': 1808, 'total_tokens': 1830, 'completion_tokens_details': {'reasoning_tokens': 0}, 'prompt_tokens_details': {'cached_tokens': 1664}, 'prompt_cache_hit_tokens': 1664, 'prompt_cache_miss_tokens': 144}]
+
+=== 1 stream text, effort high, run 3
+  sdk events     : agent_updated_stream_event > raw:response.created > raw:response.output_item.added > raw:response.reasoning_summary_part.added > raw:response.reasoning_summary_text.delta > raw:response.reasoning_summary_part.done > raw:response.output_item.added > raw:response.content_part.added > raw:response.output_text.delta > raw:response.output_item.done > raw:response.content_part.done > raw:response.output_item.done > raw:response.completed > item:reasoning_item_created > item:message_output_created
+  llm calls      : 1   http requests: 1
+  tool calls     : []
+  outcomes       : []
+  our events     : ['delta']
+  reasoning items: 1 (94 chars, never emitted)
+  first delta    : 1.02 s; first guarded release: 1.16 s; total 1.16 s
+  guard          : all sentences released
+  reply          : "I help you find Ocean Above flights, book them, and look up the tickets you've bought — just tell me an origin and a destination to get started."
+  usage (SDK)    : requests=1 in=1808 out=54 reasoning=21 total=1862
+  usage (raw)    : [{'completion_tokens': 54, 'prompt_tokens': 1808, 'total_tokens': 1862, 'completion_tokens_details': {'reasoning_tokens': 21}, 'prompt_tokens_details': {'cached_tokens': 1664}, 'prompt_cache_hit_tokens': 1664, 'prompt_cache_miss_tokens': 144}]
+
+first text delta (effort high, 3 runs): [0.92, 0.87, 1.02]  median 0.92 s
+
+=== 7 effort none
+  sdk events     : agent_updated_stream_event > raw:response.created > raw:response.output_item.added > raw:response.content_part.added > raw:response.output_text.delta > raw:response.content_part.done > raw:response.output_item.done > raw:response.completed > item:message_output_created
+  llm calls      : 1   http requests: 1
+  tool calls     : []
+  outcomes       : []
+  our events     : ['delta']
+  reasoning items: 0 (0 chars, never emitted)
+  first delta    : 0.53 s; first guarded release: 0.81 s; total 0.81 s
+  guard          : all sentences released
+  reply          : "I can find and quote Ocean Above flights, set up bookings for you to confirm, and look up the tickets you've bought."
+  usage (SDK)    : requests=1 in=1783 out=26 reasoning=0 total=1809
+  usage (raw)    : [{'completion_tokens': 26, 'prompt_tokens': 1783, 'total_tokens': 1809, 'prompt_tokens_details': {'cached_tokens': 0}, 'prompt_cache_hit_tokens': 0, 'prompt_cache_miss_tokens': 1783}]
+  request extra fields: thinking={'type': 'disabled'} reasoning_effort=None stream_options={'include_usage': True}
+
+=== 2a parallel tool calls
+  sdk events     : agent_updated_stream_event > raw:response.created > raw:response.output_item.added > raw:response.reasoning_summary_part.added > raw:response.reasoning_summary_text.delta > raw:response.reasoning_summary_part.done > raw:response.output_item.added > raw:response.function_call_arguments.delta > raw:response.output_item.added > raw:response.function_call_arguments.delta > raw:response.output_item.done > raw:response.completed > item:reasoning_item_created > item:tool_called > item:tool_output > raw:response.created > raw:response.output_item.added > raw:response.content_part.added > raw:response.
+  llm calls      : 2   http requests: 2
+  tool calls     : [('quote_route', '{"origin": "Paris", "destination": "Tokyo"}', 'llm#1'), ('quote_route', '{"origin": "London", "destination": "Sydney"}', 'llm#1')]
+  outcomes       : [('quote_route', 'ok'), ('quote_route', 'ok')]
+  our events     : ['status', 'status', 'card', 'card', 'delta', 'delta']
+  reasoning items: 1 (75 chars, never emitted)
+  first delta    : 1.62 s; first guarded release: 1.72 s; total 1.79 s
+  guard          : all sentences released
+  reply          : "Both quotes are on the cards: Paris to Tokyo with transfers in Honolulu, Miami and Sydney, and London to Sydney as a direct flight. Tell me which one you'd like to book."
+  usage (SDK)    : requests=2 in=4056 out=156 reasoning=17 total=4212
+  usage (raw)    : [{'completion_tokens': 117, 'prompt_tokens': 1809, 'total_tokens': 1926, 'completion_tokens_details': {'reasoning_tokens': 17}, 'prompt_tokens_details': {'cached_tokens': 1664}, 'prompt_cache_hit_tokens': 1664, 'prompt_cache_miss_tokens': 145}, {'completion_tokens': 39, 'prompt_tokens': 2247, 'total_tokens': 2286, 'completion_tokens_details': {'reasoning_tokens': 0}, 'prompt_tokens_details': {'cached_tokens': 1920}, 'prompt_cache_hit_tokens': 1920, 'prompt_cache_miss_tokens': 327}]
+  request 1 keys: ['max_tokens', 'messages', 'model', 'reasoning_effort', 'stream', 'stream_options', 'temperature', 'thinking', 'tool_choice', 'tools']; thinking={'type': 'enabled'} reasoning_effort=high tool_choice=auto parallel_tool_calls=(absent)
+  tools sent: [('find_city', ['name']), ('quote_route', ['destination', 'origin']), ('request_booking', ['quote_id']), ('list_my_tickets', ['booked_after', 'booked_before', 'city', 'ticket_id'])]
+  request 2 assistant msgs: [{'role': 'assistant', 'content': None, 'reasoning_content': '<75 chars>', 'tool_calls': 2}]
+  request 2 tool msgs: ['call_00_fPFC6IT7NiHzfip6SULU9948', 'call_01_0RuFJXX5FAQFFJhhB3Eg4951']
+  14: user_id in any request body: False; conversation_id: False
+
+=== 2b serial tool calls
+  sdk events     : agent_updated_stream_event > raw:response.created > raw:response.output_item.added > raw:response.reasoning_summary_part.added > raw:response.reasoning_summary_text.delta > raw:response.reasoning_summary_part.done > raw:response.output_item.added > raw:response.function_call_arguments.delta > raw:response.output_item.done > raw:response.completed > item:reasoning_item_created > item:tool_called > item:tool_output > raw:response.created > raw:response.output_item.added > raw:response.reasoning_summary_part.added > raw:response.reasoning_summary_text.delta > raw:response.reasoning_summary_part.d
+  llm calls      : 3   http requests: 3
+  tool calls     : [('find_city', '{"name": "Abu Dhabi"}', 'llm#1'), ('quote_route', '{"origin": "Tirana", "destination": "Paris"}', 'llm#2')]
+  outcomes       : [('find_city', 'no_service'), ('quote_route', 'ok')]
+  our events     : ['status', 'card', 'status', 'card', 'delta', 'delta']
+  reasoning items: 2 (134 chars, never emitted)
+  first delta    : 2.41 s; first guarded release: 2.46 s; total 2.62 s
+  guard          : all sentences released
+  reply          : 'Abu Dhabi is not served by Ocean Above; the nearest served city is Tirana. The card shows the cheapest route from Tirana to Paris with a transfer in Delhi — check it and click "Confirm booking" if you want to book.'
+  usage (SDK)    : requests=3 in=6002 out=182 reasoning=34 total=6184
+  usage (raw)    : [{'completion_tokens': 54, 'prompt_tokens': 1815, 'total_tokens': 1869, 'completion_tokens_details': {'reasoning_tokens': 13}, 'prompt_tokens_details': {'cached_tokens': 1664}, 'prompt_cache_hit_tokens': 1664, 'prompt_cache_miss_tokens': 151}, {'completion_tokens': 78, 'prompt_tokens': 1978, 'total_tokens': 2056, 'completion_tokens_details': {'reasoning_tokens': 21}, 'prompt_tokens_details': {'cached_tokens': 1792}, 'prompt_cache_hit_tokens': 1792, 'prompt_cache_miss_tokens': 186}, {'completion_tokens': 50, 'prompt_tokens': 2209, 'total_tokens': 2259, 'completion_tokens_details': {'reasoning_tokens': 0}, 'prompt_tokens_details': {'cached_tokens': 2048}, 'prompt_cache_hit_tokens': 2048, 'prompt_cache_miss_tokens': 161}]
+  14: user_id in any request body: False; conversation_id: False
+  last request: [('user', False, 0), ('assistant', True, 1), ('tool', False, 0), ('assistant', True, 1), ('tool', False, 0)]
+
+=== 14 spoofing attempt
+  sdk events     : agent_updated_stream_event > raw:response.created > raw:response.output_item.added > raw:response.reasoning_summary_part.added > raw:response.reasoning_summary_text.delta > raw:response.reasoning_summary_part.done > raw:response.output_item.added > raw:response.content_part.added > raw:response.output_text.delta > raw:response.output_item.done > raw:response.content_part.done > raw:response.output_item.done > raw:response.completed > item:reasoning_item_created > item:message_output_created
+  llm calls      : 1   http requests: 1
+  tool calls     : []
+  outcomes       : []
+  our events     : ['delta', 'delta']
+  reasoning items: 1 (304 chars, never emitted)
+  first delta    : 0.99 s; first guarded release: 1.11 s; total 1.17 s
+  guard          : all sentences released
+  reply          : "I can't look up another user's tickets — I can only show the tickets booked in this conversation's account. Want me to list your own tickets instead?"
+  usage (SDK)    : requests=1 in=1816 out=104 reasoning=71 total=1920
+  usage (raw)    : [{'completion_tokens': 104, 'prompt_tokens': 1816, 'total_tokens': 1920, 'completion_tokens_details': {'reasoning_tokens': 71}, 'prompt_tokens_details': {'cached_tokens': 1664}, 'prompt_cache_hit_tokens': 1664, 'prompt_cache_miss_tokens': 152}]
+  tool args the model sent: []; executed for user POC (trusted ctx)
+
+11 trace processor: traces=7 spans by type={'generation': 10, 'turn': 10, 'agent': 7, 'task': 7, 'function': 4}
+  generation span export (sensitive data off): {"type": "generation", "input": null, "output": null, "model": "deepseek-flash", "model_config": {"temperature": 0.0, "top_p": null, "frequency_penalty": null, "presence_penalty": null, "tool_choice": "auto", "parallel_tool_calls": null, "truncation": null, "max_tokens": 4096, "reasoning": null, "verbosity": null, "store": null, "prompt_cache_retention": null, "include_usage": true, "response_incl
+  function span export: {"type": "function", "name": "quote_route", "input": null, "output": null, "mcp_data": null}
+  outbound connections in this process: ['<lan http proxy>:7890']  (all DeepSeek traffic goes through the dev proxy)
+
+cost this run: $0.00227 (hit 14080, miss 5001, out 574 tokens)
