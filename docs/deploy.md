@@ -47,6 +47,11 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
 - 2026-11-23: compose skeleton (PR #9) verified there: build OK, `/health` 200 through Caddy, `/` → `/login` 200.
 
 ## Deploy log
+- 2026-11-24 `963c9be`: 08-runtime — agent runtime on Pydantic AI Slim 2.71 (ADR-001, #49); api image only. The script's
+  6 s health check hit the startup window (502), public health was 200 seconds later; the check now retries for up to
+  60 s. Public API e2e (coordinator invite test code): "Book me a flight from Guangzhou to Lima" → quote + confirmation
+  card $1,160.71 → click books (8,928.6 km), replayed nonce 409 `already_booked`; ticket lookup; Abu Dhabi → nearest
+  served city Tirana. `/api/config`: dev off, invite + Google on.
 - 2026-11-24 `4b667ed`: 07-ui soft-minimalist redesign (web image; api unchanged) via `deploy/release_vps.sh`. Public
   check with ego-browser (invite test code): "Book me a flight from Guangzhou to Lima" → quote + confirmation card,
   $1,160.71; light 1440 and dark 390 screenshots in `docs/iterations/07-ui/e2e/`, no horizontal scroll.
