@@ -8,13 +8,15 @@ import sqlite3
 import tempfile
 import time
 import traceback
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from app.agent import Agent, CityIndex, ReplyGuard
+from app.agent import loop as agent_loop
 from app.agent.context import build_context
-from app.airline import Airline
+from app.airline import Airline, BookingError
 from app.core.network import NetworkProvider
 from app.store import Store
 
@@ -29,6 +31,20 @@ DEFAULT_PRICE = pricing.load().price("deepseek", "deepseek-flash")
 # tool name -> the airline method behind it (for injected tool failures)
 AIRLINE_METHOD = {"find_city": "find_city", "quote_route": "quote_route", "request_booking": "request_booking",
                   "list_my_tickets": "list_tickets"}
+# A case may shrink the history the agent keeps in full (`Case.history_chars`), so a short
+# conversation already has shortened older turns. Per run (a context variable, copied into the
+# agent's task and its worker threads); unset, the agent's own call is unchanged.
+_HISTORY_CHARS: ContextVar[int | None] = ContextVar("eval_history_chars", default=None)
+
+
+def _build_context(store, user_id, conversation_id, *args, **kwargs):
+    chars = _HISTORY_CHARS.get()
+    if chars is not None and not args and "budget" not in kwargs:
+        kwargs["budget"] = chars
+    return build_context(store, user_id, conversation_id, *args, **kwargs)
+
+
+agent_loop.build_context = _build_context
 STREAM_EVENTS = {"user_message", "status", "card", "delta", "replace", "ping", "done", "error"}
 
 
@@ -150,18 +166,23 @@ async def _play(case: Case, result: RunResult, llm: Any, workdir: Path, effort: 
         method = AIRLINE_METHOD[tool]
         setattr(airline, method, _flaky(getattr(airline, method), fails))
     agent = Agent(airline, llm, budget=case.budget)
+    _HISTORY_CHARS.set(case.history_chars)
     user = store.upsert_user("eval", f"{case.name}-{result.index}", "Eval")["id"]
     conv = store.create_conversation(user)["id"]
     index = CityIndex(airline.networks.current().cities)
-    clicks: list[tuple[int, bool, int]] = []
+    clicks: list[tuple[int, bool, int, int]] = []
 
     for step_no, step in enumerate(case.steps):
         before = len(airline.tickets(user))
         if isinstance(step, Click):
             target = _newest_bookable(airline, user, conv)
             if target:
-                await asyncio.to_thread(airline.book, user, *target)
-            clicks.append((step_no, target is not None, len(airline.tickets(user)) - before))
+                try:
+                    await asyncio.to_thread(airline.book, user, *target)
+                except BookingError as refused:  # e.g. stale: the card says so, no ticket
+                    if step.tickets:
+                        raise AssertionError(f"the click was refused: {refused.code}") from None
+            clicks.append((step_no, target is not None, len(airline.tickets(user)) - before, step.tickets))
             continue
         if isinstance(step, EditDb):  # the flight data changes between turns (a stale quote)
             await asyncio.to_thread(_edit_db, db, step.sql)

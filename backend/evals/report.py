@@ -73,8 +73,12 @@ def summarize(cases: list[Case], results: list[RunResult], meta: dict[str, Any],
                     tools[expect.tool].hit += hit
     turns = [t for r in results for t in r.turns]
     done = [t for t in turns if t.outcome != "error"]
-    fallback = [t for t in done if t.outcome == "fallback"]
-    kinds = Counter(p.get("kind", "?") for t in fallback for p in t.problems)
+    # a budget stop the case asks for (budget_exhaustion) is not a ReplyGuard fallback
+    expected_stop = {id(t) for r in results
+                     for step, t in zip([s for s in by_name[r.case].steps if isinstance(s, Turn)], r.turns)
+                     if step.budget_stop}
+    fallback = [t for t in done if t.outcome == "fallback" and id(t) not in expected_stop]
+    kinds = Counter(p.get("kind", "?") for t in done if t.outcome == "fallback" for p in t.problems)
     violations = Counter(name for r in results for name in r.invariants for _ in r.invariants[name])
     per_case = {}
     for c in cases:

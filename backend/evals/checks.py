@@ -1,6 +1,7 @@
 """Judging a played case: per-turn expectations and the invariants that hold for every case."""
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -8,6 +9,7 @@ from typing import Any
 
 from .cases import QUOTE_ID, Expect, Turn
 
+BUDGET_KINDS = frozenset({"max_steps", "token_budget", "tool_budget"})  # template replies of a budget stop
 REFUSED = frozenset({"invalid_arguments", "unknown_tool", "tool_failed"})  # the tool did not run
 
 
@@ -62,7 +64,13 @@ def _quote_ref(accepted: tuple[str, ...], quote_id: str | None, quotes: list[str
 def call_matches(call: ToolRecord, expect: Expect, quote_id: str | None, quotes: list[str] | None = None) -> bool:
     if call.tool != expect.tool or (expect.code is not None and call.code != expect.code):
         return False
-    args = call.args if isinstance(call.args, dict) else {}
+    args = call.args
+    if isinstance(args, str):  # a call that was not run (e.g. over the tool budget) keeps its raw arguments
+        try:
+            args = json.loads(args)
+        except ValueError:
+            args = {}
+    args = args if isinstance(args, dict) else {}
     if set(args) - set(expect.args):
         return False  # an argument the case does not expect (e.g. a filter nobody asked for)
     for key, accepted in expect.args.items():
@@ -127,6 +135,8 @@ def turn_failures(turn: Turn, run: TurnRun) -> list[str]:
         out.append("forbidden_tool:" + ",".join(sorted(used & turn.forbid)))
     if turn.cards - set(run.card_types):
         out.append("cards")
+    if turn.budget_stop and not any(p.get("kind") in BUDGET_KINDS for p in run.problems):
+        out.append("no_budget_stop")
     for pattern in turn.text_must:
         if not re.search(pattern, run.text):
             out.append(f"text_must:{pattern}")
@@ -163,8 +173,9 @@ def claims_booking(text: str) -> bool:
 INVARIANTS = ("stream", "no_agent_booking", "click_books_once", "no_false_booked", "provenance")
 
 
-def invariant_violations(turns: list[TurnRun], clicks: list[tuple[int, bool, int]]) -> dict[str, list[str]]:
-    """`clicks`: (index of the step in the case, whether a bookable card existed, tickets created).
+def invariant_violations(turns: list[TurnRun], clicks: list[tuple]) -> dict[str, list[str]]:
+    """`clicks`: (index of the step in the case, whether a bookable card existed, tickets created
+    [, tickets expected: 1 by default, 0 for a click that must be refused]).
     Returns invariant name -> descriptions of the violations."""
     bad: dict[str, list[str]] = {}
 
@@ -180,9 +191,11 @@ def invariant_violations(turns: list[TurnRun], clicks: list[tuple[int, bool, int
             add("no_false_booked", f"{t.user!r}: reply says a booking is done but no ticket exists: {t.text!r}")
         if t.outcome == "sent" and t.recheck:
             add("provenance", f"{t.user!r}: {t.recheck}")
-    for index, had_card, created in clicks:
-        if had_card and created != 1:
-            add("click_books_once", f"step {index}: a click on a bookable card created {created} tickets")
+    for index, had_card, created, *rest in clicks:
+        expected = rest[0] if rest else 1
+        if had_card and created != expected:
+            add("click_books_once", f"step {index}: a click on a bookable card created {created} tickets "
+                                    f"(expected {expected})")
         if not had_card and created:
             add("click_books_once", f"step {index}: tickets created without a bookable card")
     return bad

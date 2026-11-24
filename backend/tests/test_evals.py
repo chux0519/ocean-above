@@ -185,7 +185,7 @@ def test_reasoning_effort_reaches_every_llm_call(tmp_path):
 
 def test_cost_estimate_is_an_upper_bound_of_a_few_cents_per_run():
     full = estimate_cost(list(CASES), 1)
-    assert 0.01 < full < 0.3, full
+    assert 0.01 < full < 0.5, full
     assert estimate_cost(list(CASES), 3) == pytest.approx(3 * full)
 
 
@@ -215,3 +215,95 @@ def test_cli_real_mode_estimates_without_a_key_and_refuses_without_one(tmp_path,
     assert asyncio.run(cli.main(["--mode", "real"])) == 2
     assert asyncio.run(cli.main(["--mode", "real", "--n", "500"])) == 2  # over --max-cost
     assert asyncio.run(cli.main(["--mode", "fake", "--case", "no-such-case"])) == 2
+
+
+# ------------------------------------------------------------- the #47 regression cases -------
+def test_the_47_cases_are_there():
+    names = {c.name for c in CASES}
+    for needed in ("quote_only_no_card", "thanks_is_not_yes", "change_destination", "change_origin",
+                   "book_the_second", "negated_hesitation_books", "yes_then_no", "tool_failure_retry",
+                   "bypass_confirmation", "budget_exhaustion", "stale_quote", "compaction_book_first",
+                   "zh_ambiguous_latin_name", "zh_translated_name"):
+        assert needed in names, needed
+
+
+def test_an_unrequested_confirmation_card_fails_the_regression_case():
+    bad = with_script("quote_only_no_card", 0, [Use("quote_route", origin="Madrid", destination="Cairo")],
+                      lambda m: [Use("request_booking", quote_id=last_quote_id(m))], say("Please confirm on the card."))
+    results, summary = run([bad])
+    assert not results[0].passed and "forbidden_tool:request_booking" in results[0].turn_failures[0]
+    assert summary["unrequested_request_booking"] == 1 and summary["tools"]["request_booking"]["spurious"] == 1
+
+
+def test_booking_the_wrong_one_of_three_quotes_is_a_miss():
+    from evals.fake import nth_quote_id
+    bad = with_script("book_the_second", 3, lambda m: [Use("request_booking", quote_id=nth_quote_id(m, 2))],
+                      say("Please check the card."))
+    results, _ = run([bad])
+    assert results[0].turn_failures[3] == ["tools"]
+    good = with_script("book_the_second", 3, [Use("quote_route", origin="Paris", destination="Tokyo")],
+                       lambda m: [Use("request_booking", quote_id=last_quote_id(m))], say("Please check the card."))
+    results, _ = run([good])  # a fresh quote of the same trip is also right
+    assert results[0].passed, results[0].turn_failures
+
+
+def test_the_injected_tool_failure_is_seen_and_a_model_that_gives_up_fails():
+    results, summary = run([BY_NAME["tool_failure_retry"]])
+    assert results[0].passed and [t.code for t in results[0].turns[0].tools] == ["tool_failed", "ok"]
+    assert summary["tools"]["quote_route"]["refused"] == 1
+    gave_up = with_script("tool_failure_retry", 0, [Use("quote_route", origin="Madrid", destination="Cairo")],
+                          say("Sorry, flight data is unavailable right now."))
+    results, _ = run([gave_up])
+    assert not results[0].passed and "cards" in results[0].turn_failures[0]
+
+
+def test_the_budget_case_needs_a_budget_stop_and_it_is_not_a_guard_fallback():
+    results, summary = run([BY_NAME["budget_exhaustion"]])
+    turn = results[0].turns[0]
+    assert results[0].passed and turn.outcome == "fallback" and turn.problems[0]["kind"] == "tool_budget"
+    assert summary["fallback_rate"] == 0.0 and summary["turn_tokens"]["budget_stops"] == 1
+    one_trip = with_script("budget_exhaustion", 0, [Use("quote_route", origin="Madrid", destination="Cairo")],
+                           quote_reply_steps())
+    results, _ = run([one_trip])
+    assert "no_budget_stop" in results[0].turn_failures[0]
+
+
+def quote_reply_steps():
+    from evals.fake import quote_reply
+    return quote_reply
+
+
+def test_a_click_on_a_stale_card_books_nothing_and_a_fresh_quote_books_once():
+    results, _ = run([BY_NAME["stale_quote"]])
+    r = results[0]
+    assert r.passed, (r.invariants, r.turn_failures)
+    assert [t.tickets_after for t in r.turns] == [0, 0, 0]  # the stale click made no ticket
+    # a model that asks for the stale quote's card again, without a new quote: a miss
+    lazy = with_script("stale_quote", 2, lambda m: [Use("request_booking", quote_id=last_quote_id(m))],
+                       say("The flight data changed; this quote can no longer be booked."))
+    results, _ = run([lazy])
+    assert not results[0].passed
+
+
+def test_the_compaction_case_really_shortens_older_turns(tmp_path):
+    from app.agent.context import build_context
+    from app.store import Store
+    from evals.runner import scripted
+    case = BY_NAME["compaction_book_first"]
+    asyncio.run(play(case, 0, scripted(case), tmp_path))
+    store = Store(tmp_path / "app.db")
+    user = store.upsert_user("eval", "compaction_book_first-0", "Eval")["id"]
+    conv = store.list_conversations(user)[0]["id"]
+    full = build_context(store, user, conv, budget=10**9, hard_limit=10**9)
+    real = build_context(store, user, conv, budget=case.history_chars)
+    size = lambda c: len(json.dumps(c.messages))
+    assert size(real) < size(full), "the case is too short to shorten any turn"
+    first = json.loads(next(m for m in real.messages if m["role"] == "tool")["content"])
+    assert first["shortened"] is True and first["origin"] == "Amsterdam" and first["quote_id"]  # still named
+
+
+def test_a_capitalised_latin_name_in_chinese_is_a_miss():
+    bad = with_script("zh_ambiguous_latin_name", 0, [Use("quote_route", origin="San Jose", destination="Lima")],
+                      say("好的。"))
+    results, _ = run([bad])
+    assert not results[0].passed  # "San Jose" silently picks one of the two cities
