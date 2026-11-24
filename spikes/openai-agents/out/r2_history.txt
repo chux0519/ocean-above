@@ -1,0 +1,14 @@
+turn 1 (current loop) events: ['user_message', 'status', 'card', 'status', 'card', 'delta', 'delta', 'delta', 'delta', 'done']
+turn 1 llm_calls in app.db: [(92, 2), (0, 0)] (reasoning chars, tool calls)
+
+build_context -> 6 chat messages: [('user', False, 0), ('assistant', True, 2), ('tool', False, 0), ('tool', False, 0), ('assistant', False, 0), ('user', False, 0)]
+chat_to_items -> 8 SDK items: ['user', 'reasoning', 'function_call', 'function_call', 'function_call_output', 'function_call_output', 'assistant', 'user']
+
+SDK request 1 messages: [('system', False, 0), ('user', False, 0), ('assistant', True, 2), ('tool', False, 0), ('tool', False, 0), ('assistant', False, 0), ('user', False, 0)]
+tool_call ids from app.db preserved: True (['call_tc_e2d9c78601222a6a', 'call_tc_ceade510a62d9c26'])
+reasoning_content passed back verbatim: True (1 assistant message(s))
+turn 2 tool calls: [('request_booking', '{"quote_id": "q_dd16f6c74b68e449"}')]
+turn 2 outcomes: [('request_booking', 'ok')]; cards: [('card', 'booking_request')]
+turn 2 reply: 'The confirmation card for London → Sydney is ready — please check the route, distance and price on it, then click "Confirm booking" to issue the ticket.'  guard: ok
+
+cost this run: $0.00063 (hit 8064, miss 842, out 278)
