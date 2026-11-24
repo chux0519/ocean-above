@@ -30,8 +30,9 @@ values.
 The Google OAuth **client ID** is public by design (it is sent to every browser). It was still redacted at export
 because it sits in `.env`.
 
-## Not included (owner decision needed)
+## Not included (owner decision, 2026-11-24)
 - The homelab "potafree.net" Codex session (`rollout-2026-11-23T15-26-16-…`, 3.1 MB) did the homelab deploy and the
-  VPS migration for this project. The same session also worked on other projects of the owner (the potafree.net site,
-  other services, TLS certificates, their `.env` files). Including it unedited would publish that other work. Options:
-  include it whole after the same redaction pass, or leave it out and describe what it did. Asked the owner.
+  VPS migration for this project. That one session also holds the owner's other private projects (another website,
+  network and SEO services, TLS certificates, other `.env` files), so it is **left out**. What it did for Ocean Above
+  is described in `prompt history/README.md` and in `docs/deploy.md`. Its instructions came from the coordinator
+  session (included); its results are visible there as the hc messages it returned.
