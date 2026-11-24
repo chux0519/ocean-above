@@ -1,0 +1,32 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-11-24T07:21:42.982Z",
+        "reason": "user chose Geist in 07-ui (D1, 2026-11-24); product font reused in the poster"
+      },
+      {
+        "rule": "tiny-text",
+        "value": "*",
+        "files": [
+          "docs/infographic/poster.html"
+        ],
+        "createdAt": "2026-11-24T07:21:42.995Z",
+        "reason": "coordinator: fixed-size poster rendered at 2x to PNG; captions/sources at 11-12 CSS px are poster scale (≥22 px in the image)"
+      },
+      {
+        "rule": "tight-leading",
+        "value": "*",
+        "files": [
+          "docs/infographic/poster.html"
+        ],
+        "createdAt": "2026-11-24T07:21:43.008Z",
+        "reason": "coordinator: single-line display numbers and headings (line-height 1-1.3) in a dense fixed-size poster; body lists use 1.38-1.42"
+      }
+    ]
+  }
+}
