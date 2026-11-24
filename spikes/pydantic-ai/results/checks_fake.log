@@ -1,0 +1,661 @@
+Task exception was never retrieved
+future: <Task finished name='Task-106' coro=<StreamReader.read() done, defined at <home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py:671> exception=ConnectionResetError(54, 'Connection reset by peer')>
+Traceback (most recent call last):
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 713, in read
+    await self._wait_for_data('read')
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 545, in _wait_for_data
+    await self._waiter
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/selector_events.py", line 1013, in _read_ready__data_received
+    data = self._sock.recv(self.max_size)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+Task exception was never retrieved
+future: <Task finished name='Task-160' coro=<StreamReader.read() done, defined at <home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py:671> exception=ConnectionResetError(54, 'Connection reset by peer')>
+Traceback (most recent call last):
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 713, in read
+    await self._wait_for_data('read')
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/streams.py", line 545, in _wait_for_data
+    await self._waiter
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/asyncio/selector_events.py", line 1013, in _read_ready__data_received
+    data = self._sock.recv(self.max_size)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [Errno 54] Connection reset by peer
+Task exception was never retrieved
+future: <Task finished name='Task-471' coro=<<async_generator_athrow without __name__>()> exception=ModelConnectionError('Connection error.')>
+Traceback (most recent call last):
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_exceptions.py", line 12, in map_exceptions
+    yield
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_backends/anyio.py", line 39, in read
+    return await self._stream.receive(max_bytes=max_bytes)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/anyio/_backends/_asyncio.py", line 1441, in receive
+    raise ClosedResourceError from None
+anyio.ClosedResourceError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 95, in map_httpcore_exceptions
+    yield
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 263, in __aiter__
+    async for part in self._httpcore_stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/connection_pool.py", line 427, in __aiter__
+    async for chunk in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 320, in __aiter__
+    raise exc
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 312, in __aiter__
+    async for chunk in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 188, in _receive_response_body
+    event = await self._receive_event(timeout=timeout)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_async/http11.py", line 200, in _receive_event
+    data = await self._network_stream.read(self.READ_NUM_BYTES, timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_backends/anyio.py", line 36, in read
+    with map_exceptions(exc_map):
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpcore2/_exceptions.py", line 16, in map_exceptions
+    raise to_exc(exc) from exc
+httpcore2.ReadError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 172, in _iter_events
+    async for sse in self._decoder.aiter_bytes(self.response.aiter_bytes()):
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 383, in aiter_bytes
+    async for chunk in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_models.py", line 1007, in aiter_bytes
+    async for raw_bytes in raw_stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_models.py", line 1063, in aiter_raw
+    async for raw_stream_bytes in stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_client.py", line 160, in __aiter__
+    async for chunk in stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 262, in __aiter__
+    with map_httpcore_exceptions():
+         ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/httpx2/_transports/default.py", line 112, in map_httpcore_exceptions
+    raise mapped_exc(message) from exc
+httpx2.ReadError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_errors.py", line 27, in map_api_errors
+    yield
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_chat_streaming.py", line 76, in _get_event_iterator
+    async for chunk in MapStreamDecodeErrors(self._validate_response(), self._model_name):
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_decode_errors.py", line 70, in __anext__
+    return await anext(self._iterator)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 851, in __anext__
+    return await anext(self._source_iter)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 167, in __aiter__
+    async for item in self._iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 187, in __stream__
+    async for sse in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/openai/_streaming.py", line 177, in _iter_events
+    raise APIConnectionError(request=self.response.request) from err
+openai.APIConnectionError: Connection error.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 463, in _stream_response_text
+    async with aclosing(_stream_text_deltas()) as deltas_iter:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 386, in __aexit__
+    await self.thing.aclose()
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 458, in _stream_text_deltas
+    async with _utils.group_by_temporal(_stream_text_deltas_ungrouped(), debounce_by) as group_iter:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 231, in __aexit__
+    await self.gen.athrow(value)
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 696, in group_by_temporal
+    await _cleanup_temporal_group(context.task, context.aiterator)
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 562, in _cleanup_temporal_group
+    task.result()
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 433, in _stream_text_deltas_ungrouped
+    async for event in self:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 581, in _pull_shared
+    event = await anext(events_iterator)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/combined.py", line 734, in wrap_run_event_stream
+    async for event in stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/abstract.py", line 1203, in wrap_run_event_stream
+    async for event in stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/capabilities/abstract.py", line 1203, in wrap_run_event_stream
+    async for event in stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_run_context.py", line 152, in dispatch_event_stream
+    async for event in stream:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 613, in _events_iter
+    event = await anext(base_iter)
+            ^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/result.py", line 552, in _model_events
+    event = await anext(events)
+            ^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_continuation.py", line 635, in _iterator_with_cancel_guard
+    async for event in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/_utils.py", line 851, in __anext__
+    return await anext(self._source_iter)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/_continuation.py", line 698, in _get_event_iterator
+    async for event in sub:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3185, in iterator_with_cancel_guard
+    async for event in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3160, in iterator_with_part_end
+    async for event in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/__init__.py", line 3135, in iterator_with_final_event
+    async for event in iterator:
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_chat_streaming.py", line 75, in _get_event_iterator
+    with map_api_errors(self._model_name, self._model_id_namespace):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<home>/.local/share/uv/python/cpython-3.12.8-macos-aarch64-none/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "<repo>/spikes/pydantic-ai/.venv/lib/python3.12/site-packages/pydantic_ai/models/openai/_errors.py", line 33, in map_api_errors
+    raise map_connection_error(e, model_name) from e
+pydantic_ai.exceptions.ModelConnectionError: Connection error.
+== 3_8_tool_errors (0.1s)
+{
+ "badargs": {
+  "outcome": "ok: 'Saw the error.'",
+  "llm_requests": 2,
+  "backend_tool_codes": [
+   "invalid_arguments"
+  ],
+  "tool_messages_in_last_request": [
+   "{\"code\":\"invalid_arguments\",\"message\":\"unknown argument(s): city; allowed: name\"}"
+  ]
+ },
+ "unknown_tool": {
+  "outcome": "ok: 'No such tool.'",
+  "llm_requests": 2,
+  "backend_tool_codes": [],
+  "tool_messages_in_last_request": [
+   "{\"error\":\"Unknown tool name: 'book_ticket'. Available tools: 'boom', 'find_city', 'list_my_tickets', 'picky', 'quote_route', 'request_booking'\"}"
+  ]
+ },
+ "malformed": {
+  "outcome": "ok: 'Recovered.'",
+  "llm_requests": 2,
+  "backend_tool_codes": [],
+  "tool_messages_in_last_request": [
+   "{\"error\":[{\"type\":\"json_invalid\",\"loc\":[],\"msg\":\"Invalid JSON: EOF while parsing a string at line 1 column 13\",\"input\":\"{\\\"name\\\": \\\"Par\"}]}"
+  ]
+ },
+ "malformed_always": {
+  "outcome": "UnexpectedModelBehavior: Tool 'find_city' exceeded max retries count of 1. Consider raising the retry limit, or see the docs on tool retries: https://pydantic.dev/docs/ai/tools-toolsets",
+  "llm_requests": 2,
+  "backend_tool_codes": [],
+  "tool_messages_in_last_request": [
+   "{\"error\":[{\"type\":\"json_invalid\",\"loc\":[],\"msg\":\"Invalid JSON: EOF while parsing a string at line 1 column 13\",\"input\":\"{\\\"name\\\": \\\"Par\"}]}"
+  ]
+ },
+ "raise": {
+  "outcome": "RuntimeError: tool crashed",
+  "llm_requests": 1,
+  "backend_tool_codes": [],
+  "tool_messages_in_last_request": []
+ },
+ "modelretry": {
+  "outcome": "ok: 'After the tool.'",
+  "llm_requests": 3,
+  "backend_tool_codes": [],
+  "tool_messages_in_last_request": [
+   "{\"error\":\"x must be a city name, try again\"}",
+   "ok"
+  ]
+ },
+ "malformed_always_retries3": {
+  "outcome": "UnexpectedModelBehavior: Tool 'find_city' exceeded max retries count of 3. Consider raising the retry limit, or see the docs on tool retries: https://pydantic.dev/docs/ai/tools-toolsets",
+  "llm_requests": 4
+ }
+}
+== 4_6_cancel (24.4s)
+{
+ "run.cancel": {
+  "example": {
+   "mode": "run.cancel",
+   "outcome": "RunCancelled",
+   "usage": "RunUsage(requests=1)",
+   "messages_kept": 2,
+   "chunks_before_close": 15,
+   "upstream_closed_after_ms": 1.9,
+   "raised_after_ms": 3.5,
+   "llm_requests_total": 1
+  },
+  "upstream_close_ms_median": 1.2,
+  "upstream_close_ms_all": [
+   1.9,
+   2.0,
+   0.7,
+   0.3,
+   0.4,
+   1.8,
+   1.2
+  ],
+  "closed_in_all_runs": true,
+  "max_llm_requests": 1
+ },
+ "token_thread": {
+  "example": {
+   "mode": "token_thread",
+   "outcome": "RunCancelled",
+   "usage": "RunUsage(requests=1)",
+   "messages_kept": 2,
+   "chunks_before_close": 15,
+   "upstream_closed_after_ms": 0.5,
+   "raised_after_ms": 0.9,
+   "llm_requests_total": 1
+  },
+  "upstream_close_ms_median": 1.9,
+  "upstream_close_ms_all": [
+   0.5,
+   2.0,
+   1.8,
+   1.7,
+   2.4,
+   1.9,
+   2.3
+  ],
+  "closed_in_all_runs": true,
+  "max_llm_requests": 1
+ },
+ "task.cancel": {
+  "example": {
+   "mode": "task.cancel",
+   "outcome": "CancelledError",
+   "chunks_before_close": 15,
+   "upstream_closed_after_ms": 0.8,
+   "raised_after_ms": 1.4,
+   "llm_requests_total": 1
+  },
+  "upstream_close_ms_median": 0.4,
+  "upstream_close_ms_all": [
+   0.8,
+   0.4,
+   0.4,
+   0.4,
+   0.4,
+   0.4,
+   0.3
+  ],
+  "closed_in_all_runs": true,
+  "max_llm_requests": 1
+ },
+ "break": {
+  "example": {
+   "mode": "break",
+   "outcome": "left",
+   "chunks_before_close": 10,
+   "upstream_closed_after_ms": 0.3,
+   "raised_after_ms": 0.6,
+   "llm_requests_total": 1
+  },
+  "upstream_close_ms_median": 0.3,
+  "upstream_close_ms_all": [
+   0.3,
+   0.4,
+   0.3,
+   0.3,
+   0.4,
+   0.3,
+   0.3
+  ],
+  "closed_in_all_runs": true,
+  "max_llm_requests": 1
+ },
+ "run_stream": {
+  "api": "run_stream + StreamedRunResult.cancel()",
+  "deltas_read": 10,
+  "upstream_closed_after_ms": 0.4,
+  "llm_requests_total": 1
+ }
+}
+== 5_cancel_in_sync_tool (16.0s)
+{
+ "single_run_cancel": {
+  "scenario": "slow_tool",
+  "mode": "run.cancel",
+  "sequential": false,
+  "tracked_and_drained": null,
+  "outcome": "RunCancelled",
+  "returned_after_cancel_ms": 0,
+  "threads": [
+   {
+    "ended_after_cancel_ms": 707,
+    "returned_before_thread_ended": true
+   }
+  ],
+  "backend_tools_run": [],
+  "llm_requests_total": 1
+ },
+ "single_task_cancel": {
+  "scenario": "slow_tool",
+  "mode": "task.cancel",
+  "sequential": false,
+  "tracked_and_drained": null,
+  "outcome": "CancelledError",
+  "returned_after_cancel_ms": 0,
+  "threads": [
+   {
+    "ended_after_cancel_ms": 696,
+    "returned_before_thread_ended": true
+   }
+  ],
+  "backend_tools_run": [],
+  "llm_requests_total": 1
+ },
+ "two_parallel": {
+  "scenario": "two_slow",
+  "mode": "run.cancel",
+  "sequential": false,
+  "tracked_and_drained": null,
+  "outcome": "RunCancelled",
+  "returned_after_cancel_ms": 0,
+  "threads": [
+   {
+    "ended_after_cancel_ms": 697,
+    "returned_before_thread_ended": true
+   },
+   {
+    "ended_after_cancel_ms": 697,
+    "returned_before_thread_ended": true
+   }
+  ],
+  "backend_tools_run": [],
+  "llm_requests_total": 1
+ },
+ "slow_then_find_city_parallel": {
+  "scenario": "slow_then_more",
+  "mode": "run.cancel",
+  "sequential": false,
+  "tracked_and_drained": null,
+  "outcome": "RunCancelled",
+  "returned_after_cancel_ms": 0,
+  "threads": [
+   {
+    "ended_after_cancel_ms": 692,
+    "returned_before_thread_ended": true
+   }
+  ],
+  "backend_tools_run": [
+   "find_city"
+  ],
+  "llm_requests_total": 1
+ },
+ "slow_then_find_city_sequential": {
+  "scenario": "slow_then_more",
+  "mode": "run.cancel",
+  "sequential": true,
+  "tracked_and_drained": null,
+  "outcome": "RunCancelled",
+  "returned_after_cancel_ms": 0,
+  "threads": [
+   {
+    "ended_after_cancel_ms": 690,
+    "returned_before_thread_ended": true
+   }
+  ],
+  "backend_tools_run": [],
+  "llm_requests_total": 1
+ },
+ "adapter_Threads_then_drain": {
+  "scenario": "slow_tool",
+  "mode": "run.cancel",
+  "sequential": false,
+  "tracked_and_drained": true,
+  "outcome": "RunCancelled",
+  "returned_after_cancel_ms": 699,
+  "threads": [
+   {
+    "ended_after_cancel_ms": 698,
+    "returned_before_thread_ended": false
+   }
+  ],
+  "backend_tools_run": [],
+  "llm_requests_total": 1
+ },
+ "adapter_Threads_then_drain_sequential": {
+  "scenario": "slow_then_more",
+  "mode": "run.cancel",
+  "sequential": true,
+  "tracked_and_drained": true,
+  "outcome": "RunCancelled",
+  "returned_after_cancel_ms": 693,
+  "threads": [
+   {
+    "ended_after_cancel_ms": 692,
+    "returned_before_thread_ended": false
+   }
+  ],
+  "backend_tools_run": [],
+  "llm_requests_total": 1
+ }
+}
+== 9_usage_limits (1.1s)
+{
+ "normal": {
+  "usage": "RunUsage(cost=Decimal('0.000162'), input_tokens=300, output_tokens=60, requests=2, tool_calls=2)",
+  "per_response": [
+   "RequestUsage(cost=Decimal('0.000108'), input_tokens=200, output_tokens=40)",
+   "RequestUsage(cost=Decimal('0.000054'), input_tokens=100, output_tokens=20)"
+  ]
+ },
+ "cancelled_mid_stream": {
+  "usage": "RunUsage(requests=1)",
+  "note": "the fake sends usage only in the final chunk, as DeepSeek does"
+ },
+ "request_limit=3": {
+  "outcome": "UsageLimitExceeded: The next request would exceed the request_limit of 3. Consider raising the limit, or see the docs on usage limits for budget-aware patterns: https://pydantic.de",
+  "llm_requests": 3,
+  "tools_executed": [
+   "find_city",
+   "find_city",
+   "find_city"
+  ]
+ },
+ "tool_calls_limit=1": {
+  "outcome": "UsageLimitExceeded: The next tool call(s) would exceed the tool_calls_limit of 1 (tool_calls=2). Consider raising the limit, or see the docs on usage limits for budget-aware patter",
+  "llm_requests": 1,
+  "tools_executed": []
+ },
+ "total_tokens_limit=250": {
+  "outcome": "UsageLimitExceeded: Exceeded the total_tokens_limit of 250 (total_tokens=480). Consider raising the limit, or see the docs on usage limits for budget-aware patterns: https://pydant",
+  "llm_requests": 2,
+  "tools_executed": [
+   "find_city"
+  ]
+ }
+}
+== 10_errors_retries_timeouts (5.2s)
+{
+ "http500 (2x 500 then 200), SDK default max_retries": {
+  "outcome": "ok: 'Third time lucky.'",
+  "http_attempts": 3,
+  "text_streamed": "Third time lucky.",
+  "elapsed_s": 1.33
+ },
+ "http500 with max_retries=0": {
+  "outcome": "ModelServerError: status_code: 500, model_name: deepseek-flash, body: {'message': 'boom', 'type': 'server_error'} (status_code=500)",
+  "http_attempts": 1,
+  "text_streamed": "",
+  "elapsed_s": 0.02
+ },
+ "http400": {
+  "outcome": "ModelRequestRejectedError: status_code: 400, model_name: deepseek-flash, body: {'message': 'bad request', 'type': 'invalid_request_error'} (status_code=400)",
+  "http_attempts": 1,
+  "text_streamed": "",
+  "elapsed_s": 0.01
+ },
+ "hang after first chunk, first_event_timeout=1": {
+  "outcome": "ModelRequestTimeout: Request to model 'deepseek-flash' timed out after 1 seconds without producing any output",
+  "http_attempts": 1,
+  "text_streamed": "",
+  "elapsed_s": 1.01
+ },
+ "hang before any chunk, first_event_timeout=1": {
+  "outcome": "ModelRequestTimeout: Request to model 'deepseek-flash' timed out after 1 seconds without producing any output",
+  "http_attempts": 1,
+  "text_streamed": "",
+  "elapsed_s": 1.01
+ },
+ "hang, request_timeout=1": {
+  "outcome": "ModelRequestTimeout: Request to model 'deepseek-flash' timed out after 1 seconds",
+  "http_attempts": 1,
+  "text_streamed": "",
+  "elapsed_s": 1.01
+ },
+ "drop mid-stream": {
+  "outcome": "ok: 'Partial'",
+  "http_attempts": 1,
+  "text_streamed": "Partial",
+  "elapsed_s": 0.03
+ },
+ "stream ends without finish_reason": {
+  "outcome": "ok: 'No finish reason'",
+  "http_attempts": 1,
+  "text_streamed": "No finish reason",
+  "elapsed_s": 0.06
+ }
+}
+== 11_tracing (0.1s)
+{
+ "logfire_installed": false,
+ "logfire_api_installed": true,
+ "spans": [
+  "chat deepseek-flash",
+  "execute_tool find_city",
+  "execute_tool find_city",
+  "chat deepseek-flash",
+  "invoke_agent agent"
+ ],
+ "attribute_keys": [
+  "agent_name",
+  "gen_ai.agent.call.id",
+  "gen_ai.agent.name",
+  "gen_ai.aggregated_usage.input_tokens",
+  "gen_ai.aggregated_usage.output_tokens",
+  "gen_ai.conversation.id",
+  "gen_ai.input.messages",
+  "gen_ai.operation.name",
+  "gen_ai.output.messages",
+  "gen_ai.provider.name",
+  "gen_ai.request.max_tokens",
+  "gen_ai.request.model",
+  "gen_ai.request.temperature",
+  "gen_ai.response.finish_reasons",
+  "gen_ai.response.id",
+  "gen_ai.response.model",
+  "gen_ai.system",
+  "gen_ai.tool.call.id",
+  "gen_ai.tool.definitions",
+  "gen_ai.tool.name",
+  "gen_ai.usage.input_tokens",
+  "gen_ai.usage.output_tokens",
+  "logfire.json_schema",
+  "logfire.msg",
+  "model_name",
+  "model_request_parameters",
+  "operation.cost",
+  "pydantic_ai.all_messages",
+  "server.address",
+  "server.port"
+ ],
+ "tool_args_or_results_in_spans_with_include_content_False": false
+}
+== 12_guard (0.4s)
+{
+ "outcome": "GuardFailed raised out of the stream; run left; template reply would be emitted",
+ "emitted_before_failure": [
+  "Hello there. "
+ ],
+ "problems": [
+  {
+   "kind": "number",
+   "value": "9,999.00"
+  }
+ ],
+ "upstream_closed_by_client": true,
+ "upstream_finished_normally": false
+}
+== 13_budgets (0.2s)
+{
+ "six_calls_one_completion": {
+  "executed": [
+   "find_city",
+   "find_city",
+   "find_city",
+   "find_city"
+  ],
+  "refused": [
+   "find_city:per_step",
+   "find_city:per_step"
+  ],
+  "llm_requests": 2
+ },
+ "flood_20_calls": {
+  "stop": {
+   "kind": "tool_budget",
+   "value": "20"
+  },
+  "executed": [],
+  "refused": 0,
+  "llm_requests": 1
+ },
+ "loop_max_steps_6": {
+  "stop": {
+   "kind": "max_steps",
+   "value": "6"
+  },
+  "llm_requests": 6,
+  "executed": 6
+ }
+}
+== 14_deps (0.0s)
+{
+ "tool_parameters_sent_to_model": {
+  "find_city": [
+   "name"
+  ],
+  "quote_route": [
+   "destination",
+   "origin"
+  ],
+  "request_booking": [
+   "quote_id"
+  ],
+  "list_my_tickets": [
+   "booked_after",
+   "booked_before",
+   "city",
+   "ticket_id"
+  ]
+ },
+ "model_args": [
+  {
+   "user_id": "u_someone_else"
+  },
+  {}
+ ],
+ "user_id_the_tools_used": [
+  "u_c178ab49b0caa82f",
+  "u_c178ab49b0caa82f"
+ ],
+ "world_user": "u_c178ab49b0caa82f",
+ "other_user": "u_fb80311a2ccd2a17",
+ "tool_codes": [
+  "invalid_arguments",
+  "ok"
+ ],
+ "unknown_argument_result": {
+  "code": "invalid_arguments",
+  "message": "unknown argument(s): user_id; allowed: city, ticket_id, booked_after, booked_before"
+ }
+}
+== outbound ["('127.0.0.1', 49438)"]

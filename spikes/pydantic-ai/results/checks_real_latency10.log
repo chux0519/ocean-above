@@ -1,0 +1,101 @@
+== 1_streaming_first_token (26.1s)
+{
+ "pydantic_ai": {
+  "first_text_s_median": 1.0310000000000001,
+  "all": [
+   1.457,
+   0.622,
+   1.354,
+   1.286,
+   0.985,
+   0.795,
+   0.979,
+   1.066,
+   1.222,
+   0.996
+  ],
+  "first_thinking_s": [
+   1.045,
+   0.483,
+   0.924,
+   1.005,
+   0.744,
+   0.542,
+   0.663,
+   0.703,
+   0.55,
+   0.803
+  ],
+  "deltas_per_reply": [
+   54,
+   43,
+   40,
+   36,
+   39,
+   43,
+   48,
+   36,
+   36,
+   46
+  ],
+  "example": "I can find the cheapest Ocean Above route between two cities, show you the distance and price, and prepare a booking for you to confirm. I can also look up the tickets you've already booked and list t"
+ },
+ "backend_httpx_client": {
+  "first_text_s_median": 1.2195,
+  "all": [
+   0.816,
+   1.471,
+   1.23,
+   1.209,
+   0.815,
+   0.697,
+   0.743,
+   1.371,
+   1.247,
+   1.338
+  ]
+ }
+}
+== 12_guard_real (2.6s)
+{
+ "outcome": "all released",
+ "sentences_released": 1,
+ "problems": [],
+ "released_text": "Your quote for Paris to Sydney is on the card — it has transfers in Honolulu and Miami, with the distance and price shown there. Let me know if you'd like to book it."
+}
+== 14_deps_real (1.6s)
+{
+ "tool_calls": [],
+ "deps_user": "u_6ccb474ff95db469",
+ "other_user": "u_aca0de49e8ec24aa",
+ "reply": "I can only look up the tickets booked in this conversation — there's no way for me to pass a user id, so I can't list another user's tickets. If you'd like, I can show the tickets on this account inst"
+}
+== 15_history_from_app_db (4.0s)
+{
+ "turn1_backend_reply": "The cheapest Paris–Sydney route is on the card, with transfers in Honolulu and Miami. Would you like to book it?",
+ "history_messages_from_app_db": 4,
+ "converted_model_messages": [
+  "ModelRequest",
+  "ModelResponse",
+  "ModelRequest",
+  "ModelResponse"
+ ],
+ "reasoning_content_in_request": 1,
+ "assistant_msgs_in_request": 2,
+ "turn2_tool_calls": [
+  [
+   "request_booking",
+   {
+    "quote_id": "q_bf2b12d60c28fccb"
+   }
+  ]
+ ],
+ "quote_id_from_history": [
+  "q_bf2b12d60c28fccb"
+ ],
+ "turn2_codes": [
+  "ok"
+ ],
+ "turn2_reply": "The confirmation card is ready: please check the route, distance and price on it, then click \"Confirm booking\" to issue the ticket."
+}
+== outbound ["('<lan-proxy>', 7890)"]

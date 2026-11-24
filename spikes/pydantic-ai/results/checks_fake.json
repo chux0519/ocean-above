@@ -1,0 +1,494 @@
+{
+  "3_8_tool_errors": {
+    "badargs": {
+      "outcome": "ok: 'Saw the error.'",
+      "llm_requests": 2,
+      "backend_tool_codes": [
+        "invalid_arguments"
+      ],
+      "tool_messages_in_last_request": [
+        "{\"code\":\"invalid_arguments\",\"message\":\"unknown argument(s): city; allowed: name\"}"
+      ]
+    },
+    "unknown_tool": {
+      "outcome": "ok: 'No such tool.'",
+      "llm_requests": 2,
+      "backend_tool_codes": [],
+      "tool_messages_in_last_request": [
+        "{\"error\":\"Unknown tool name: 'book_ticket'. Available tools: 'boom', 'find_city', 'list_my_tickets', 'picky', 'quote_route', 'request_booking'\"}"
+      ]
+    },
+    "malformed": {
+      "outcome": "ok: 'Recovered.'",
+      "llm_requests": 2,
+      "backend_tool_codes": [],
+      "tool_messages_in_last_request": [
+        "{\"error\":[{\"type\":\"json_invalid\",\"loc\":[],\"msg\":\"Invalid JSON: EOF while parsing a string at line 1 column 13\",\"input\":\"{\\\"name\\\": \\\"Par\"}]}"
+      ]
+    },
+    "malformed_always": {
+      "outcome": "UnexpectedModelBehavior: Tool 'find_city' exceeded max retries count of 1. Consider raising the retry limit, or see the docs on tool retries: https://pydantic.dev/docs/ai/tools-toolsets",
+      "llm_requests": 2,
+      "backend_tool_codes": [],
+      "tool_messages_in_last_request": [
+        "{\"error\":[{\"type\":\"json_invalid\",\"loc\":[],\"msg\":\"Invalid JSON: EOF while parsing a string at line 1 column 13\",\"input\":\"{\\\"name\\\": \\\"Par\"}]}"
+      ]
+    },
+    "raise": {
+      "outcome": "RuntimeError: tool crashed",
+      "llm_requests": 1,
+      "backend_tool_codes": [],
+      "tool_messages_in_last_request": []
+    },
+    "modelretry": {
+      "outcome": "ok: 'After the tool.'",
+      "llm_requests": 3,
+      "backend_tool_codes": [],
+      "tool_messages_in_last_request": [
+        "{\"error\":\"x must be a city name, try again\"}",
+        "ok"
+      ]
+    },
+    "malformed_always_retries3": {
+      "outcome": "UnexpectedModelBehavior: Tool 'find_city' exceeded max retries count of 3. Consider raising the retry limit, or see the docs on tool retries: https://pydantic.dev/docs/ai/tools-toolsets",
+      "llm_requests": 4
+    }
+  },
+  "4_6_cancel": {
+    "run.cancel": {
+      "example": {
+        "mode": "run.cancel",
+        "outcome": "RunCancelled",
+        "usage": "RunUsage(requests=1)",
+        "messages_kept": 2,
+        "chunks_before_close": 15,
+        "upstream_closed_after_ms": 1.9,
+        "raised_after_ms": 3.5,
+        "llm_requests_total": 1
+      },
+      "upstream_close_ms_median": 1.2,
+      "upstream_close_ms_all": [
+        1.9,
+        2.0,
+        0.7,
+        0.3,
+        0.4,
+        1.8,
+        1.2
+      ],
+      "closed_in_all_runs": true,
+      "max_llm_requests": 1
+    },
+    "token_thread": {
+      "example": {
+        "mode": "token_thread",
+        "outcome": "RunCancelled",
+        "usage": "RunUsage(requests=1)",
+        "messages_kept": 2,
+        "chunks_before_close": 15,
+        "upstream_closed_after_ms": 0.5,
+        "raised_after_ms": 0.9,
+        "llm_requests_total": 1
+      },
+      "upstream_close_ms_median": 1.9,
+      "upstream_close_ms_all": [
+        0.5,
+        2.0,
+        1.8,
+        1.7,
+        2.4,
+        1.9,
+        2.3
+      ],
+      "closed_in_all_runs": true,
+      "max_llm_requests": 1
+    },
+    "task.cancel": {
+      "example": {
+        "mode": "task.cancel",
+        "outcome": "CancelledError",
+        "chunks_before_close": 15,
+        "upstream_closed_after_ms": 0.8,
+        "raised_after_ms": 1.4,
+        "llm_requests_total": 1
+      },
+      "upstream_close_ms_median": 0.4,
+      "upstream_close_ms_all": [
+        0.8,
+        0.4,
+        0.4,
+        0.4,
+        0.4,
+        0.4,
+        0.3
+      ],
+      "closed_in_all_runs": true,
+      "max_llm_requests": 1
+    },
+    "break": {
+      "example": {
+        "mode": "break",
+        "outcome": "left",
+        "chunks_before_close": 10,
+        "upstream_closed_after_ms": 0.3,
+        "raised_after_ms": 0.6,
+        "llm_requests_total": 1
+      },
+      "upstream_close_ms_median": 0.3,
+      "upstream_close_ms_all": [
+        0.3,
+        0.4,
+        0.3,
+        0.3,
+        0.4,
+        0.3,
+        0.3
+      ],
+      "closed_in_all_runs": true,
+      "max_llm_requests": 1
+    },
+    "run_stream": {
+      "api": "run_stream + StreamedRunResult.cancel()",
+      "deltas_read": 10,
+      "upstream_closed_after_ms": 0.4,
+      "llm_requests_total": 1
+    }
+  },
+  "5_cancel_in_sync_tool": {
+    "single_run_cancel": {
+      "scenario": "slow_tool",
+      "mode": "run.cancel",
+      "sequential": false,
+      "tracked_and_drained": null,
+      "outcome": "RunCancelled",
+      "returned_after_cancel_ms": 0,
+      "threads": [
+        {
+          "ended_after_cancel_ms": 707,
+          "returned_before_thread_ended": true
+        }
+      ],
+      "backend_tools_run": [],
+      "llm_requests_total": 1
+    },
+    "single_task_cancel": {
+      "scenario": "slow_tool",
+      "mode": "task.cancel",
+      "sequential": false,
+      "tracked_and_drained": null,
+      "outcome": "CancelledError",
+      "returned_after_cancel_ms": 0,
+      "threads": [
+        {
+          "ended_after_cancel_ms": 696,
+          "returned_before_thread_ended": true
+        }
+      ],
+      "backend_tools_run": [],
+      "llm_requests_total": 1
+    },
+    "two_parallel": {
+      "scenario": "two_slow",
+      "mode": "run.cancel",
+      "sequential": false,
+      "tracked_and_drained": null,
+      "outcome": "RunCancelled",
+      "returned_after_cancel_ms": 0,
+      "threads": [
+        {
+          "ended_after_cancel_ms": 697,
+          "returned_before_thread_ended": true
+        },
+        {
+          "ended_after_cancel_ms": 697,
+          "returned_before_thread_ended": true
+        }
+      ],
+      "backend_tools_run": [],
+      "llm_requests_total": 1
+    },
+    "slow_then_find_city_parallel": {
+      "scenario": "slow_then_more",
+      "mode": "run.cancel",
+      "sequential": false,
+      "tracked_and_drained": null,
+      "outcome": "RunCancelled",
+      "returned_after_cancel_ms": 0,
+      "threads": [
+        {
+          "ended_after_cancel_ms": 692,
+          "returned_before_thread_ended": true
+        }
+      ],
+      "backend_tools_run": [
+        "find_city"
+      ],
+      "llm_requests_total": 1
+    },
+    "slow_then_find_city_sequential": {
+      "scenario": "slow_then_more",
+      "mode": "run.cancel",
+      "sequential": true,
+      "tracked_and_drained": null,
+      "outcome": "RunCancelled",
+      "returned_after_cancel_ms": 0,
+      "threads": [
+        {
+          "ended_after_cancel_ms": 690,
+          "returned_before_thread_ended": true
+        }
+      ],
+      "backend_tools_run": [],
+      "llm_requests_total": 1
+    },
+    "adapter_Threads_then_drain": {
+      "scenario": "slow_tool",
+      "mode": "run.cancel",
+      "sequential": false,
+      "tracked_and_drained": true,
+      "outcome": "RunCancelled",
+      "returned_after_cancel_ms": 699,
+      "threads": [
+        {
+          "ended_after_cancel_ms": 698,
+          "returned_before_thread_ended": false
+        }
+      ],
+      "backend_tools_run": [],
+      "llm_requests_total": 1
+    },
+    "adapter_Threads_then_drain_sequential": {
+      "scenario": "slow_then_more",
+      "mode": "run.cancel",
+      "sequential": true,
+      "tracked_and_drained": true,
+      "outcome": "RunCancelled",
+      "returned_after_cancel_ms": 693,
+      "threads": [
+        {
+          "ended_after_cancel_ms": 692,
+          "returned_before_thread_ended": false
+        }
+      ],
+      "backend_tools_run": [],
+      "llm_requests_total": 1
+    }
+  },
+  "9_usage_limits": {
+    "normal": {
+      "usage": "RunUsage(cost=Decimal('0.000162'), input_tokens=300, output_tokens=60, requests=2, tool_calls=2)",
+      "per_response": [
+        "RequestUsage(cost=Decimal('0.000108'), input_tokens=200, output_tokens=40)",
+        "RequestUsage(cost=Decimal('0.000054'), input_tokens=100, output_tokens=20)"
+      ]
+    },
+    "cancelled_mid_stream": {
+      "usage": "RunUsage(requests=1)",
+      "note": "the fake sends usage only in the final chunk, as DeepSeek does"
+    },
+    "request_limit=3": {
+      "outcome": "UsageLimitExceeded: The next request would exceed the request_limit of 3. Consider raising the limit, or see the docs on usage limits for budget-aware patterns: https://pydantic.de",
+      "llm_requests": 3,
+      "tools_executed": [
+        "find_city",
+        "find_city",
+        "find_city"
+      ]
+    },
+    "tool_calls_limit=1": {
+      "outcome": "UsageLimitExceeded: The next tool call(s) would exceed the tool_calls_limit of 1 (tool_calls=2). Consider raising the limit, or see the docs on usage limits for budget-aware patter",
+      "llm_requests": 1,
+      "tools_executed": []
+    },
+    "total_tokens_limit=250": {
+      "outcome": "UsageLimitExceeded: Exceeded the total_tokens_limit of 250 (total_tokens=480). Consider raising the limit, or see the docs on usage limits for budget-aware patterns: https://pydant",
+      "llm_requests": 2,
+      "tools_executed": [
+        "find_city"
+      ]
+    }
+  },
+  "10_errors_retries_timeouts": {
+    "http500 (2x 500 then 200), SDK default max_retries": {
+      "outcome": "ok: 'Third time lucky.'",
+      "http_attempts": 3,
+      "text_streamed": "Third time lucky.",
+      "elapsed_s": 1.33
+    },
+    "http500 with max_retries=0": {
+      "outcome": "ModelServerError: status_code: 500, model_name: deepseek-flash, body: {'message': 'boom', 'type': 'server_error'} (status_code=500)",
+      "http_attempts": 1,
+      "text_streamed": "",
+      "elapsed_s": 0.02
+    },
+    "http400": {
+      "outcome": "ModelRequestRejectedError: status_code: 400, model_name: deepseek-flash, body: {'message': 'bad request', 'type': 'invalid_request_error'} (status_code=400)",
+      "http_attempts": 1,
+      "text_streamed": "",
+      "elapsed_s": 0.01
+    },
+    "hang after first chunk, first_event_timeout=1": {
+      "outcome": "ModelRequestTimeout: Request to model 'deepseek-flash' timed out after 1 seconds without producing any output",
+      "http_attempts": 1,
+      "text_streamed": "",
+      "elapsed_s": 1.01
+    },
+    "hang before any chunk, first_event_timeout=1": {
+      "outcome": "ModelRequestTimeout: Request to model 'deepseek-flash' timed out after 1 seconds without producing any output",
+      "http_attempts": 1,
+      "text_streamed": "",
+      "elapsed_s": 1.01
+    },
+    "hang, request_timeout=1": {
+      "outcome": "ModelRequestTimeout: Request to model 'deepseek-flash' timed out after 1 seconds",
+      "http_attempts": 1,
+      "text_streamed": "",
+      "elapsed_s": 1.01
+    },
+    "drop mid-stream": {
+      "outcome": "ok: 'Partial'",
+      "http_attempts": 1,
+      "text_streamed": "Partial",
+      "elapsed_s": 0.03
+    },
+    "stream ends without finish_reason": {
+      "outcome": "ok: 'No finish reason'",
+      "http_attempts": 1,
+      "text_streamed": "No finish reason",
+      "elapsed_s": 0.06
+    }
+  },
+  "11_tracing": {
+    "logfire_installed": false,
+    "logfire_api_installed": true,
+    "spans": [
+      "chat deepseek-flash",
+      "execute_tool find_city",
+      "execute_tool find_city",
+      "chat deepseek-flash",
+      "invoke_agent agent"
+    ],
+    "attribute_keys": [
+      "agent_name",
+      "gen_ai.agent.call.id",
+      "gen_ai.agent.name",
+      "gen_ai.aggregated_usage.input_tokens",
+      "gen_ai.aggregated_usage.output_tokens",
+      "gen_ai.conversation.id",
+      "gen_ai.input.messages",
+      "gen_ai.operation.name",
+      "gen_ai.output.messages",
+      "gen_ai.provider.name",
+      "gen_ai.request.max_tokens",
+      "gen_ai.request.model",
+      "gen_ai.request.temperature",
+      "gen_ai.response.finish_reasons",
+      "gen_ai.response.id",
+      "gen_ai.response.model",
+      "gen_ai.system",
+      "gen_ai.tool.call.id",
+      "gen_ai.tool.definitions",
+      "gen_ai.tool.name",
+      "gen_ai.usage.input_tokens",
+      "gen_ai.usage.output_tokens",
+      "logfire.json_schema",
+      "logfire.msg",
+      "model_name",
+      "model_request_parameters",
+      "operation.cost",
+      "pydantic_ai.all_messages",
+      "server.address",
+      "server.port"
+    ],
+    "tool_args_or_results_in_spans_with_include_content_False": false
+  },
+  "12_guard": {
+    "outcome": "GuardFailed raised out of the stream; run left; template reply would be emitted",
+    "emitted_before_failure": [
+      "Hello there. "
+    ],
+    "problems": [
+      {
+        "kind": "number",
+        "value": "9,999.00"
+      }
+    ],
+    "upstream_closed_by_client": true,
+    "upstream_finished_normally": false
+  },
+  "13_budgets": {
+    "six_calls_one_completion": {
+      "executed": [
+        "find_city",
+        "find_city",
+        "find_city",
+        "find_city"
+      ],
+      "refused": [
+        "find_city:per_step",
+        "find_city:per_step"
+      ],
+      "llm_requests": 2
+    },
+    "flood_20_calls": {
+      "stop": {
+        "kind": "tool_budget",
+        "value": "20"
+      },
+      "executed": [],
+      "refused": 0,
+      "llm_requests": 1
+    },
+    "loop_max_steps_6": {
+      "stop": {
+        "kind": "max_steps",
+        "value": "6"
+      },
+      "llm_requests": 6,
+      "executed": 6
+    }
+  },
+  "14_deps": {
+    "tool_parameters_sent_to_model": {
+      "find_city": [
+        "name"
+      ],
+      "quote_route": [
+        "destination",
+        "origin"
+      ],
+      "request_booking": [
+        "quote_id"
+      ],
+      "list_my_tickets": [
+        "booked_after",
+        "booked_before",
+        "city",
+        "ticket_id"
+      ]
+    },
+    "model_args": [
+      {
+        "user_id": "u_someone_else"
+      },
+      {}
+    ],
+    "user_id_the_tools_used": [
+      "u_c178ab49b0caa82f",
+      "u_c178ab49b0caa82f"
+    ],
+    "world_user": "u_c178ab49b0caa82f",
+    "other_user": "u_fb80311a2ccd2a17",
+    "tool_codes": [
+      "invalid_arguments",
+      "ok"
+    ],
+    "unknown_argument_result": {
+      "code": "invalid_arguments",
+      "message": "unknown argument(s): user_id; allowed: city, ticket_id, booked_after, booked_before"
+    }
+  },
+  "outbound_hosts": [
+    "('127.0.0.1', 49438)"
+  ]
+}
