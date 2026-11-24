@@ -1,0 +1,13 @@
+__ test_the_prompt_tells_the_model_to_retry_a_failed_tool_once_without_asking __
+    def test_the_prompt_tells_the_model_to_retry_a_failed_tool_once_without_asking():
+_________________ test_a_tool_failed_record_says_to_retry_once _________________
+    def test_a_tool_failed_record_says_to_retry_once():
+        assert out.code == "tool_failed"
+FAILED tests/test_agent_followups.py::test_the_prompt_tells_the_model_to_retry_a_failed_tool_once_without_asking
+FAILED tests/test_agent_followups.py::test_a_tool_failed_record_says_to_retry_once
+FAILED tests/test_agent_followups.py::test_an_ambiguous_quote_names_the_resolved_other_endpoint
+FAILED tests/test_agent_followups.py::test_an_unknown_city_quote_names_the_resolved_other_endpoint
+FAILED tests/test_agent_followups.py::test_the_resolved_city_is_a_record_for_the_guard_but_the_echoed_query_is_not
+FAILED tests/test_agent_followups.py::test_a_chinese_reply_naming_the_resolved_city_is_sent_not_replaced
+6 failed, 3 passed in 1.08s
+71a54b9
