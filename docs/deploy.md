@@ -55,6 +55,11 @@ Agreed with the homelab agent ("potafree.net", hc machine `homelab`) on 2026-11-
   messages), then start the old image.
 
 ## Deploy log
+- 2026-11-24 `3d9fc29` (tag `v1.0`): repository made public as `github.com/chux0519/ocean-above` with history rewritten
+  (the VPS origin IP replaced in old prompt-history blobs; full-history secret scan clean). The private repo with
+  issues and PRs is now `ocean-above-dev`. Build host and VPS checkouts were reset to the rewritten `main` (no
+  local changes; `.env` and `data/` untouched); containers not restarted, health 200. Commit hashes in older log
+  entries refer to the pre-rewrite history (same trees).
 - 2026-11-24 `c689e0f`: #59 (retry a failed tool once; resolved endpoint on unknown / ambiguous quotes) and the #47
   benchmark code (evals only); api only. Health 200 after 8 s; public API e2e: Guangzhou → Lima quote + confirmation
   $1,160.71, click books, replayed nonce 409, Abu Dhabi → nearest served Tirana.
