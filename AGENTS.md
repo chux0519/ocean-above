@@ -62,6 +62,8 @@ Practices: pfstack (potafree stack). Read this file first; details live in the l
 ## Design
 - [frontend/DESIGN.md](frontend/DESIGN.md) (the UI design system) is the single source of truth for visual and
   interaction rules; only the coordinator edits it. The root [DESIGN.md](DESIGN.md) is the take-home design doc.
+- Impeccable and pfstack look for a root `DESIGN.md`, which is now the take-home design doc (2026-11-24): pass
+  `frontend/` and `frontend/DESIGN.md` explicitly as the target / design context in UI reviews.
 - UI reviews use **Impeccable** (https://github.com/pbakaus/impeccable): `/impeccable critique <target>` (UX,
   scored) and `/impeccable audit <target>` (a11y, performance, theming, responsive; P0–P3) on narrow targets,
   plus `npx impeccable detect` on `frontend/` sources and on the running dev-server URL (rendered-only rules
