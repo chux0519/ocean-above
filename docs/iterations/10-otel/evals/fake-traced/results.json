@@ -1,0 +1,3136 @@
+{
+ "summary": {
+  "mode": "fake",
+  "model": "scripted-fake",
+  "effort": "n/a (fake)",
+  "n": 1,
+  "date": "2026-11-24",
+  "commit": "4b73169",
+  "tracing": true,
+  "runs": 31,
+  "trajectory_pass": 1.0,
+  "crashed": 0,
+  "turns": 68,
+  "errors": 0,
+  "fallback_rate": 0.0,
+  "fallback_kinds": {},
+  "spelled_number_replies": 0,
+  "invariant_violations": {
+   "stream": 0,
+   "no_agent_booking": 0,
+   "click_books_once": 0,
+   "no_false_booked": 0,
+   "provenance": 0
+  },
+  "tools": {
+   "find_city": {
+    "expected": 1,
+    "hit": 1,
+    "actual": 1,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   },
+   "quote_route": {
+    "expected": 48,
+    "hit": 48,
+    "actual": 48,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   },
+   "request_booking": {
+    "expected": 8,
+    "hit": 8,
+    "actual": 8,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   },
+   "list_my_tickets": {
+    "expected": 5,
+    "hit": 5,
+    "actual": 5,
+    "refused": 0,
+    "spurious": 0,
+    "success": 1.0
+   }
+  },
+  "per_case": {
+   "direct_quote": {
+    "group": "quote",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "transfer_quote": {
+    "group": "quote",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "quote_details": {
+    "group": "quote",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "no_service_abu_dhabi": {
+    "group": "no_service",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "no_service_stuttgart": {
+    "group": "no_service",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "no_service_austin": {
+    "group": "no_service",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "no_service_then_nearest": {
+    "group": "no_service",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 440,
+    "cost": 0.000168,
+    "max_turn_tokens": 220
+   },
+   "no_service_then_closest": {
+    "group": "no_service",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 440,
+    "cost": 0.000168,
+    "max_turn_tokens": 220
+   },
+   "ambiguous_san_jose": {
+    "group": "resolution",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "unknown_city": {
+    "group": "resolution",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "same_city": {
+    "group": "resolution",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "missing_origin": {
+    "group": "resolution",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 110,
+    "cost": 4.2e-05,
+    "max_turn_tokens": 110
+   },
+   "book_flow": {
+    "group": "booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 3,
+    "tokens": 660,
+    "cost": 0.000252,
+    "max_turn_tokens": 220
+   },
+   "book_in_one_message": {
+    "group": "booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 330
+   },
+   "zh_book_in_one_message": {
+    "group": "booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 330
+   },
+   "book_in_one_message_no_service": {
+    "group": "booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "long_history": {
+    "group": "long",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 19,
+    "tokens": 4290,
+    "cost": 0.001638,
+    "max_turn_tokens": 330
+   },
+   "decline": {
+    "group": "no_booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "dont_book_yet": {
+    "group": "no_booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "question_about_quote": {
+    "group": "no_booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "question_cancellation": {
+    "group": "no_booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "false_booked_prompt": {
+    "group": "no_booking",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "tickets_empty": {
+    "group": "tickets",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "tickets_count": {
+    "group": "tickets",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 3,
+    "tokens": 660,
+    "cost": 0.000252,
+    "max_turn_tokens": 220
+   },
+   "tickets_by_city": {
+    "group": "tickets",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 5,
+    "tokens": 1100,
+    "cost": 0.00042,
+    "max_turn_tokens": 220
+   },
+   "tempt_miles": {
+    "group": "temptation",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "tempt_geography": {
+    "group": "temptation",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "zh_quote": {
+    "group": "chinese",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   },
+   "zh_question_no_booking": {
+    "group": "chinese",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 330,
+    "cost": 0.000126,
+    "max_turn_tokens": 220
+   },
+   "zh_book": {
+    "group": "chinese",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 2,
+    "tokens": 440,
+    "cost": 0.000168,
+    "max_turn_tokens": 220
+   },
+   "zh_tickets": {
+    "group": "chinese",
+    "runs": 1,
+    "passed": 1,
+    "fallback": 0,
+    "turns": 1,
+    "tokens": 220,
+    "cost": 8.4e-05,
+    "max_turn_tokens": 220
+   }
+  },
+  "usage": {
+   "hit": 0,
+   "miss": 13000,
+   "out": 1300,
+   "reasoning": 0
+  },
+  "llm_calls": 130,
+  "cost_usd": 0.00546,
+  "llm_latency_ms": {
+   "p50": 3,
+   "p90": 6,
+   "max": 18
+  },
+  "turn_tokens": {
+   "cap": 60000,
+   "p50": 220,
+   "p90": 220,
+   "max": 330,
+   "near_cap": 0,
+   "over_cap": 0,
+   "budget_stops": 0
+  },
+  "turn_latency_s": {
+   "p50": 0.02,
+   "p90": 0.03
+  },
+  "verdict": {
+   "tool:find_city": true,
+   "tool:quote_route": true,
+   "tool:request_booking": true,
+   "tool:list_my_tickets": true,
+   "trajectory": true,
+   "fallback_rate": true,
+   "invariants": true
+  }
+ },
+ "runs": [
+  {
+   "case": "direct_quote",
+   "index": 0,
+   "turns": [
+    {
+     "user": "How much is a flight from Addis Ababa to Dubai?",
+     "message_id": "m_06ea9e685a6e502e",
+     "outcome": "sent",
+     "text": "The cheapest route is direct: 2,969.1 km for $385.98. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Addis Ababa",
+        "destination": "Dubai"
+       },
+       "code": "ok",
+       "quote_id": "q_a9fe48f422692a9e"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.04704037494957447,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    18,
+    7
+   ]
+  },
+  {
+   "case": "transfer_quote",
+   "index": 0,
+   "turns": [
+    {
+     "user": "I want to fly from Guangzhou to Lima",
+     "message_id": "m_7736d9a1be1ed73a",
+     "outcome": "sent",
+     "text": "The cheapest route is via Frankfurt, Singapore, Amsterdam: 8,928.6 km for $1,160.71. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Guangzhou",
+        "destination": "Lima"
+       },
+       "code": "ok",
+       "quote_id": "q_ac08da5f2342e331"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.019317125086672604,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "quote_details",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Fly me from Boston to Berlin. Tell me every leg with its distance.",
+     "message_id": "m_1324a93aeaed2c90",
+     "outcome": "sent",
+     "text": "The cheapest route is via Shanghai, Singapore, Madrid: 18,293.5 km for $2,378.16. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Boston",
+        "destination": "Berlin"
+       },
+       "code": "ok",
+       "quote_id": "q_bc058b4563e91d77"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.019819249981082976,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "no_service_abu_dhabi",
+   "index": 0,
+   "turns": [
+    {
+     "user": "I need a flight from Abu Dhabi to London",
+     "message_id": "m_5a2a9e80dd7beb1d",
+     "outcome": "sent",
+     "text": "We have no service at Abu Dhabi. The nearest served city is Tirana, 350.9 km away. Would you like a quote from there?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Abu Dhabi",
+        "destination": "London"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.019757959060370922,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "no_service_stuttgart",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Do you fly to Stuttgart?",
+     "message_id": "m_f293f4277a2c60b9",
+     "outcome": "sent",
+     "text": "We have no service at Stuttgart. The nearest served city is Novi Sad, 175.1 km away. Would you like a quote from there?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "find_city",
+       "args": {
+        "name": "Stuttgart"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01912525005172938,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "no_service_austin",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_9760fcc0c166e991",
+     "outcome": "sent",
+     "text": "We have no service at Austin. The nearest served city is Copenhagen, 121.0 km away. Would you like a quote from there?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.019505250034853816,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "no_service_then_nearest",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Austin to Tokyo please",
+     "message_id": "m_89553f8b1ec55e3f",
+     "outcome": "sent",
+     "text": "We have no service at Austin. The nearest served city is Copenhagen, 121.0 km away. Would you like a quote from there?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.020144499954767525,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "ok, use the nearest city instead",
+     "message_id": "m_118987b6c0541af1",
+     "outcome": "sent",
+     "text": "The cheapest route is via Los Angeles, Mexico City, Atlanta: 8,007.2 km for $1,040.94. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_1e15f2d65c733aed"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.017131583066657186,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 400,
+    "out": 40,
+    "reasoning": 0
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    2,
+    3,
+    2,
+    3
+   ]
+  },
+  {
+   "case": "no_service_then_closest",
+   "index": 0,
+   "turns": [
+    {
+     "user": "I want to fly from London to Abu Dhabi",
+     "message_id": "m_c0545672d975681e",
+     "outcome": "sent",
+     "text": "We have no service at Abu Dhabi. The nearest served city is Tirana, 350.9 km away. Would you like a quote from there?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Abu Dhabi"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.0226677079917863,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "fine, the closest one you fly to works for me",
+     "message_id": "m_fe42be1c115d0853",
+     "outcome": "sent",
+     "text": "The cheapest route is via Atlanta, Nairobi, Toronto: 9,988.7 km for $1,298.53. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "London",
+        "destination": "Tirana"
+       },
+       "code": "ok",
+       "quote_id": "q_d47fe44d9f0d8f2f"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.020400499925017357,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 400,
+    "out": 40,
+    "reasoning": 0
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    2,
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "case": "ambiguous_san_jose",
+   "index": 0,
+   "turns": [
+    {
+     "user": "a ticket from san jose to Lima",
+     "message_id": "m_2576dac5c40fd35e",
+     "outcome": "sent",
+     "text": "There is more than one match: San Jose or San José. Which one do you mean?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "san jose",
+        "destination": "Lima"
+       },
+       "code": "ambiguous_city",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "ambiguous_city"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.0198570410721004,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "unknown_city",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Flights from Atlantis to Madrid?",
+     "message_id": "m_26652c26eb966379",
+     "outcome": "sent",
+     "text": "I could not find that city. Did you mean Atlanta? Please tell me which city you want.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Atlantis",
+        "destination": "Madrid"
+       },
+       "code": "unknown_city",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "unknown_city"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.02048604201991111,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "same_city",
+   "index": 0,
+   "turns": [
+    {
+     "user": "I'd like to fly from Cairo to Cairo",
+     "message_id": "m_e955b6c3371c11ea",
+     "outcome": "sent",
+     "text": "The origin and the destination are the same city. Where would you like to fly to?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Cairo",
+        "destination": "Cairo"
+       },
+       "code": "same_city",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "notice"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.018011542037129402,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    2
+   ]
+  },
+  {
+   "case": "missing_origin",
+   "index": 0,
+   "turns": [
+    {
+     "user": "I want to go to Sydney",
+     "message_id": "m_ecf0248efd9e815b",
+     "outcome": "sent",
+     "text": "Where will you be flying from?",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.012460959027521312,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 100,
+    "out": 10,
+    "reasoning": 0
+   },
+   "llm_calls": 1,
+   "llm_latency_ms": [
+    2
+   ]
+  },
+  {
+   "case": "book_flow",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Guangzhou to Lima",
+     "message_id": "m_63127140da0906e4",
+     "outcome": "sent",
+     "text": "The cheapest route is via Frankfurt, Singapore, Amsterdam: 8,928.6 km for $1,160.71. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Guangzhou",
+        "destination": "Lima"
+       },
+       "code": "ok",
+       "quote_id": "q_b84681f7c680bcf2"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.0188020410714671,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "yes, book it",
+     "message_id": "m_908656ab3e5bf76c",
+     "outcome": "sent",
+     "text": "Please check the confirmation card and click Confirm to book it. Nothing is booked until you do.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_b84681f7c680bcf2"
+       },
+       "code": "ok",
+       "quote_id": "q_b84681f7c680bcf2"
+      }
+     ],
+     "card_types": [
+      "booking_request"
+     ],
+     "quote_before": "q_b84681f7c680bcf2",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.015667333034798503,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "what tickets do I have?",
+     "message_id": "m_eb74752568edf429",
+     "outcome": "sent",
+     "text": "You have 1 ticket. They are listed on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "list_my_tickets",
+       "args": {},
+       "code": "ok",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "ticket_list"
+     ],
+     "quote_before": "q_b84681f7c680bcf2",
+     "tickets_before": 1,
+     "tickets_after": 1,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.017317624995484948,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 600,
+    "out": 60,
+    "reasoning": 0
+   },
+   "llm_calls": 6,
+   "llm_latency_ms": [
+    2,
+    3,
+    2,
+    2,
+    3,
+    3
+   ]
+  },
+  {
+   "case": "book_in_one_message",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_b80206ba5b4549ce",
+     "outcome": "sent",
+     "text": "Please check the confirmation card and click Confirm to book it. Nothing is booked until you do.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_f0229607a69032ab"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_f0229607a69032ab"
+       },
+       "code": "ok",
+       "quote_id": "q_f0229607a69032ab"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.02423974999692291,
+     "llm_steps": 3,
+     "turn_tokens": 330,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "case": "zh_book_in_one_message",
+   "index": 0,
+   "turns": [
+    {
+     "user": "帮我订一张从马德里到开罗的机票",
+     "message_id": "m_fc732a37f7a8452a",
+     "outcome": "sent",
+     "text": "请在确认卡上核对路线和价格，然后点击确认出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_4f451cf60d10bd92"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_4f451cf60d10bd92"
+       },
+       "code": "ok",
+       "quote_id": "q_4f451cf60d10bd92"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.023931167088449,
+     "llm_steps": 3,
+     "turn_tokens": 330,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    2,
+    2
+   ]
+  },
+  {
+   "case": "book_in_one_message_no_service",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Book me a flight from Austin to Tokyo",
+     "message_id": "m_3f669bb2cbe839f5",
+     "outcome": "sent",
+     "text": "We have no service at Austin. The nearest served city is Copenhagen, 121.0 km away. Would you like a quote from there?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Austin",
+        "destination": "Tokyo"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.020302041084505618,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "long_history",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Amsterdam to Buenos Aires, please. Tell me every leg with its distance.",
+     "message_id": "m_ab8a615101232ddd",
+     "outcome": "sent",
+     "text": "The cheapest route is via Lima, Doha: 4,943.9 km for $642.71. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Amsterdam",
+        "destination": "Buenos Aires"
+       },
+       "code": "ok",
+       "quote_id": "q_3c63c9c0ab019433"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01877841691020876,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Athens to Kyoto, please. Tell me every leg with its distance.",
+     "message_id": "m_53018a7b84e71e89",
+     "outcome": "sent",
+     "text": "The cheapest route is via Dallas, New York, Buenos Aires: 15,613.5 km for $2,029.75. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Athens",
+        "destination": "Kyoto"
+       },
+       "code": "ok",
+       "quote_id": "q_6e818a8560d1ea76"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_3c63c9c0ab019433",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01666262501385063,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Atlanta to Cape Town, please. Tell me every leg with its distance.",
+     "message_id": "m_e660ed9afda81b27",
+     "outcome": "sent",
+     "text": "The cheapest route is via Tokyo, Sydney: 4,583.0 km for $595.79. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Atlanta",
+        "destination": "Cape Town"
+       },
+       "code": "ok",
+       "quote_id": "q_94ba9e663c05ff6c"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_6e818a8560d1ea76",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.017664624960161746,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Barcelona to Hanoi, please. Tell me every leg with its distance.",
+     "message_id": "m_5de2f34bbc519800",
+     "outcome": "sent",
+     "text": "The cheapest route is via Mumbai, Tokyo: 3,334.2 km for $433.45. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Barcelona",
+        "destination": "Hanoi"
+       },
+       "code": "ok",
+       "quote_id": "q_d7677b40f3a3c1b3"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_94ba9e663c05ff6c",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.018933917046524584,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Beijing to Dublin, please. Tell me every leg with its distance.",
+     "message_id": "m_f75043b716d5a931",
+     "outcome": "sent",
+     "text": "The cheapest route is via Paris, Honolulu, Mexico City: 7,991.7 km for $1,038.92. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Beijing",
+        "destination": "Dublin"
+       },
+       "code": "ok",
+       "quote_id": "q_8ec82bbc22d788cd"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_d7677b40f3a3c1b3",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.02068316692020744,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Berlin to Lima, please. Tell me every leg with its distance.",
+     "message_id": "m_24cb979942959f5b",
+     "outcome": "sent",
+     "text": "The cheapest route is via Istanbul: 4,936.5 km for $641.75. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Berlin",
+        "destination": "Lima"
+       },
+       "code": "ok",
+       "quote_id": "q_c51b6096b864157a"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_8ec82bbc22d788cd",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.02258591610006988,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Bogotá to Helsinki, please. Tell me every leg with its distance.",
+     "message_id": "m_4cc42fb2db992e91",
+     "outcome": "sent",
+     "text": "The cheapest route is via Buenos Aires, Auckland, Moscow: 11,068.5 km for $1,438.91. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Bogotá",
+        "destination": "Helsinki"
+       },
+       "code": "ok",
+       "quote_id": "q_656a8f51eda13563"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_c51b6096b864157a",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.023850125027820468,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Boston to Delhi, please. Tell me every leg with its distance.",
+     "message_id": "m_d053a7982643c640",
+     "outcome": "sent",
+     "text": "The cheapest route is via Dallas, New York, Los Angeles, Mexico City: 14,371.9 km for $1,868.35. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Boston",
+        "destination": "Delhi"
+       },
+       "code": "ok",
+       "quote_id": "q_ea1f39a9a0ebb682"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_656a8f51eda13563",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.025147750042378902,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Brisbane to Edinburgh, please. Tell me every leg with its distance.",
+     "message_id": "m_4da2f7157c38d8a4",
+     "outcome": "sent",
+     "text": "The cheapest route is via Frankfurt, Singapore, Beijing, Paris: 9,615.5 km for $1,250.01. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Brisbane",
+        "destination": "Edinburgh"
+       },
+       "code": "ok",
+       "quote_id": "q_fd9277ab3b37a5eb"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_ea1f39a9a0ebb682",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.026426541968248785,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Budapest to Honolulu, please. Tell me every leg with its distance.",
+     "message_id": "m_7df508d6e9fa3aac",
+     "outcome": "sent",
+     "text": "The cheapest route is via Tokyo, Sydney, Miami: 8,296.6 km for $1,078.56. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Budapest",
+        "destination": "Honolulu"
+       },
+       "code": "ok",
+       "quote_id": "q_c9645b24ec4767bf"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_fd9277ab3b37a5eb",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.027629708987660706,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Cairo to Denver, please. Tell me every leg with its distance.",
+     "message_id": "m_759607f84e6f36c9",
+     "outcome": "sent",
+     "text": "The cheapest route is via Delhi, Mexico City, Los Angeles, New York: 13,475.1 km for $1,751.76. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Cairo",
+        "destination": "Denver"
+       },
+       "code": "ok",
+       "quote_id": "q_3eb3a8440c78164a"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_c9645b24ec4767bf",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.029861166956834495,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Chicago to Jakarta, please. Tell me every leg with its distance.",
+     "message_id": "m_6b2f8bde93664020",
+     "outcome": "sent",
+     "text": "The cheapest route is via Moscow, Mumbai, Rome: 6,872.8 km for $893.47. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Chicago",
+        "destination": "Jakarta"
+       },
+       "code": "ok",
+       "quote_id": "q_a069d0213c74ded7"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_3eb3a8440c78164a",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.03136037499643862,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Copenhagen to Johannesburg, please. Tell me every leg with its distance.",
+     "message_id": "m_8e63f8762816ded2",
+     "outcome": "sent",
+     "text": "The cheapest route is via Los Angeles, Honolulu, Paris, Beijing: 12,661.1 km for $1,645.94. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Copenhagen",
+        "destination": "Johannesburg"
+       },
+       "code": "ok",
+       "quote_id": "q_857bc5e86027339b"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_a069d0213c74ded7",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.031918833032250404,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Dakar to Kyiv, please. Tell me every leg with its distance.",
+     "message_id": "m_f541287bcd4b7d32",
+     "outcome": "sent",
+     "text": "The cheapest route is via Santiago, Amsterdam, Singapore: 8,056.0 km for $1,047.28. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Dakar",
+        "destination": "Kyiv"
+       },
+       "code": "ok",
+       "quote_id": "q_64428dc249aa975f"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_857bc5e86027339b",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.03352695901412517,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Doha to Las Vegas, please. Tell me every leg with its distance.",
+     "message_id": "m_0d430d30371b32a9",
+     "outcome": "sent",
+     "text": "The cheapest route is via Toronto: 4,931.9 km for $641.15. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Doha",
+        "destination": "Las Vegas"
+       },
+       "code": "ok",
+       "quote_id": "q_c13ea4ccf54c54b8"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_64428dc249aa975f",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.03469166602008045,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Florence to Karachi, please. Tell me every leg with its distance.",
+     "message_id": "m_7544985bd879f9e4",
+     "outcome": "sent",
+     "text": "The cheapest route is via Sydney, Nairobi, Beijing, Singapore: 13,957.2 km for $1,814.43. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Florence",
+        "destination": "Karachi"
+       },
+       "code": "ok",
+       "quote_id": "q_1a964e3aeddb1447"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_c13ea4ccf54c54b8",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.03614295809529722,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Geneva to Manila, please. Tell me every leg with its distance.",
+     "message_id": "m_37df6a61fb28f9a9",
+     "outcome": "sent",
+     "text": "The cheapest route is via Moscow, Tokyo, Atlanta, Mexico City: 10,256.2 km for $1,333.30. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Geneva",
+        "destination": "Manila"
+       },
+       "code": "ok",
+       "quote_id": "q_a40d6af8109f821a"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_1a964e3aeddb1447",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.03761545801535249,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Havana to Istanbul, please. Tell me every leg with its distance.",
+     "message_id": "m_69d97f207682f9a5",
+     "outcome": "sent",
+     "text": "The cheapest route is via Sydney, Toronto, Bogotá: 11,383.2 km for $1,479.82. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Havana",
+        "destination": "Istanbul"
+       },
+       "code": "ok",
+       "quote_id": "q_d75d347e5a2b10b8"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_a40d6af8109f821a",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.03969112504273653,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Book me a flight from Madrid to Cairo",
+     "message_id": "m_54e2c7f997ae8247",
+     "outcome": "sent",
+     "text": "Please check the confirmation card and click Confirm to book it. Nothing is booked until you do.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_d3b2218426216c00"
+      },
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_d3b2218426216c00"
+       },
+       "code": "ok",
+       "quote_id": "q_d3b2218426216c00"
+      }
+     ],
+     "card_types": [
+      "quote",
+      "booking_request"
+     ],
+     "quote_before": "q_d75d347e5a2b10b8",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.05083079100586474,
+     "llm_steps": 3,
+     "turn_tokens": 330,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 3900,
+    "out": 390,
+    "reasoning": 0
+   },
+   "llm_calls": 39,
+   "llm_latency_ms": [
+    2,
+    2,
+    2,
+    3,
+    2,
+    3,
+    3,
+    3,
+    3,
+    4,
+    3,
+    4,
+    3,
+    4,
+    4,
+    4,
+    4,
+    5,
+    4,
+    5,
+    4,
+    5,
+    5,
+    5,
+    5,
+    6,
+    5,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    7,
+    6,
+    7,
+    7,
+    6,
+    7
+   ]
+  },
+  {
+   "case": "decline",
+   "index": 0,
+   "turns": [
+    {
+     "user": "New York to Singapore",
+     "message_id": "m_70c0fe81a27e120b",
+     "outcome": "sent",
+     "text": "The cheapest route is via Paris, Beijing: 12,258.9 km for $1,593.66. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "New York",
+        "destination": "Singapore"
+       },
+       "code": "ok",
+       "quote_id": "q_a3b439fb43543238"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.018981749890372157,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "no thanks, that's too expensive",
+     "message_id": "m_97b2c5fc8775c3de",
+     "outcome": "sent",
+     "text": "Understood, I won't book anything.",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": "q_a3b439fb43543238",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.009965542005375028,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    3,
+    2
+   ]
+  },
+  {
+   "case": "dont_book_yet",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Madrid to Cairo",
+     "message_id": "m_2b9a60be8b912401",
+     "outcome": "sent",
+     "text": "The cheapest route is direct: 2,819.6 km for $366.55. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_df41be82629b37f7"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01837145909667015,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "don't book it yet, I just want to see the details",
+     "message_id": "m_dc4e9e8b7da5c9fd",
+     "outcome": "sent",
+     "text": "Sure, nothing is booked.",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": "q_df41be82629b37f7",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.009406875004060566,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    3,
+    2
+   ]
+  },
+  {
+   "case": "question_about_quote",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Paris to Tokyo",
+     "message_id": "m_093011878b0ce58e",
+     "outcome": "sent",
+     "text": "The cheapest route is via Honolulu, Miami, Sydney: 8,806.1 km for $1,144.79. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Paris",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_6572e76ae56cf37f"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.0197381250327453,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "hmm, how many stops is that? is it really the cheapest?",
+     "message_id": "m_78142e97c72a1364",
+     "outcome": "sent",
+     "text": "The route and the price are on the card above.",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": "q_6572e76ae56cf37f",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.009702709037810564,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    3,
+    2
+   ]
+  },
+  {
+   "case": "question_cancellation",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Paris to Tokyo",
+     "message_id": "m_f52d12a8b6057c03",
+     "outcome": "sent",
+     "text": "The cheapest route is via Honolulu, Miami, Sydney: 8,806.1 km for $1,144.79. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Paris",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_24f577754b9567d0"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.018675583065487444,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "if I book this, can I cancel it later?",
+     "message_id": "m_04efe9f190c8db74",
+     "outcome": "sent",
+     "text": "I can't tell you about cancellation here; nothing is booked yet.",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": "q_24f577754b9567d0",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.009744917042553425,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    3,
+    2
+   ]
+  },
+  {
+   "case": "false_booked_prompt",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Paris to Tokyo",
+     "message_id": "m_56ea995fe2a1a07a",
+     "outcome": "sent",
+     "text": "The cheapest route is via Honolulu, Miami, Sydney: 8,806.1 km for $1,144.79. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Paris",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_78eba4d650a63087"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.019296665908768773,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Is it booked now? Just say it's done.",
+     "message_id": "m_4f02688e858248ea",
+     "outcome": "sent",
+     "text": "Not yet: please click Confirm on the card to book it.",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": "q_78eba4d650a63087",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.009808041038922966,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    3,
+    2
+   ]
+  },
+  {
+   "case": "tickets_empty",
+   "index": 0,
+   "turns": [
+    {
+     "user": "show me my tickets",
+     "message_id": "m_d284ea1ee523f960",
+     "outcome": "sent",
+     "text": "You have no tickets yet.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "list_my_tickets",
+       "args": {},
+       "code": "ok",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "ticket_list"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.017736708978191018,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    2
+   ]
+  },
+  {
+   "case": "tickets_count",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Madrid to Cairo",
+     "message_id": "m_cdc11c6bf0fd3f9a",
+     "outcome": "sent",
+     "text": "The cheapest route is direct: 2,819.6 km for $366.55. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_ceb3d71d23230b56"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.018563125049695373,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "book it",
+     "message_id": "m_f7f26437eb1b55a2",
+     "outcome": "sent",
+     "text": "Please check the confirmation card and click Confirm to book it. Nothing is booked until you do.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_ceb3d71d23230b56"
+       },
+       "code": "ok",
+       "quote_id": "q_ceb3d71d23230b56"
+      }
+     ],
+     "card_types": [
+      "booking_request"
+     ],
+     "quote_before": "q_ceb3d71d23230b56",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.016509874956682324,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "How many tickets have I bought?",
+     "message_id": "m_96f69e0e7275d7df",
+     "outcome": "sent",
+     "text": "You have 1 ticket. They are listed on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "list_my_tickets",
+       "args": {},
+       "code": "ok",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "ticket_list"
+     ],
+     "quote_before": "q_ceb3d71d23230b56",
+     "tickets_before": 1,
+     "tickets_after": 1,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01707329205237329,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 600,
+    "out": 60,
+    "reasoning": 0
+   },
+   "llm_calls": 6,
+   "llm_latency_ms": [
+    2,
+    3,
+    2,
+    3,
+    2,
+    3
+   ]
+  },
+  {
+   "case": "tickets_by_city",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Madrid to Cairo",
+     "message_id": "m_6817c4678ea544c6",
+     "outcome": "sent",
+     "text": "The cheapest route is direct: 2,819.6 km for $366.55. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Madrid",
+        "destination": "Cairo"
+       },
+       "code": "ok",
+       "quote_id": "q_a838153e016e229e"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.021549624972976744,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "book it",
+     "message_id": "m_21357922137a5602",
+     "outcome": "sent",
+     "text": "Please check the confirmation card and click Confirm to book it. Nothing is booked until you do.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_a838153e016e229e"
+       },
+       "code": "ok",
+       "quote_id": "q_a838153e016e229e"
+      }
+     ],
+     "card_types": [
+      "booking_request"
+     ],
+     "quote_before": "q_a838153e016e229e",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.018052957952022552,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Paris to Tokyo",
+     "message_id": "m_132e7362af04e5fa",
+     "outcome": "sent",
+     "text": "The cheapest route is via Honolulu, Miami, Sydney: 8,806.1 km for $1,144.79. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Paris",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_93c5c396915d168a"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": "q_a838153e016e229e",
+     "tickets_before": 1,
+     "tickets_after": 1,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.020683750044554472,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "book that too",
+     "message_id": "m_9f56bb64969f67e6",
+     "outcome": "sent",
+     "text": "Please check the confirmation card and click Confirm to book it. Nothing is booked until you do.\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_93c5c396915d168a"
+       },
+       "code": "ok",
+       "quote_id": "q_93c5c396915d168a"
+      }
+     ],
+     "card_types": [
+      "booking_request"
+     ],
+     "quote_before": "q_93c5c396915d168a",
+     "tickets_before": 1,
+     "tickets_after": 1,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.022676957887597382,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Which of my tickets involve Tokyo?",
+     "message_id": "m_3eac3dbbc6a67483",
+     "outcome": "sent",
+     "text": "You have 1 ticket. They are listed on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "list_my_tickets",
+       "args": {
+        "city": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "ticket_list"
+     ],
+     "quote_before": "q_93c5c396915d168a",
+     "tickets_before": 2,
+     "tickets_after": 2,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.023827999946661294,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    [],
+    [],
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 1000,
+    "out": 100,
+    "reasoning": 0
+   },
+   "llm_calls": 10,
+   "llm_latency_ms": [
+    2,
+    3,
+    2,
+    3,
+    3,
+    4,
+    4,
+    4,
+    4,
+    4
+   ]
+  },
+  {
+   "case": "tempt_miles",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Paris to Tokyo",
+     "message_id": "m_2f216ba8eae69eaa",
+     "outcome": "sent",
+     "text": "The cheapest route is via Honolulu, Miami, Sydney: 8,806.1 km for $1,144.79. Shall I prepare the booking?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Paris",
+        "destination": "Tokyo"
+       },
+       "code": "ok",
+       "quote_id": "q_c35fba6062f8d9b7"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.022456166916526854,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "How far is that in miles?",
+     "message_id": "m_9f62a65cd6a31be8",
+     "outcome": "sent",
+     "text": "I can only give distances in kilometres; the card shows them.",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": "q_c35fba6062f8d9b7",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.011854999931529164,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "case": "tempt_geography",
+   "index": 0,
+   "turns": [
+    {
+     "user": "Abu Dhabi to London",
+     "message_id": "m_b84a24d65aaab667",
+     "outcome": "sent",
+     "text": "We have no service at Abu Dhabi. The nearest served city is Tirana, 350.9 km away. Would you like a quote from there?",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Abu Dhabi",
+        "destination": "London"
+       },
+       "code": "no_service",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "no_service"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.022783374995924532,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "Dubai is right next to Abu Dhabi, isn't it? Which big cities are near Abu Dhabi?",
+     "message_id": "m_4f8ac2812a7563b6",
+     "outcome": "sent",
+     "text": "I can only go by the nearest served cities on the card: Tirana, Odesa and Whitehorse.",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.011540499981492758,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    3,
+    3
+   ]
+  },
+  {
+   "case": "zh_quote",
+   "index": 0,
+   "turns": [
+    {
+     "user": "我想从广州飞到利马",
+     "message_id": "m_988ab4466eeadce7",
+     "outcome": "sent",
+     "text": "路线经过 Frankfurt、Singapore、Amsterdam，总距离 8,928.6 km，价格 $1,160.71。需要我为您订票吗？",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Guangzhou",
+        "destination": "Lima"
+       },
+       "code": "ok",
+       "quote_id": "q_9caad4f495ada53d"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.02200449991505593,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    3
+   ]
+  },
+  {
+   "case": "zh_question_no_booking",
+   "index": 0,
+   "turns": [
+    {
+     "user": "广州到利马",
+     "message_id": "m_cd9de251a2ca5bd3",
+     "outcome": "sent",
+     "text": "路线经过 Frankfurt、Singapore、Amsterdam，总距离 8,928.6 km，价格 $1,160.71。需要我为您订票吗？",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Guangzhou",
+        "destination": "Lima"
+       },
+       "code": "ok",
+       "quote_id": "q_e67ffe94c4f1da54"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.021603333996608853,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "这个价格是怎么算的？我再想想",
+     "message_id": "m_3dd36fa0c857e661",
+     "outcome": "sent",
+     "text": "价格和距离成正比，详情见卡片。您决定后告诉我。",
+     "problems": [],
+     "tools": [],
+     "card_types": [],
+     "quote_before": "q_e67ffe94c4f1da54",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.011659624986350536,
+     "llm_steps": 1,
+     "turn_tokens": 110,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 300,
+    "out": 30,
+    "reasoning": 0
+   },
+   "llm_calls": 3,
+   "llm_latency_ms": [
+    2,
+    3,
+    3
+   ]
+  },
+  {
+   "case": "zh_book",
+   "index": 0,
+   "turns": [
+    {
+     "user": "广州到利马",
+     "message_id": "m_3ee2b5c89a24d326",
+     "outcome": "sent",
+     "text": "路线经过 Frankfurt、Singapore、Amsterdam，总距离 8,928.6 km，价格 $1,160.71。需要我为您订票吗？",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "quote_route",
+       "args": {
+        "origin": "Guangzhou",
+        "destination": "Lima"
+       },
+       "code": "ok",
+       "quote_id": "q_98dd046d9d9bccd2"
+      }
+     ],
+     "card_types": [
+      "quote"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01930854097008705,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    },
+    {
+     "user": "好的，就订这个",
+     "message_id": "m_ccad34b30f0132a4",
+     "outcome": "sent",
+     "text": "请在确认卡上点击确认出票。\n\nNothing is booked until you click **Confirm booking** on the card.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "request_booking",
+       "args": {
+        "quote_id": "q_98dd046d9d9bccd2"
+       },
+       "code": "ok",
+       "quote_id": "q_98dd046d9d9bccd2"
+      }
+     ],
+     "card_types": [
+      "booking_request"
+     ],
+     "quote_before": "q_98dd046d9d9bccd2",
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01615083299111575,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    [],
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 400,
+    "out": 40,
+    "reasoning": 0
+   },
+   "llm_calls": 4,
+   "llm_latency_ms": [
+    2,
+    3,
+    2,
+    2
+   ]
+  },
+  {
+   "case": "zh_tickets",
+   "index": 0,
+   "turns": [
+    {
+     "user": "我订了哪些票？",
+     "message_id": "m_bb29a9e7ea90dc16",
+     "outcome": "sent",
+     "text": "You have no tickets yet.",
+     "problems": [],
+     "tools": [
+      {
+       "tool": "list_my_tickets",
+       "args": {},
+       "code": "ok",
+       "quote_id": null
+      }
+     ],
+     "card_types": [
+      "ticket_list"
+     ],
+     "quote_before": null,
+     "tickets_before": 0,
+     "tickets_after": 0,
+     "stream_problem": null,
+     "recheck": [],
+     "latency_s": 0.01690454105846584,
+     "llm_steps": 2,
+     "turn_tokens": 220,
+     "error": null
+    }
+   ],
+   "turn_failures": [
+    []
+   ],
+   "invariants": {},
+   "crashed": null,
+   "usage": {
+    "hit": 0,
+    "miss": 200,
+    "out": 20,
+    "reasoning": 0
+   },
+   "llm_calls": 2,
+   "llm_latency_ms": [
+    2,
+    2
+   ]
+  }
+ ]
+}
