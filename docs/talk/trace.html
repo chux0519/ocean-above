@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Trace 回放</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400..500&family=Hanken+Grotesk:wght@400..700&family=DM+Mono:wght@400..500&family=Noto+Serif+SC:wght@400;600&display=swap">
+<style>
+/* === THEME: Cobalt Grid === */
+:root {
+  --paper: #F0EBDE; --ink: #1F2BE0; --ink-soft: #5560E5;
+  --grid: rgba(31, 43, 224, 0.10); --ink-faint: rgba(31, 43, 224, 0.18);
+  --display: "Newsreader", "Noto Serif SC", Georgia, serif;
+  --body: "Hanken Grotesk", "Noto Serif SC", sans-serif;
+  --mono: "DM Mono", ui-monospace, monospace;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: var(--paper); color: var(--ink); font-family: var(--body); }
+body { min-height: 100vh; padding: 28px 36px; background-image: linear-gradient(to right, var(--grid) 1px, transparent 1px), linear-gradient(to bottom, var(--grid) 1px, transparent 1px); background-size: 44px 44px; }
+
+/* === HEADER: case and turn pickers === */
+header { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; border-bottom: 1.5px solid var(--ink); padding-bottom: 14px; }
+h1 { font: 400 40px/1.1 var(--display); }
+.sub { font: 400 14px/1.6 var(--mono); margin-top: 6px; }
+.pick { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.pick button { font: 400 15px/1 var(--body); color: var(--ink); background: var(--paper); border: 1.5px solid var(--ink); padding: 9px 12px; cursor: pointer; }
+.pick button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.pick.turns button { font-family: var(--mono); font-size: 13px; }
+.replay { font: 400 13px/1 var(--mono); }
+
+/* === WATERFALL === */
+main { display: grid; grid-template-columns: 1fr 470px; gap: 28px; margin-top: 16px; }
+.axis { display: grid; grid-template-columns: 360px 1fr; font: 400 12px/1 var(--mono); padding-bottom: 6px; border-bottom: 1.5px solid var(--ink); }
+.axis .ticks { position: relative; height: 14px; }
+.axis .ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.axis .ticks span:last-child { transform: translateX(-100%); }
+.rows { max-height: 560px; overflow: auto; }
+.row { display: grid; grid-template-columns: 360px 1fr; align-items: center; min-height: 34px; border-bottom: 1px solid var(--ink-faint); cursor: pointer; opacity: 0; transition: opacity 0.3s var(--ease); }
+.row.in { opacity: 1; }
+.row:hover, .row.sel { background: rgba(31, 43, 224, 0.06); }
+.name { display: flex; align-items: center; gap: 8px; font: 400 15px/1.3 var(--mono); white-space: nowrap; overflow: hidden; }
+.kind { font: 600 10px/1 var(--body); letter-spacing: 0.12em; border: 1.5px solid var(--ink); padding: 3px 4px; min-width: 52px; text-align: center; }
+.kind.llm { background: var(--ink); color: var(--paper); }
+.track { position: relative; height: 34px; }
+.bar { position: absolute; top: 10px; height: 14px; background: var(--ink); transform-origin: left center; transform: scaleX(0); transition: transform var(--d, 0.5s) linear; }
+.bar.code { background: var(--paper); border: 1.5px solid var(--ink); }
+.bar.guard { background: repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 5px); border: 1.5px solid var(--ink); }
+.bar.tool { background: var(--ink-soft); }
+.row.in .bar { transform: scaleX(1); }
+.dur { position: absolute; top: 9px; font: 400 12px/1 var(--mono); white-space: nowrap; padding-left: 6px; }
+
+/* === ATTRIBUTES PANEL === */
+aside { border-left: 1.5px solid var(--ink); padding-left: 22px; }
+aside h2 { font: 400 28px/1.15 var(--display); word-break: break-word; }
+aside .d { font: 400 14px/1.6 var(--mono); margin: 6px 0 10px; }
+table { width: 100%; border-collapse: collapse; }
+td { font: 400 13px/1.45 var(--mono); padding: 6px 6px 6px 0; border-bottom: 1px solid var(--ink-faint); vertical-align: top; word-break: break-all; }
+td:first-child { width: 46%; opacity: 0.85; }
+.attrs { max-height: 470px; overflow: auto; }
+.note { font: 400 14px/1.6 var(--body); margin-top: 12px; }
+/* inside the deck the slide already carries the title */
+.embedded h1 { display: none; }
+@media (prefers-reduced-motion: reduce) { .bar, .row { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Trace 回放</h1>
+    <div class="sub" id="sub"></div>
+  </div>
+  <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+    <div class="pick" id="cases"></div>
+    <div class="pick turns" id="turns"></div>
+  </div>
+</header>
+<main>
+  <section>
+    <div class="axis"><span>span</span><div class="ticks" id="ticks"></div></div>
+    <div class="rows" id="rows"></div>
+  </section>
+  <aside id="attrs"></aside>
+</main>
+
+<script src="data/traces.js"></script>
+<script>
+if (window.parent !== window) document.body.classList.add('embedded');
+/* === DATA + HELPERS === */
+const T = window.TRACES, esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const kind = n => n.startsWith('chat ') ? ['llm', 'LLM'] : n.startsWith('execute_tool') ? ['tool', 'TOOL'] : n === 'reply_guard' ? ['guard', 'GUARD']
+  : /^(airline|core|booking)\./.test(n) ? ['code', 'CODE'] : n === 'run.stop' ? ['code', 'STOP'] : ['agent', 'AGENT'];
+const fmt = ms => ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : ms >= 1 ? ms.toFixed(1) + ' ms' : (ms * 1000).toFixed(0) + ' µs';
+document.getElementById('sub').textContent = `${T.captured} · ${T.model} · span 经过 app 的脱敏导出，不含 prompt 和回复原文`;
+let ci = 0, ti = 0, timers = [];
+
+/* === PICKERS === */
+function pickers() {
+  document.getElementById('cases').innerHTML = T.cases.map((c, i) => `<button aria-pressed="${i === ci}" data-c="${i}">${esc(c.label)}</button>`).join('');
+  document.getElementById('turns').innerHTML = T.cases[ci].turns.map((t, i) => {
+    const root = t.find(s => !s.parent) || t[0];
+    return `<button aria-pressed="${i === ti}" data-t="${i}">${i + 1} · ${esc(root.name)}</button>`;
+  }).join('') + `<button class="replay" data-r="1">↻ 重放</button>`;
+}
+document.getElementById('cases').onclick = e => { const b = e.target.closest('button'); if (b) { ci = +b.dataset.c; ti = 0; pickers(); draw(true); } };
+document.getElementById('turns').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.r) return draw(true); ti = +b.dataset.t; pickers(); draw(true); };
+
+/* === WATERFALL: rows in tree order, bars placed by real start time and duration === */
+function tree(spans) {
+  const kids = {}; spans.forEach(s => (kids[s.parent || 'root'] ||= []).push(s));
+  const ids = new Set(spans.map(s => s.id)), out = [];
+  const walk = (s, depth) => { out.push([s, depth]); (kids[s.id] || []).sort((a, b) => a.start_ms - b.start_ms).forEach(k => walk(k, depth + 1)); };
+  spans.filter(s => !s.parent || !ids.has(s.parent)).sort((a, b) => a.start_ms - b.start_ms).forEach(s => walk(s, 0));
+  return out;
+}
+function draw(animate) {
+  timers.forEach(clearTimeout); timers = [];
+  const spans = T.cases[ci].turns[ti], total = Math.max(...spans.map(s => s.start_ms + s.dur_ms)) || 1;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => `<span style="left:${p * 100}%">${fmt(total * p)}</span>`).join('');
+  document.getElementById('ticks').innerHTML = ticks;
+  const rows = tree(spans);
+  document.getElementById('rows').innerHTML = rows.map(([s, depth], i) => {
+    const [k, label] = kind(s.name), left = s.start_ms / total * 100, w = Math.max(0.25, s.dur_ms / total * 100);
+    return `<div class="row" data-i="${i}"><div class="name" style="padding-left:${depth * 18}px"><span class="kind ${k}">${label}</span>${esc(s.name)}</div>
+      <div class="track"><div class="bar ${k}" style="left:${left}%;width:${w}%"></div><span class="dur" style="${left + w > 86 ? `right:${100 - left}%;padding:0 6px 0 0` : `left:${left + w}%`}">${fmt(s.dur_ms)}</span></div></div>`;
+  }).join('');
+  const els = [...document.querySelectorAll('.row')];
+  const still = !animate || matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(location.search).has('static');
+  // replay: each span appears at its real start time, compressed so a whole turn takes about 3 s
+  const scale = 3000 / total;
+  rows.forEach(([s], i) => {
+    const el = els[i], bar = el.querySelector('.bar');
+    bar.style.setProperty('--d', still ? '0s' : `${Math.max(0.15, s.dur_ms * scale / 1000)}s`);
+    if (still) el.classList.add('in'); else timers.push(setTimeout(() => el.classList.add('in'), s.start_ms * scale + 80));
+  });
+  const first = rows.findIndex(([s]) => s.name.startsWith('core.') || s.name.startsWith('airline.book'));
+  select(rows, first >= 0 ? first : 0);
+  document.getElementById('rows').onclick = e => { const r = e.target.closest('.row'); if (r) select(rows, +r.dataset.i); };
+}
+function select(rows, i) {
+  document.querySelectorAll('.row.sel').forEach(x => x.classList.remove('sel'));
+  document.querySelector(`.row[data-i="${i}"]`)?.classList.add('sel');
+  const s = rows[i][0], a = s.attributes, keys = Object.keys(a).sort((x, y) => (y.startsWith('ocean.') - x.startsWith('ocean.')) || x.localeCompare(y));
+  const val = v => { const t = typeof v === 'string' ? v : JSON.stringify(v); return t.length > 220 ? t.slice(0, 220) + '…' : t; };
+  document.getElementById('attrs').innerHTML = `<h2>${esc(s.name)}</h2><div class="d">${fmt(s.dur_ms)} · 开始于 +${fmt(s.start_ms)} · ${esc(s.status)}${s.events.length ? ' · ' + esc(s.events.join(', ')) : ''}</div>
+    <div class="attrs"><table>${keys.map(k => `<tr><td>${esc(k)}</td><td>${esc(val(a[k]))}</td></tr>`).join('') || '<tr><td>无属性</td><td></td></tr>'}</table></div>
+    <p class="note">ocean.* 是我们自己加的业务属性（路由算法、路网指纹、ReplyGuard 结果）；gen_ai.* 来自 Pydantic AI，消息只记录类型。</p>`;
+}
+
+/* === START + DECK BRIDGE === */
+pickers();
+const inDeck = window.parent !== window && !new URLSearchParams(location.search).has('static');
+draw(!inDeck);
+if (inDeck) document.querySelectorAll('.row').forEach(r => r.classList.add('in'));
+addEventListener('message', e => { if (e.data === 'deck-visible') draw(true); });
+addEventListener('keydown', e => {
+  if (window.parent !== window && ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' ', 'Enter', 'Home', 'End', 'f', 'F'].includes(e.key)) {
+    e.preventDefault(); window.parent.postMessage({ deckKey: e.key }, '*');
+  }
+});
+</script>
+</body>
+</html>

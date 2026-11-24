@@ -65,6 +65,7 @@ services:
       - "127.0.0.1:${OCEAN_PORT:-3000}:80"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./docs/talk:/srv/talk:ro  # talk slides at /talk/ (see Caddyfile)
 
 volumes:
   phoenix:
