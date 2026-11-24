@@ -464,3 +464,55 @@ def test_ticket_lists_for_the_llm_are_capped_but_count_is_full():
     out = _payload("ok", {"count": len(tickets), "filter": {}, "tickets": tickets})
     assert out["count"] == MAX_TICKETS_FOR_LLM + 7 and len(out["tickets"]) == MAX_TICKETS_FOR_LLM
     assert out["tickets_shown"] == MAX_TICKETS_FOR_LLM
+
+
+# ------------------------------------------------------------------ dialects (#47) ------------
+def test_the_production_deepseek_request_body_is_pinned(tmp_path, monkeypatch):
+    """Production keeps the exact request of before #47: same model, same fields, DeepSeek's
+    thinking switch. A config from the environment without LLM_DIALECT is the deepseek dialect."""
+    for var in ("LLM_DIALECT", "LLM_BASE_URL", "LLM_MODEL", "LLM_REASONING_EFFORT"):
+        monkeypatch.delenv(var, raising=False)
+    config = LLMConfig.from_env({"LLM_API_KEY": KEY, "OCEAN_ENV_FILE": str(tmp_path / "none.env")})
+    assert (config.dialect, config.model, config.base_url, config.thinking_budget) == (
+        "deepseek", "deepseek-flash", "https://api.deepseek.com", None)
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(200, content=text_reply("ok")), config=config)
+    body = w.bodies[0]
+    assert str(w.requests[0].url) == "https://api.deepseek.com/chat/completions"
+    assert {k: v for k, v in body.items() if k not in ("messages", "tools")} == {
+        "model": "deepseek-flash", "stream": True, "max_tokens": 4096, "stream_options": {"include_usage": True},
+        "temperature": 0, "tool_choice": "auto", "thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+    assert sorted(body) == ["max_tokens", "messages", "model", "reasoning_effort", "stream", "stream_options",
+                            "temperature", "thinking", "tool_choice", "tools"]
+
+
+@pytest.mark.parametrize("effort, budget, fields", [
+    ("high", None, {"enable_thinking": True, "reasoning_effort": "high"}),
+    ("low", None, {"enable_thinking": True, "reasoning_effort": "low"}),
+    ("none", None, {"enable_thinking": False}),
+    ("max", 2048, {"enable_thinking": True, "thinking_budget": 2048}),  # never both: Qwen answers 400
+    ("none", 2048, {"enable_thinking": False}),
+    ("omit", None, {}),
+])
+def test_the_bailian_dialect_spells_thinking_its_own_way(tmp_path, effort, budget, fields):
+    config = LLMConfig(api_key=KEY, base_url="https://llm.example-host.test/v1", model="example-model",
+                       reasoning_effort=effort, dialect="bailian", thinking_budget=budget)
+    w = Wire(tmp_path, lambda r, n: httpx2.Response(200, content=text_reply("ok")), config=config)
+    body = w.bodies[0]
+    thinking = {k: body[k] for k in ("enable_thinking", "reasoning_effort", "thinking_budget", "thinking") if k in body}
+    assert thinking == fields  # no DeepSeek `thinking` object
+    assert body["max_tokens"] == 4096 and body["temperature"] == 0 and body["model"] == "example-model"
+
+
+def test_unsupported_dialect_settings_fail_before_any_request():
+    from app.agent.model import UnsupportedSetting, thinking_fields
+    with pytest.raises(UnsupportedSetting):
+        ChatModel(LLMConfig(api_key=KEY, dialect="plain"))  # plain + high: nothing to send
+    assert thinking_fields("plain", "omit") == {}
+    with pytest.raises(UnsupportedSetting):
+        thinking_fields("deepseek", "high", 1024)  # DeepSeek has no thinking budget
+    with pytest.raises(ValueError):
+        LLMConfig(api_key=KEY, dialect="martian")
+    with pytest.raises(ValueError):
+        LLMConfig(api_key=KEY, dialect="bailian", thinking_budget=0)
+    assert LLMConfig.from_env({"LLM_API_KEY": KEY, "LLM_DIALECT": "Bailian", "OCEAN_ENV_FILE": "/nonexistent"}
+                              ).dialect == "bailian"
