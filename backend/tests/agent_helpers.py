@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Any, Callable
 
-from app.agent import Agent, Completion, Event, TextDelta
+from app.agent import Agent, Completion, Event, ScriptedLLM, TextDelta
 
 from .airline_helpers import assert_card, assert_message
 
@@ -40,8 +40,9 @@ class Wait:
         self.gate, self.seconds = gate, seconds
 
 
-class FakeLLM:
-    """Plays one scripted step per LLM call. A step is a list of: str (a text chunk), Call,
+class FakeLLM(ScriptedLLM):
+    """Plays one scripted step per LLM call (served as an OpenAI-compatible stream to the real
+    Pydantic AI model, app/agent/scripted.py). A step is a list of: str (a text chunk), Call,
     Wait, or an Exception (raised at that point); or an Exception (the call fails at once); or a
     function `messages -> step` for steps that need a value from an earlier tool result. When
     the script is used up, every further call gets `default` (if given)."""
@@ -49,6 +50,7 @@ class FakeLLM:
     model = "fake-llm"
 
     def __init__(self, *steps: Any, default: Any = None):
+        super().__init__()
         self.steps = list(steps)
         self.default = default
         self.requests: list[list[dict]] = []  # the messages of every call (deep copies)

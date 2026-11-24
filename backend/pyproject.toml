@@ -9,6 +9,10 @@ dependencies = [
     "networkx>=3.3",
     "httpx>=0.27",
     "pyjwt[crypto]>=2.10",
+    # agent runtime (ADR-001). Not the `[openai]` extra: it only adds tiktoken (+ requests), which
+    # pydantic-ai imports for embeddings / realtime only; the chat model needs just `openai`.
+    "pydantic-ai-slim==2.71.0",
+    "openai>=3.31,<4",
 ]
 
 [dependency-groups]

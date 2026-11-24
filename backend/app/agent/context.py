@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .llm import wire_tool_call
+from .model import wire_tool_call
 from .tools import slim
 
 HISTORY_CHAR_BUDGET = 40_000  # roughly 10k tokens of history kept in full

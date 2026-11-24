@@ -14,7 +14,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel
 
-from ..agent import Agent, LLMConfig, LLMNotConfigured, OpenAIChatClient, encode_stream
+from ..agent import Agent, ChatModel, LLMConfig, LLMNotConfigured, encode_stream
 from ..agent.concurrency import executor_workers
 from ..agent.loop import MAX_USER_CHARS, TITLE_CHARS
 from ..agent.sse import HEADERS as SSE_HEADERS, MEDIA_TYPE as SSE_MEDIA_TYPE
@@ -320,8 +320,8 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
     app.state.airline = airline = Airline(store, networks, nonce_secret=settings.nonce_secret)
     if llm is None:
         try:
-            llm = OpenAIChatClient(LLMConfig.from_env(),
-                                   max_tokens=settings.agent_budget.max_output_tokens_per_call)
+            llm = ChatModel(LLMConfig.from_env(),
+                            max_tokens=settings.agent_budget.max_output_tokens_per_call)
         except LLMNotConfigured:
             llm = None
     app.state.llm = llm
