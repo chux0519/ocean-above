@@ -1,0 +1,563 @@
+{
+ "meta": {
+  "mode": "real",
+  "n": 3,
+  "date": "2026-11-24",
+  "commit": "a64c39f",
+  "spec": "12-bench",
+  "cases": [
+   "tool_failure_retry",
+   "zh_ambiguous_latin_name"
+  ],
+  "dataset_version": "f9c1f2092a11",
+  "prompt_version": "42baf72ee7c3",
+  "pricing_version": "2026-11-24",
+  "tracing": false
+ },
+ "spec": {
+  "name": "12-bench",
+  "version": 1,
+  "interleave": true
+ },
+ "configs": [
+  {
+   "id": "deepseek-official",
+   "provider": "deepseek",
+   "model": "deepseek-flash",
+   "api_key_env": "DEEPSEEK_API_KEY",
+   "base_url_env": null,
+   "dialect": "deepseek",
+   "reasoning_effort": "high",
+   "thinking_budget": null,
+   "temperature": 0,
+   "max_tokens": 4096,
+   "concurrency": 4,
+   "status": "ready",
+   "reason": "",
+   "skipped_runs": 0,
+   "pricing_basis": "list price, peak rate (off-peak is half); the rate the 03-10 eval reports used"
+  }
+ ],
+ "summaries": {
+  "deepseek-official": {
+   "mode": "real",
+   "n": 3,
+   "date": "2026-11-24",
+   "commit": "a64c39f",
+   "spec": "12-bench",
+   "cases": [
+    "tool_failure_retry",
+    "zh_ambiguous_latin_name"
+   ],
+   "dataset_version": "f9c1f2092a11",
+   "prompt_version": "42baf72ee7c3",
+   "pricing_version": "2026-11-24",
+   "tracing": false,
+   "config": "deepseek-official",
+   "provider": "deepseek",
+   "model": "deepseek-flash",
+   "effort": "high",
+   "dialect": "deepseek",
+   "skipped_runs": 0,
+   "pricing": "pricing 2026-11-24: list price, peak rate (off-peak is half); the rate the 03-10 eval reports used",
+   "runs": 6,
+   "trajectory_pass": 1.0,
+   "crashed": 0,
+   "turns": 6,
+   "errors": 0,
+   "fallback_rate": 0.0,
+   "fallback_kinds": {},
+   "spelled_number_replies": 0,
+   "invariant_violations": {
+    "stream": 0,
+    "no_agent_booking": 0,
+    "click_books_once": 0,
+    "no_false_booked": 0,
+    "provenance": 0
+   },
+   "tools": {
+    "find_city": {
+     "expected": 0,
+     "hit": 0,
+     "actual": 0,
+     "refused": 0,
+     "spurious": 0,
+     "success": null
+    },
+    "quote_route": {
+     "expected": 6,
+     "hit": 6,
+     "actual": 9,
+     "refused": 3,
+     "spurious": 0,
+     "success": 1.0
+    },
+    "request_booking": {
+     "expected": 0,
+     "hit": 0,
+     "actual": 0,
+     "refused": 0,
+     "spurious": 0,
+     "success": null
+    },
+    "list_my_tickets": {
+     "expected": 0,
+     "hit": 0,
+     "actual": 0,
+     "refused": 0,
+     "spurious": 0,
+     "success": null
+    }
+   },
+   "per_case": {
+    "tool_failure_retry": {
+     "group": "robustness",
+     "runs": 3,
+     "passed": 3,
+     "fallback": 0,
+     "turns": 3,
+     "tokens": 18525,
+     "cost": 0.0012298679999999998,
+     "max_turn_tokens": 6202
+    },
+    "zh_ambiguous_latin_name": {
+     "group": "chinese",
+     "runs": 3,
+     "passed": 3,
+     "fallback": 0,
+     "turns": 3,
+     "tokens": 12526,
+     "cost": 0.0011646119999999998,
+     "max_turn_tokens": 4197
+    }
+   },
+   "unrequested_request_booking": 0,
+   "passed_runs": 6,
+   "usage": {
+    "input": 29960,
+    "cached": 26880,
+    "output": 1091,
+    "reasoning": 323
+   },
+   "tokens": 31051,
+   "llm_calls": 15,
+   "retries": 0,
+   "retry_rate": 0.0,
+   "cost_usd": 0.00239448,
+   "tokens_per_run": 5175.166666666667,
+   "tokens_per_success": 5175.166666666667,
+   "usage_per_success": {
+    "input": 4993.333333333333,
+    "cached": 4480.0,
+    "output": 181.83333333333334,
+    "reasoning": 53.833333333333336
+   },
+   "cost_per_run": 0.00039908,
+   "cost_per_success": 0.00039908,
+   "llm_latency_ms": {
+    "p50": 1095,
+    "p90": 1459,
+    "p95": 1845,
+    "max": 1845
+   },
+   "turn_tokens": {
+    "cap": 60000,
+    "p50": 6142,
+    "p90": 6202,
+    "max": 6202,
+    "near_cap": 0,
+    "over_cap": 0,
+    "budget_stops": 0
+   },
+   "turn_latency_s": {
+    "p50": 3.09,
+    "p90": 3.54,
+    "p95": 3.54
+   },
+   "first_token_s": {
+    "p50": 2.93,
+    "p95": 3.52,
+    "turns": 6
+   },
+   "verdict": {
+    "tool:find_city": true,
+    "tool:quote_route": true,
+    "tool:request_booking": true,
+    "tool:list_my_tickets": true,
+    "trajectory": true,
+    "fallback_rate": true,
+    "invariants": true
+   }
+  }
+ },
+ "runs": {
+  "deepseek-official": [
+   {
+    "case": "tool_failure_retry",
+    "index": 0,
+    "turns": [
+     {
+      "user": "How much is a flight from Madrid to Cairo?",
+      "message_id": "m_29ab10c3fc93d5f6",
+      "outcome": "sent",
+      "text": "The cheapest flight from Madrid to Cairo is a direct one, shown on the card with its distance and price. Let me know if you'd like to book it.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Madrid",
+         "destination": "Cairo"
+        },
+        "code": "tool_failed",
+        "quote_id": null
+       },
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Madrid",
+         "destination": "Cairo"
+        },
+        "code": "ok",
+        "quote_id": "q_9c7aa5976fc0d905"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 3.536377582931891,
+      "first_token_s": 3.5247331249993294,
+      "llm_steps": 3,
+      "turn_tokens": 6202,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 6037,
+     "cached": 5376,
+     "output": 165,
+     "reasoning": 17
+    },
+    "llm_calls": 3,
+    "retries": 0,
+    "llm_latency_ms": [
+     1199,
+     752,
+     1095
+    ],
+    "config": "deepseek-official"
+   },
+   {
+    "case": "tool_failure_retry",
+    "index": 1,
+    "turns": [
+     {
+      "user": "How much is a flight from Madrid to Cairo?",
+      "message_id": "m_ce1f306caf311d51",
+      "outcome": "sent",
+      "text": "The cheapest route from Madrid to Cairo is on the card: a direct flight, $366.55. Tell me if you'd like to book it.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Madrid",
+         "destination": "Cairo"
+        },
+        "code": "tool_failed",
+        "quote_id": null
+       },
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Madrid",
+         "destination": "Cairo"
+        },
+        "code": "ok",
+        "quote_id": "q_cbf54b9967b40b11"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 3.0852680419338867,
+      "first_token_s": 3.0774318339535967,
+      "llm_steps": 3,
+      "turn_tokens": 6181,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 6024,
+     "cached": 5376,
+     "output": 157,
+     "reasoning": 11
+    },
+    "llm_calls": 3,
+    "retries": 0,
+    "llm_latency_ms": [
+     946,
+     1152,
+     789
+    ],
+    "config": "deepseek-official"
+   },
+   {
+    "case": "tool_failure_retry",
+    "index": 2,
+    "turns": [
+     {
+      "user": "How much is a flight from Madrid to Cairo?",
+      "message_id": "m_c74fd90066e7ae4a",
+      "outcome": "sent",
+      "text": "The card shows a direct flight from Madrid to Cairo for $366.55. Would you like to book it?",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Madrid",
+         "destination": "Cairo"
+        },
+        "code": "tool_failed",
+        "quote_id": null
+       },
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Madrid",
+         "destination": "Cairo"
+        },
+        "code": "ok",
+        "quote_id": "q_0d68cbe7ef39cd6b"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.4771406670333818,
+      "first_token_s": 2.4380178339779377,
+      "llm_steps": 3,
+      "turn_tokens": 6142,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 6004,
+     "cached": 5376,
+     "output": 138,
+     "reasoning": 0
+    },
+    "llm_calls": 3,
+    "retries": 0,
+    "llm_latency_ms": [
+     916,
+     630,
+     880
+    ],
+    "config": "deepseek-official"
+   },
+   {
+    "case": "zh_ambiguous_latin_name",
+    "index": 0,
+    "turns": [
+     {
+      "user": "从 san jose 飞到利马多少钱？",
+      "message_id": "m_ef8a5d0159bb00d6",
+      "outcome": "sent",
+      "text": "从 san jose 出发有两个同名城市可选，请告诉我您要的是哪一个：\n\n- **San Jose**（经 Tokyo 连接）\n- **San José**（经 Sydney、Tokyo 连接）\n\n选定后我再为您查询到 Lima 的票价。",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "san jose",
+         "destination": "Lima"
+        },
+        "code": "ambiguous_city",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "ambiguous_city"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 3.0409558749524876,
+      "first_token_s": 2.9036865410162136,
+      "llm_steps": 2,
+      "turn_tokens": 4146,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 3950,
+     "cached": 3584,
+     "output": 196,
+     "reasoning": 84
+    },
+    "llm_calls": 2,
+    "retries": 0,
+    "llm_latency_ms": [
+     1459,
+     1258
+    ],
+    "config": "deepseek-official"
+   },
+   {
+    "case": "zh_ambiguous_latin_name",
+    "index": 1,
+    "turns": [
+     {
+      "user": "从 san jose 飞到利马多少钱？",
+      "message_id": "m_f59af1402af6b5c8",
+      "outcome": "sent",
+      "text": "“san jose”有歧义，需要先确定出发城市：\n\n- **San Jose**（可经 Tokyo 中转）\n- **San José**（可经 Sydney、Tokyo 中转）\n\n您要的是哪一个？",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "san jose",
+         "destination": "Lima"
+        },
+        "code": "ambiguous_city",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "ambiguous_city"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 3.101436375058256,
+      "first_token_s": 2.9348906670929864,
+      "llm_steps": 2,
+      "turn_tokens": 4183,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 3966,
+     "cached": 3584,
+     "output": 217,
+     "reasoning": 112
+    },
+    "llm_calls": 2,
+    "retries": 0,
+    "llm_latency_ms": [
+     1845,
+     1209
+    ],
+    "config": "deepseek-official"
+   },
+   {
+    "case": "zh_ambiguous_latin_name",
+    "index": 2,
+    "turns": [
+     {
+      "user": "从 san jose 飞到利马多少钱？",
+      "message_id": "m_fd1ed59600efcc5e",
+      "outcome": "sent",
+      "text": "您说的“san jose”可能指以下两个城市之一，请确认是哪一个：\n\n- San Jose（可经 Tokyo 中转）\n- San José（可经 Sydney、Tokyo 中转）\n\n您想选哪一个？确定后，我再为您查从该城市到 Lima 的价格。",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "san jose",
+         "destination": "Lima"
+        },
+        "code": "ambiguous_city",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "ambiguous_city"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.3848289999878034,
+      "first_token_s": 2.203649083035998,
+      "llm_steps": 2,
+      "turn_tokens": 4197,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 3979,
+     "cached": 3584,
+     "output": 218,
+     "reasoning": 99
+    },
+    "llm_calls": 2,
+    "retries": 0,
+    "llm_latency_ms": [
+     1323,
+     1031
+    ],
+    "config": "deepseek-official"
+   }
+  ]
+ }
+}

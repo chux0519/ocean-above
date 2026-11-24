@@ -66,6 +66,9 @@ STATUS_TEXT = {
     "list_my_tickets": "Looking up your tickets…",
 }
 DEFAULT_STATUS = "Working on it…"
+# #59: read by the model right where it decides; the prompt says the same.
+TOOL_FAILED_MESSAGE = ("the tool could not run; flight data may be unavailable. Call it once more with the "
+                       "same arguments without asking the user; if it fails again, tell the user to try later")
 _SPECS = {t["function"]["name"]: t["function"]["parameters"] for t in TOOL_SCHEMAS}
 
 
@@ -192,7 +195,7 @@ class Toolbox:
         try:
             result = self._run[name](user_id, conversation_id, clean)
         except Exception as exc:  # NetworkDataError (locations.db unreadable), NotFound, bugs
-            failed = refused("tool_failed", "the tool could not run; flight data may be unavailable", clean)
+            failed = refused("tool_failed", TOOL_FAILED_MESSAGE, clean)
             return replace(failed, error=f"{type(exc).__name__}: {exc}"[:500])
         return Outcome(name, clean, result.code, _payload(result.code, result.data),
                        tuple(result.cards), latency_ms=int((time.monotonic() - started) * 1000))

@@ -145,7 +145,7 @@ class Airline:
         if isinstance(route, RouteError):
             with self.store.read() as con:
                 self._require_conversation(con, user_id, conversation_id)
-            return _route_error(net, route)
+            return _route_error(net, route, {"origin": origin, "destination": destination})
 
         legs = [
             {
@@ -631,7 +631,7 @@ def _quote_data(quote: dict, status: str) -> dict:
     }
 
 
-def _route_error(net: Network, err: RouteError) -> Result:
+def _route_error(net: Network, err: RouteError, queries: dict[str, str]) -> Result:
     if err.code == "same_city":
         return Result("same_city", {"cities": list(err.cities)}, (cards.notice_card("same_city"),))
     if err.code == "unreachable":
@@ -652,4 +652,23 @@ def _route_error(net: Network, err: RouteError) -> Result:
             item["nearest"] = cards.nearest(issue.nearest_served)
             out.append(cards.no_service_card(issue.city, item["nearest"]))
         issues.append(item)
-    return Result(err.code, {"issues": issues}, tuple(out))
+    data: dict[str, Any] = {"issues": issues}
+    if err.code in ("unknown_city", "ambiguous_city"):
+        resolved = _resolved_endpoints(net, err, queries)
+        if resolved:
+            data["resolved"] = resolved
+    return Result(err.code, data, tuple(out))
+
+
+def _resolved_endpoints(net: Network, err: RouteError, queries: dict[str, str]) -> list[dict]:
+    """The endpoint(s) of an unknown/ambiguous quote that did resolve, by canonical name (#59): a
+    reply may then name that city ("flights to Lima") with a record as its source, even when the
+    user wrote it in another script. A record only - no quote, no card change."""
+    out = []
+    for role in ("origin", "destination"):
+        if any(issue.role == role for issue in err.issues):
+            continue
+        res = places.resolve(net, queries[role])
+        if res.status == "ok" and res.city is not None:
+            out.append({"role": role, "city": res.city})
+    return out
