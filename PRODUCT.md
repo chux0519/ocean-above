@@ -51,7 +51,7 @@ structured cards, not in chat prose.
 
 ## Brand Commitments
 - Name: **Ocean Above** (fictional airline from the take-home). No logo or brand assets exist.
-- Character (DESIGN.md §1): calm, trustworthy, precise; no decorative gradients or illustrations; prices and distances
+- Character (frontend/DESIGN.md §1): calm, trustworthy, precise; no decorative gradients or illustrations; prices and distances
   always also appear in a structured card; colour never means two things.
 
 ## Evidence on Hand
