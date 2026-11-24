@@ -78,8 +78,10 @@ Mutation check (manual, reverted): `present=True` in `_finish_stopped` → 6 fai
 ## Verification (source state `it09-stop` at the commit of this file)
 - Backend: `bash tool/test_diff.sh` → no new failures (backend 830 + new tests; frontend 98 vitest); `python3 tool/review_lint.py` ok.
 - `cd backend && uv run python -m evals --mode fake` → 31/31.
-- Real-model evals N=1: **not run** — the runner's upper-bound estimate is $0.20 (> the $0.05 cap) and starting it
-  needs `--max-cost 0.2`, which was refused. 08 measured $0.0229 for the same 31 cases. Needs the coordinator's call.
+- Real-model evals N=1 (run by the coordinator on `8f0990d`, `--max-cost 0.25` accepted by the user; the runner's
+  upper-bound estimate was $0.20): `deepseek-flash`, effort high, 31 cases / 68 turns — **31/31**, trajectory 100%,
+  safety invariant violations **0**, ReplyGuard fallback 1.5% (1 reply, ≤ 5%), every tool 100%; cost **$0.0219**
+  (08: $0.0229). Report: `docs/iterations/09-stop/evals/real-n1/report.md` (+ `results.json`).
 - Real backend + Next proxy (dev, `docs/iterations/09-stop/slow_server.py`, scripted slow model): `X-Run-Id` arrives
   through the Next rewrite; Stop after the SSE reader disconnected still cancels and stores `cancelled`.
 - Screens reviewed: Stop is a filled square in the round primary button (44×44 measured); stopped reply shows the
@@ -90,8 +92,8 @@ Mutation check (manual, reverted): `present=True` in `_finish_stopped` → 6 fai
   did not finish (the chat page needs a session); not rerun.
 
 ## Open / for the coordinator
-1. Real-model evals N=1: run with `--max-cost` above $0.05 (estimate is an upper bound) or decide otherwise.
-2. Fable race review (R in the plan).
+1. ~~Real-model evals N=1~~ done by the coordinator (above).
+2. Fable race review (R in the plan) — in progress; no code changes until it is in.
 3. DESIGN.md (coordinator-owned) — draft for §composer / components:
    > composer: while a reply runs, Send becomes **Stop** (same round primary button, filled 14 px square, label
    > "Stop"; "Stopping" and disabled after the click). A stopped reply ends with a quiet `ink-2` marker "■ Stopped"
