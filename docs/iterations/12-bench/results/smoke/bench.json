@@ -1,0 +1,1391 @@
+{
+ "meta": {
+  "mode": "real",
+  "n": 1,
+  "date": "2026-11-24",
+  "commit": "0569a6f",
+  "spec": "12-bench",
+  "cases": [
+   "book_flow",
+   "no_service_then_nearest",
+   "zh_quote"
+  ],
+  "dataset_version": "f9c1f2092a11",
+  "prompt_version": "9f2f7dc8ab79",
+  "pricing_version": "2026-11-24",
+  "tracing": false
+ },
+ "spec": {
+  "name": "12-bench",
+  "version": 1,
+  "interleave": true
+ },
+ "configs": [
+  {
+   "id": "deepseek-official",
+   "provider": "deepseek",
+   "model": "deepseek-flash",
+   "api_key_env": "DEEPSEEK_API_KEY",
+   "base_url_env": null,
+   "dialect": "deepseek",
+   "reasoning_effort": "high",
+   "thinking_budget": null,
+   "temperature": 0,
+   "max_tokens": 4096,
+   "concurrency": 4,
+   "status": "ready",
+   "reason": "",
+   "skipped_runs": 0,
+   "pricing_basis": "list price, peak rate (off-peak is half); the rate the 03-10 eval reports used"
+  },
+  {
+   "id": "deepseek-bailian",
+   "provider": "bailian",
+   "model": "deepseek-v4.1-flash-1017",
+   "api_key_env": "BAILIAN_API_KEY",
+   "base_url_env": "BAILIAN_OPENAI_API_BASE",
+   "dialect": "bailian",
+   "reasoning_effort": "high",
+   "thinking_budget": null,
+   "temperature": 0,
+   "max_tokens": 4096,
+   "concurrency": 4,
+   "status": "ready",
+   "reason": "",
+   "skipped_runs": 0,
+   "pricing_basis": "owner's Bailian token plan: plan pricing may differ from the list price, which is not applied"
+  },
+  {
+   "id": "qwen-bailian",
+   "provider": "bailian",
+   "model": "qwen3.8-flash",
+   "api_key_env": "BAILIAN_API_KEY",
+   "base_url_env": "BAILIAN_OPENAI_API_BASE",
+   "dialect": "bailian",
+   "reasoning_effort": "high",
+   "thinking_budget": null,
+   "temperature": 0,
+   "max_tokens": 4096,
+   "concurrency": 4,
+   "status": "ready",
+   "reason": "",
+   "skipped_runs": 0,
+   "pricing_basis": "owner's Bailian token plan: plan pricing may differ from the list price, which is not applied"
+  }
+ ],
+ "summaries": {
+  "deepseek-official": {
+   "mode": "real",
+   "n": 1,
+   "date": "2026-11-24",
+   "commit": "0569a6f",
+   "spec": "12-bench",
+   "cases": [
+    "book_flow",
+    "no_service_then_nearest",
+    "zh_quote"
+   ],
+   "dataset_version": "f9c1f2092a11",
+   "prompt_version": "9f2f7dc8ab79",
+   "pricing_version": "2026-11-24",
+   "tracing": false,
+   "config": "deepseek-official",
+   "provider": "deepseek",
+   "model": "deepseek-flash",
+   "effort": "high",
+   "dialect": "deepseek",
+   "skipped_runs": 0,
+   "pricing": "pricing 2026-11-24: list price, peak rate (off-peak is half); the rate the 03-10 eval reports used",
+   "runs": 3,
+   "trajectory_pass": 1.0,
+   "crashed": 0,
+   "turns": 6,
+   "errors": 0,
+   "fallback_rate": 0.0,
+   "fallback_kinds": {},
+   "spelled_number_replies": 0,
+   "invariant_violations": {
+    "stream": 0,
+    "no_agent_booking": 0,
+    "click_books_once": 0,
+    "no_false_booked": 0,
+    "provenance": 0
+   },
+   "tools": {
+    "find_city": {
+     "expected": 0,
+     "hit": 0,
+     "actual": 0,
+     "refused": 0,
+     "spurious": 0,
+     "success": null
+    },
+    "quote_route": {
+     "expected": 4,
+     "hit": 4,
+     "actual": 4,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    },
+    "request_booking": {
+     "expected": 1,
+     "hit": 1,
+     "actual": 1,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    },
+    "list_my_tickets": {
+     "expected": 1,
+     "hit": 1,
+     "actual": 1,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    }
+   },
+   "per_case": {
+    "book_flow": {
+     "group": "booking",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 3,
+     "tokens": 14147,
+     "cost": 0.000862728,
+     "max_turn_tokens": 5594
+    },
+    "no_service_then_nearest": {
+     "group": "no_service",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 2,
+     "tokens": 8414,
+     "cost": 0.000575544,
+     "max_turn_tokens": 4500
+    },
+    "zh_quote": {
+     "group": "chinese",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 1,
+     "tokens": 4091,
+     "cost": 0.000366036,
+     "max_turn_tokens": 4091
+    }
+   },
+   "unrequested_request_booking": 0,
+   "passed_runs": 3,
+   "usage": {
+    "input": 25963,
+    "cached": 23168,
+    "output": 689,
+    "reasoning": 152
+   },
+   "tokens": 26652,
+   "llm_calls": 12,
+   "retries": 0,
+   "retry_rate": 0.0,
+   "cost_usd": 0.001804308,
+   "tokens_per_run": 8884.0,
+   "tokens_per_success": 8884.0,
+   "usage_per_success": {
+    "input": 8654.333333333334,
+    "cached": 7722.666666666667,
+    "output": 229.66666666666666,
+    "reasoning": 50.666666666666664
+   },
+   "cost_per_run": 0.000601436,
+   "cost_per_success": 0.000601436,
+   "llm_latency_ms": {
+    "p50": 896,
+    "p90": 1213,
+    "p95": 1267,
+    "max": 1267
+   },
+   "turn_tokens": {
+    "cap": 60000,
+    "p50": 4500,
+    "p90": 5594,
+    "max": 5594,
+    "near_cap": 0,
+    "over_cap": 0,
+    "budget_stops": 0
+   },
+   "turn_latency_s": {
+    "p50": 2.49,
+    "p90": 2.84,
+    "p95": 2.84
+   },
+   "first_token_s": {
+    "p50": 2.35,
+    "p95": 2.78,
+    "turns": 6
+   },
+   "verdict": {
+    "tool:find_city": true,
+    "tool:quote_route": true,
+    "tool:request_booking": true,
+    "tool:list_my_tickets": true,
+    "trajectory": true,
+    "fallback_rate": true,
+    "invariants": true
+   }
+  },
+  "deepseek-bailian": {
+   "mode": "real",
+   "n": 1,
+   "date": "2026-11-24",
+   "commit": "0569a6f",
+   "spec": "12-bench",
+   "cases": [
+    "book_flow",
+    "no_service_then_nearest",
+    "zh_quote"
+   ],
+   "dataset_version": "f9c1f2092a11",
+   "prompt_version": "9f2f7dc8ab79",
+   "pricing_version": "2026-11-24",
+   "tracing": false,
+   "config": "deepseek-bailian",
+   "provider": "bailian",
+   "model": "deepseek-v4.1-flash-1017",
+   "effort": "high",
+   "dialect": "bailian",
+   "skipped_runs": 0,
+   "pricing": "pricing 2026-11-24: owner's Bailian token plan: plan pricing may differ from the list price, which is not applied",
+   "runs": 3,
+   "trajectory_pass": 1.0,
+   "crashed": 0,
+   "turns": 6,
+   "errors": 0,
+   "fallback_rate": 0.0,
+   "fallback_kinds": {},
+   "spelled_number_replies": 0,
+   "invariant_violations": {
+    "stream": 0,
+    "no_agent_booking": 0,
+    "click_books_once": 0,
+    "no_false_booked": 0,
+    "provenance": 0
+   },
+   "tools": {
+    "find_city": {
+     "expected": 0,
+     "hit": 0,
+     "actual": 0,
+     "refused": 0,
+     "spurious": 0,
+     "success": null
+    },
+    "quote_route": {
+     "expected": 4,
+     "hit": 4,
+     "actual": 4,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    },
+    "request_booking": {
+     "expected": 1,
+     "hit": 1,
+     "actual": 1,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    },
+    "list_my_tickets": {
+     "expected": 1,
+     "hit": 1,
+     "actual": 1,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    }
+   },
+   "per_case": {
+    "book_flow": {
+     "group": "booking",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 3,
+     "tokens": 14358,
+     "cost": null,
+     "max_turn_tokens": 5669
+    },
+    "no_service_then_nearest": {
+     "group": "no_service",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 2,
+     "tokens": 8629,
+     "cost": null,
+     "max_turn_tokens": 4631
+    },
+    "zh_quote": {
+     "group": "chinese",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 1,
+     "tokens": 4035,
+     "cost": null,
+     "max_turn_tokens": 4035
+    }
+   },
+   "unrequested_request_booking": 0,
+   "passed_runs": 3,
+   "usage": {
+    "input": 26249,
+    "cached": 13568,
+    "output": 773,
+    "reasoning": 258
+   },
+   "tokens": 27022,
+   "llm_calls": 12,
+   "retries": 0,
+   "retry_rate": 0.0,
+   "cost_usd": null,
+   "tokens_per_run": 9007.333333333334,
+   "tokens_per_success": 9007.333333333334,
+   "usage_per_success": {
+    "input": 8749.666666666666,
+    "cached": 4522.666666666667,
+    "output": 257.6666666666667,
+    "reasoning": 86.0
+   },
+   "cost_per_run": null,
+   "cost_per_success": null,
+   "llm_latency_ms": {
+    "p50": 1112,
+    "p90": 1248,
+    "p95": 2191,
+    "max": 2191
+   },
+   "turn_tokens": {
+    "cap": 60000,
+    "p50": 4631,
+    "p90": 5669,
+    "max": 5669,
+    "near_cap": 0,
+    "over_cap": 0,
+    "budget_stops": 0
+   },
+   "turn_latency_s": {
+    "p50": 2.33,
+    "p90": 4.21,
+    "p95": 4.21
+   },
+   "first_token_s": {
+    "p50": 2.22,
+    "p95": 3.99,
+    "turns": 6
+   },
+   "verdict": {
+    "tool:find_city": true,
+    "tool:quote_route": true,
+    "tool:request_booking": true,
+    "tool:list_my_tickets": true,
+    "trajectory": true,
+    "fallback_rate": true,
+    "invariants": true
+   }
+  },
+  "qwen-bailian": {
+   "mode": "real",
+   "n": 1,
+   "date": "2026-11-24",
+   "commit": "0569a6f",
+   "spec": "12-bench",
+   "cases": [
+    "book_flow",
+    "no_service_then_nearest",
+    "zh_quote"
+   ],
+   "dataset_version": "f9c1f2092a11",
+   "prompt_version": "9f2f7dc8ab79",
+   "pricing_version": "2026-11-24",
+   "tracing": false,
+   "config": "qwen-bailian",
+   "provider": "bailian",
+   "model": "qwen3.8-flash",
+   "effort": "high",
+   "dialect": "bailian",
+   "skipped_runs": 0,
+   "pricing": "pricing 2026-11-24: owner's Bailian token plan: plan pricing may differ from the list price, which is not applied",
+   "runs": 3,
+   "trajectory_pass": 1.0,
+   "crashed": 0,
+   "turns": 6,
+   "errors": 0,
+   "fallback_rate": 0.0,
+   "fallback_kinds": {},
+   "spelled_number_replies": 0,
+   "invariant_violations": {
+    "stream": 0,
+    "no_agent_booking": 0,
+    "click_books_once": 0,
+    "no_false_booked": 0,
+    "provenance": 0
+   },
+   "tools": {
+    "find_city": {
+     "expected": 0,
+     "hit": 0,
+     "actual": 0,
+     "refused": 0,
+     "spurious": 0,
+     "success": null
+    },
+    "quote_route": {
+     "expected": 4,
+     "hit": 4,
+     "actual": 4,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    },
+    "request_booking": {
+     "expected": 1,
+     "hit": 1,
+     "actual": 1,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    },
+    "list_my_tickets": {
+     "expected": 1,
+     "hit": 1,
+     "actual": 1,
+     "refused": 0,
+     "spurious": 0,
+     "success": 1.0
+    }
+   },
+   "per_case": {
+    "book_flow": {
+     "group": "booking",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 3,
+     "tokens": 14970,
+     "cost": null,
+     "max_turn_tokens": 6010
+    },
+    "no_service_then_nearest": {
+     "group": "no_service",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 2,
+     "tokens": 8584,
+     "cost": null,
+     "max_turn_tokens": 4618
+    },
+    "zh_quote": {
+     "group": "chinese",
+     "runs": 1,
+     "passed": 1,
+     "fallback": 0,
+     "turns": 1,
+     "tokens": 4226,
+     "cost": null,
+     "max_turn_tokens": 4226
+    }
+   },
+   "unrequested_request_booking": 0,
+   "passed_runs": 3,
+   "usage": {
+    "input": 26835,
+    "cached": 16384,
+    "output": 945,
+    "reasoning": 372
+   },
+   "tokens": 27780,
+   "llm_calls": 12,
+   "retries": 0,
+   "retry_rate": 0.0,
+   "cost_usd": null,
+   "tokens_per_run": 9260.0,
+   "tokens_per_success": 9260.0,
+   "usage_per_success": {
+    "input": 8945.0,
+    "cached": 5461.333333333333,
+    "output": 315.0,
+    "reasoning": 124.0
+   },
+   "cost_per_run": null,
+   "cost_per_success": null,
+   "llm_latency_ms": {
+    "p50": 1658,
+    "p90": 2483,
+    "p95": 4406,
+    "max": 4406
+   },
+   "turn_tokens": {
+    "cap": 60000,
+    "p50": 4618,
+    "p90": 6010,
+    "max": 6010,
+    "near_cap": 0,
+    "over_cap": 0,
+    "budget_stops": 0
+   },
+   "turn_latency_s": {
+    "p50": 3.85,
+    "p90": 6.81,
+    "p95": 6.81
+   },
+   "first_token_s": {
+    "p50": 3.19,
+    "p95": 6.76,
+    "turns": 6
+   },
+   "verdict": {
+    "tool:find_city": true,
+    "tool:quote_route": true,
+    "tool:request_booking": true,
+    "tool:list_my_tickets": true,
+    "trajectory": true,
+    "fallback_rate": true,
+    "invariants": true
+   }
+  }
+ },
+ "runs": {
+  "deepseek-official": [
+   {
+    "case": "book_flow",
+    "index": 0,
+    "turns": [
+     {
+      "user": "Guangzhou to Lima",
+      "message_id": "m_77e4066313d23d22",
+      "outcome": "sent",
+      "text": "The cheapest route from Guangzhou to Lima is on the card, with transfers in Frankfurt, Singapore and Amsterdam. Tell me if you'd like to book it.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Guangzhou",
+         "destination": "Lima"
+        },
+        "code": "ok",
+        "quote_id": "q_db165fd0aae40089"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.840112957987003,
+      "first_token_s": 2.783359457971528,
+      "llm_steps": 2,
+      "turn_tokens": 3979,
+      "error": null
+     },
+     {
+      "user": "yes, book it",
+      "message_id": "m_5667ef82086672d5",
+      "outcome": "sent",
+      "text": "The confirmation card is ready — please check the route, distance and price on it, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "request_booking",
+        "args": {
+         "quote_id": "q_db165fd0aae40089"
+        },
+        "code": "ok",
+        "quote_id": "q_db165fd0aae40089"
+       }
+      ],
+      "card_types": [
+       "booking_request"
+      ],
+      "quote_before": "q_db165fd0aae40089",
+      "quotes_before": [
+       "q_db165fd0aae40089"
+      ],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 1.3343456669244915,
+      "first_token_s": 1.3203497920185328,
+      "llm_steps": 2,
+      "turn_tokens": 4574,
+      "error": null
+     },
+     {
+      "user": "what tickets do I have?",
+      "message_id": "m_24447a8103e4332d",
+      "outcome": "sent",
+      "text": "You have 1 ticket: Guangzhou to Lima with transfers in Frankfurt, Singapore and Amsterdam — the full details are on the card.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "list_my_tickets",
+        "args": {},
+        "code": "ok",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "ticket_list"
+      ],
+      "quote_before": "q_db165fd0aae40089",
+      "quotes_before": [
+       "q_db165fd0aae40089",
+       "q_db165fd0aae40089"
+      ],
+      "tickets_before": 1,
+      "tickets_after": 1,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 1.5865062079392374,
+      "first_token_s": 1.581259583006613,
+      "llm_steps": 2,
+      "turn_tokens": 5594,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     [],
+     [],
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 13890,
+     "cached": 12288,
+     "output": 257,
+     "reasoning": 38
+    },
+    "llm_calls": 6,
+    "retries": 0,
+    "llm_latency_ms": [
+     896,
+     752,
+     626,
+     676,
+     821,
+     730
+    ],
+    "config": "deepseek-official"
+   },
+   {
+    "case": "no_service_then_nearest",
+    "index": 0,
+    "turns": [
+     {
+      "user": "Austin to Tokyo please",
+      "message_id": "m_6f97b174c479c517",
+      "outcome": "sent",
+      "text": "Austin isn't served by Ocean Above. The card shows the nearest cities with service; Copenhagen is listed as the nearest. Would you like me to quote Austin's trip to Tokyo from Copenhagen instead, or from one of the other cities listed?",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Austin",
+         "destination": "Tokyo"
+        },
+        "code": "no_service",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "no_service"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.7592056249268353,
+      "first_token_s": 2.4955250839702785,
+      "llm_steps": 2,
+      "turn_tokens": 3914,
+      "error": null
+     },
+     {
+      "user": "ok, use the nearest city instead",
+      "message_id": "m_fa16f0751f01f614",
+      "outcome": "sent",
+      "text": "Here is the route from Copenhagen to Tokyo with transfers in Los Angeles, Mexico City and Atlanta. Check the legs, distance and price on the card, and tell me if you'd like to book it.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Copenhagen",
+         "destination": "Tokyo"
+        },
+        "code": "ok",
+        "quote_id": "q_0f0fc6746191f961"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 1.8496472500264645,
+      "first_token_s": 1.784330082940869,
+      "llm_steps": 2,
+      "turn_tokens": 4500,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     [],
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 8154,
+     "cached": 7424,
+     "output": 260,
+     "reasoning": 58
+    },
+    "llm_calls": 4,
+    "retries": 0,
+    "llm_latency_ms": [
+     1043,
+     1213,
+     753,
+     1073
+    ],
+    "config": "deepseek-official"
+   },
+   {
+    "case": "zh_quote",
+    "index": 0,
+    "turns": [
+     {
+      "user": "我想从广州飞到利马",
+      "message_id": "m_2682c3ca3114fce2",
+      "outcome": "sent",
+      "text": "广州到利马最便宜的航线已出，共 4 段航程，含 3 个中转点，总价 $1,160.71。请查看卡片上的航段、距离和价格；需要预订的话告诉我，我为你生成确认卡。",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Guangzhou",
+         "destination": "Lima"
+        },
+        "code": "ok",
+        "quote_id": "q_86badd2b427ed58f"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.488206416950561,
+      "first_token_s": 2.3468572919955477,
+      "llm_steps": 2,
+      "turn_tokens": 4091,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 3919,
+     "cached": 3456,
+     "output": 172,
+     "reasoning": 56
+    },
+    "llm_calls": 2,
+    "retries": 0,
+    "llm_latency_ms": [
+     1267,
+     1000
+    ],
+    "config": "deepseek-official"
+   }
+  ],
+  "deepseek-bailian": [
+   {
+    "case": "book_flow",
+    "index": 0,
+    "turns": [
+     {
+      "user": "Guangzhou to Lima",
+      "message_id": "m_9b25424fc9eb6e29",
+      "outcome": "sent",
+      "text": "The cheapest route from Guangzhou to Lima is on the card, with transfers in Frankfurt, Singapore and Amsterdam. Would you like me to prepare it for booking?",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Guangzhou",
+         "destination": "Lima"
+        },
+        "code": "ok",
+        "quote_id": "q_2b51f509ece8bdee"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.863856708048843,
+      "first_token_s": 2.7985773750115186,
+      "llm_steps": 2,
+      "turn_tokens": 4041,
+      "error": null
+     },
+     {
+      "user": "yes, book it",
+      "message_id": "m_649bdcb4489fb3e5",
+      "outcome": "sent",
+      "text": "The confirmation card is ready — please check the route, distance and price on it and click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "request_booking",
+        "args": {
+         "quote_id": "q_2b51f509ece8bdee"
+        },
+        "code": "ok",
+        "quote_id": "q_2b51f509ece8bdee"
+       }
+      ],
+      "card_types": [
+       "booking_request"
+      ],
+      "quote_before": "q_2b51f509ece8bdee",
+      "quotes_before": [
+       "q_2b51f509ece8bdee"
+      ],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 1.4136191660072654,
+      "first_token_s": 1.4096823330037296,
+      "llm_steps": 2,
+      "turn_tokens": 4648,
+      "error": null
+     },
+     {
+      "user": "what tickets do I have?",
+      "message_id": "m_792f113ac00bd9b2",
+      "outcome": "sent",
+      "text": "You have 1 ticket, for Guangzhou to Lima with transfers in Frankfurt, Singapore and Amsterdam — it's on the card.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "list_my_tickets",
+        "args": {},
+        "code": "ok",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "ticket_list"
+      ],
+      "quote_before": "q_2b51f509ece8bdee",
+      "quotes_before": [
+       "q_2b51f509ece8bdee",
+       "q_2b51f509ece8bdee"
+      ],
+      "tickets_before": 1,
+      "tickets_after": 1,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 1.6579071669839323,
+      "first_token_s": 1.6472207499900833,
+      "llm_steps": 2,
+      "turn_tokens": 5669,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     [],
+     [],
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 14069,
+     "cached": 8448,
+     "output": 289,
+     "reasoning": 64
+    },
+    "llm_calls": 6,
+    "retries": 0,
+    "llm_latency_ms": [
+     1184,
+     644,
+     718,
+     659,
+     821,
+     808
+    ],
+    "config": "deepseek-bailian"
+   },
+   {
+    "case": "no_service_then_nearest",
+    "index": 0,
+    "turns": [
+     {
+      "user": "Austin to Tokyo please",
+      "message_id": "m_6f67e97c1cce2382",
+      "outcome": "sent",
+      "text": "Ocean Above doesn't fly to Austin. The card lists the nearest served cities: Copenhagen, Ohrid and St. John's. Which one would you like to depart from?",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Austin",
+         "destination": "Tokyo"
+        },
+        "code": "no_service",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "no_service"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 4.21418241597712,
+      "first_token_s": 3.9906876659952104,
+      "llm_steps": 2,
+      "turn_tokens": 3998,
+      "error": null
+     },
+     {
+      "user": "ok, use the nearest city instead",
+      "message_id": "m_6e42956c2f0f3384",
+      "outcome": "sent",
+      "text": "Here's the cheapest route from Copenhagen to Tokyo, with the legs and transfer cities on the card. Would you like to book it?",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Copenhagen",
+         "destination": "Tokyo"
+        },
+        "code": "ok",
+        "quote_id": "q_126c213732eec221"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.333965790923685,
+      "first_token_s": 2.2151538329198956,
+      "llm_steps": 2,
+      "turn_tokens": 4631,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     [],
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 8287,
+     "cached": 4096,
+     "output": 342,
+     "reasoning": 163
+    },
+    "llm_calls": 4,
+    "retries": 0,
+    "llm_latency_ms": [
+     1248,
+     2191,
+     1112,
+     1176
+    ],
+    "config": "deepseek-bailian"
+   },
+   {
+    "case": "zh_quote",
+    "index": 0,
+    "turns": [
+     {
+      "user": "我想从广州飞到利马",
+      "message_id": "m_56f8bde9c53f901e",
+      "outcome": "sent",
+      "text": "广州到 Lima 的航线已找到，详细信息在卡片上：需要经 Frankfurt、Singapore、Amsterdam 转机，共 3 次转机。请查看卡片上的航线、距离和价格，确认无误后即可预订。",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Guangzhou",
+         "destination": "Lima"
+        },
+        "code": "ok",
+        "quote_id": "q_315822d0e4713982"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.1152239579241723,
+      "first_token_s": 2.0034661249956116,
+      "llm_steps": 2,
+      "turn_tokens": 4035,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 3893,
+     "cached": 1024,
+     "output": 142,
+     "reasoning": 31
+    },
+    "llm_calls": 2,
+    "retries": 0,
+    "llm_latency_ms": [
+     1157,
+     871
+    ],
+    "config": "deepseek-bailian"
+   }
+  ],
+  "qwen-bailian": [
+   {
+    "case": "book_flow",
+    "index": 0,
+    "turns": [
+     {
+      "user": "Guangzhou to Lima",
+      "message_id": "m_3023daa4e0cad911",
+      "outcome": "sent",
+      "text": "Here's the cheapest route from Guangzhou to Lima: 4 legs with stops in Frankfurt, Singapore and Amsterdam — 8,928.6 km, $1,160.71. The details are on the card. Want me to book it?",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Guangzhou",
+         "destination": "Lima"
+        },
+        "code": "ok",
+        "quote_id": "q_98c3f7bea433e9a5"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 4.769515167106874,
+      "first_token_s": 4.653240084066056,
+      "llm_steps": 2,
+      "turn_tokens": 4096,
+      "error": null
+     },
+     {
+      "user": "yes, book it",
+      "message_id": "m_506543c2537314a2",
+      "outcome": "sent",
+      "text": "The confirmation card is up — please check the route (Guangzhou → Frankfurt → Singapore → Amsterdam → Lima), the distance and the price, then click \"Confirm booking\" to issue your ticket.\n\nNothing is booked until you click **Confirm booking** on the card.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "request_booking",
+        "args": {
+         "quote_id": "q_98c3f7bea433e9a5"
+        },
+        "code": "ok",
+        "quote_id": "q_98c3f7bea433e9a5"
+       }
+      ],
+      "card_types": [
+       "booking_request"
+      ],
+      "quote_before": "q_98c3f7bea433e9a5",
+      "quotes_before": [
+       "q_98c3f7bea433e9a5"
+      ],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.8886816250160336,
+      "first_token_s": 2.8767495419597253,
+      "llm_steps": 2,
+      "turn_tokens": 4864,
+      "error": null
+     },
+     {
+      "user": "what tickets do I have?",
+      "message_id": "m_3c9db60ec2d925cb",
+      "outcome": "sent",
+      "text": "You have 1 ticket: Guangzhou → Lima, with stops in Frankfurt, Singapore and Amsterdam — 8,928.6 km, $1,160.71, booked 2026-11-24T06:46:56Z. The full details are on the card.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "list_my_tickets",
+        "args": {},
+        "code": "ok",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "ticket_list"
+      ],
+      "quote_before": "q_98c3f7bea433e9a5",
+      "quotes_before": [
+       "q_98c3f7bea433e9a5",
+       "q_98c3f7bea433e9a5"
+      ],
+      "tickets_before": 1,
+      "tickets_after": 1,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 2.5379994589602575,
+      "first_token_s": 2.488606833969243,
+      "llm_steps": 2,
+      "turn_tokens": 6010,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     [],
+     [],
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 14574,
+     "cached": 9216,
+     "output": 396,
+     "reasoning": 114
+    },
+    "llm_calls": 6,
+    "retries": 0,
+    "llm_latency_ms": [
+     1387,
+     2483,
+     1147,
+     1658,
+     997,
+     1499
+    ],
+    "config": "qwen-bailian"
+   },
+   {
+    "case": "no_service_then_nearest",
+    "index": 0,
+    "turns": [
+     {
+      "user": "Austin to Tokyo please",
+      "message_id": "m_5987ced6139bc049",
+      "outcome": "sent",
+      "text": "Ocean Above doesn't fly out of Austin. The nearest served city is Copenhagen (121.0 km away) — shall I quote Austin's alternative from Copenhagen to Tokyo? Other options are Ohrid and St. John's.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Austin",
+         "destination": "Tokyo"
+        },
+        "code": "no_service",
+        "quote_id": null
+       }
+      ],
+      "card_types": [
+       "no_service"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 3.847838959074579,
+      "first_token_s": 3.186967208981514,
+      "llm_steps": 2,
+      "turn_tokens": 3966,
+      "error": null
+     },
+     {
+      "user": "ok, use the nearest city instead",
+      "message_id": "m_c0756fb87995de40",
+      "outcome": "sent",
+      "text": "Here's the cheapest route from Copenhagen to Tokyo: 4 legs with stops in Los Angeles, Mexico City and Atlanta, 8,007.2 km total, $1,040.94.\n\nThe details are on the card — say the word and I'll set up the booking confirmation.",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Copenhagen",
+         "destination": "Tokyo"
+        },
+        "code": "ok",
+        "quote_id": "q_a56d080fdce07ef0"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 3.1010738749755546,
+      "first_token_s": 2.9726203749887645,
+      "llm_steps": 2,
+      "turn_tokens": 4618,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     [],
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 8285,
+     "cached": 5120,
+     "output": 299,
+     "reasoning": 96
+    },
+    "llm_calls": 4,
+    "retries": 0,
+    "llm_latency_ms": [
+     1257,
+     1960,
+     1043,
+     2021
+    ],
+    "config": "qwen-bailian"
+   },
+   {
+    "case": "zh_quote",
+    "index": 0,
+    "turns": [
+     {
+      "user": "我想从广州飞到利马",
+      "message_id": "m_6fe907162062f3c5",
+      "outcome": "sent",
+      "text": "已找到广州到 Lima 的最便宜路线，经 Frankfurt、Singapore、Amsterdam 转机，共 4 段，价格 $1,160.71。需要预订吗？",
+      "problems": [],
+      "tools": [
+       {
+        "tool": "quote_route",
+        "args": {
+         "origin": "Guangzhou",
+         "destination": "Lima"
+        },
+        "code": "ok",
+        "quote_id": "q_a9adc34e83c3213b"
+       }
+      ],
+      "card_types": [
+       "quote"
+      ],
+      "quote_before": null,
+      "quotes_before": [],
+      "tickets_before": 0,
+      "tickets_after": 0,
+      "stream_problem": null,
+      "recheck": [],
+      "latency_s": 6.812382041011006,
+      "first_token_s": 6.7632189999567345,
+      "llm_steps": 2,
+      "turn_tokens": 4226,
+      "error": null
+     }
+    ],
+    "turn_failures": [
+     []
+    ],
+    "invariants": {},
+    "crashed": null,
+    "usage": {
+     "input": 3976,
+     "cached": 2048,
+     "output": 250,
+     "reasoning": 162
+    },
+    "llm_calls": 2,
+    "retries": 0,
+    "llm_latency_ms": [
+     2051,
+     4406
+    ],
+    "config": "qwen-bailian"
+   }
+  ]
+ }
+}
