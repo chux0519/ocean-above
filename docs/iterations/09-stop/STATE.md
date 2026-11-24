@@ -1,4 +1,4 @@
-# 09-stop S1 — STATE (2026-11-24)
+# 09-stop S1 — STATE (2026-11-24, updated after the Fable review)
 
 Issue #48, plan `docs/iterations/09-stop/plan.md` (decisions 1–5 followed as written). Branch `it09-stop`.
 Coordinator approval (hc, 2026-11-24): `airline/service.py` gets only `present` / `status` keyword arguments with
@@ -100,12 +100,49 @@ Mutation check (manual, reverted): `present=True` in `_finish_stopped` → 6 fai
    > (no colour, not an error); its quote cards show no Confirm button and the line "Stopped before confirmation — ask
    > again to book". Stop before the message was stored: "■ Stopped — your message was not sent" under the composer,
    > input kept.
-4. Known edge: a Stop that lands in the same instant as the turn's own time limit is answered `cancelling` but the
-   turn may end with `done` (template, `turn_timeout`); still exactly one terminal event.
+4. ~~Known edge: Stop + time limit may end `done`~~ — wrong: the review could not reproduce it and the code ends an
+   accepted Stop `cancelled` (`stopped = stopped or turn.cancelled`, now pinned by
+   `test_p2_9_a_stop_accepted_while_the_last_step_ends_still_ends_cancelled`). Removed.
 5. Pre-existing (not changed): the typing indicator "Looking up routes…" stays visible after a card arrived until the
    first text (seen in `*-3-next-message`).
 
+## Review (Fable, `review-stop.md`): finding → fix → test
+No P0 / P1; 9 × P2, all fixed (commit `87c0e61`). Mutation checks re-run after the fixes: every mutation below is
+killed (backend script `/tmp/oa-stop/mutate.py`, frontend `/tmp/oa-stop/fmutate.py`, both restore the file).
+
+| Finding | Fix | Test (mutation that it kills) |
+|---|---|---|
+| **P2-1** Stop during the `server_busy` refund: no terminal event (probe 1) | the refusal branches (`ServerBusy`, `_NotStored`) set the run to `finishing` before their first await, so a Stop there is "too late" and does not cancel the task; `finally` adds a backstop `error internal_error` when a run ended without a terminal event (e.g. a shutdown cancel) | `test_p2_1_a_stop_while_a_server_busy_refusal_refunds_still_ends_with_one_terminal_event` (kills "refusal stays queued"); `test_p2_1_a_run_cancelled_by_a_shutdown_still_ends_with_a_terminal_event` (kills "no backstop") |
+| **P2-2** finished runs kept the whole turn (probe 2) | `_retire` drops `run.turn` and `run.task`; only id / owner / conversation / state stay | `test_p2_2_a_finished_run_keeps_no_turn_context` (kills "keep turn") |
+| **P2-3** Stop on a slow drain: Send back before the reply was stored | after the reader is closed without a terminal event, the client polls the (idempotent) cancel endpoint every 1 s until `cancelled` / `completed` / `failed` / 404 (max 35 s), keeping "Stopping"; then reloads | `stop.test.tsx` "waits for a slow stopped run to settle before restoring Send" (kills "no settle") |
+| **P2-4** headers never arrive → stuck "Stopping"; Stop during chat creation still sent | the grace timer starts at the click (aborts even without a run id); after `createConversation` a pressed Stop sends nothing (input kept, "not sent" note) | "closes the request when its headers never arrive…" (kills "grace only after cancel"); "Stop while a new chat is being created sends nothing" (kills "send after Stop during create") |
+| **P2-5** focus lost when Send ↔ Stop swap; no announcement | one `<Button>` element for both (type / label / icon / handler change), `aria-disabled` instead of `disabled` while stopping; focus returns to the input after a Stop if it was on the button; one polite live region ("Stopping the reply…", "Reply stopped.", "Stopped. Your message was not sent."); Esc in the input stops | "keeps the focus on the one Send/Stop button and returns it to the input after Stop; Esc stops" (kills "no focus return", "no Esc", "no announcement") |
+| **P2-6** switching test could not catch regressions | test now has stored text in the old chat, waits for every fetch, checks no old text / marker / Stopping, Send works and the next reply gets a fresh Stop. Mutation F5 showed a **real bug**: `load()` sets the view itself, so a slow reload of the old chat replaced the new chat's view; the post-stream reload now checks `here()` before setting state | "switching conversations detaches the stream…" (kills F1, F6); new "a reload that lands after switching conversations does not replace the new view" (kills F5) |
+| **P2-7** v4 → v3 rollback cannot start | no code change (the migration is correct); release + rollback steps drafted below for deploy.md and design.md §7 | — (operational) |
+| **P2-8** model not told that stopped cards cannot be confirmed | `STOPPED_NOTE` adds: "Quote cards in that reply cannot be confirmed: to book one of its quotes, call request_booking for it again…" (request_booking on a `quoted` quote presents it in a completed turn, B2 unchanged). Not added as a fake eval: the fake model is scripted, so it would only test the script; the note reaching the model is what code controls | `test_p2_8_the_model_is_told_that_a_stopped_replys_cards_cannot_be_confirmed`; real evals N=1 after the change 31/31 |
+| **P2-9** second-line checks untested (M1–M5, M10 survived) | tests accept a Stop *without* cancelling the task (what a swallowed `CancelledError` looks like) at each boundary; also fixed an order bug they exposed: after the tool thread the check now runs before `in_flight` is cleared, so a tool that ran is stored `cancelled: interrupted`, not `not run` | M2 `test_p2_9_a_lost_cancellation_during_a_tool_thread_discards_its_result_and_stops`; M4 `…before_a_tool_runs_no_tool`; M3 `…after_a_tool_starts_no_further_model_request`; M5 `…stop_accepted_while_the_last_step_ends_still_ends_cancelled`; M1 `…stop_in_the_instant_the_steps_ended_is_finishing_and_the_reply_completes`; M10 `test_p2_9_nothing_is_sent_after_the_terminal_event` |
+| minor: contract `cancelling` / `finishing` outcomes; `RunStatus` | contract: `cancelling` may end `error` if storing fails; `finishing` / `completed` may end `error`; `RunStatus` = the five values the endpoint returns (TS type synced) | — |
+| minor: switching back to a running chat cannot Stop | not changed (needs the active run in the conversation detail; no such capability before this PR) — proposed follow-up | — |
+
+Verification after the fixes (`87c0e61`): backend full suite + `tool/test_diff.sh` no new failures; vitest 103;
+lint ok; evals fake 31/31; real-model evals N=1 (`--max-cost 0.25`): **31/31**, trajectory 100 %, safety violations 0,
+fallback 0.0 %, **$0.0223** (`docs/iterations/09-stop/evals/real-n1-review/`). Screens not re-shot: the visible states
+are unchanged (the Stopping state now uses `aria-disabled` + 50 % opacity instead of `disabled`, same look).
+
 ## Drafts for docs the coordinator merges
+
+### docs/deploy.md — release with a schema change (review P2-7)
+> **App.db schema v4 (09-stop, #48).** The first start of this release migrates app.db to v4 (`messages.status`, old
+> rows = `completed`; one transaction). Older images refuse a newer schema (`RuntimeError: … has schema 4, this code
+> knows 3`) and do not start. Release: copy `app.db` (with `-wal` / `-shm`, or `sqlite3 app.db ".backup app.db.v3"`
+> while the API is stopped) before `up -d`. Rollback to a v3 image: stop the API, then either restore the copy
+> (loses rows written since) or downgrade in place: `ALTER TABLE messages DROP COLUMN status; PRAGMA user_version = 3;`
+> (stopped replies then read as normal assistant messages), then start the old image.
+
+### design.md §7, after the schema list
+> v4（#48）：`messages.status`（`completed` | `cancelled`，旧行默认 `completed`）。迁移只向前；旧版本镜像遇到更新的 schema 拒绝启动，
+> 回滚步骤见 deploy.md（先备份，或 `DROP COLUMN status` + `user_version = 3`）。
+
 ### design.md §4.10, replace the "取消" bullet
 > - 取消（#48）：只有 Stop 接口（`POST /api/conversations/{id}/runs/{run_id}/cancel`）能停止一轮；断开 SSE 不算（照常跑完落库）。
 >   每轮有 app 自己的 `run_id`（响应头 `X-Run-Id` + 第一个事件），进程内登记（单 worker；多 worker 需要共享的取消标志或按会话粘性路由）。
