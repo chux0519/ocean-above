@@ -31,9 +31,8 @@ OpenAI-compatible server that records TCP close, with the same 15 checks.
 First-token latency was within noise for all three.
 
 ## Decision
-Adopt **Pydantic AI Slim** (`pydantic-ai-slim[openai]`, pinned) for the generic runtime: the model client (HTTP
-stream, chunk parsing, tool-call assembly, provider request fields, per-call retry / timeout), tool dispatch and run
-cancellation. Its tracing is OpenTelemetry from the start, with no outbound export unless we configure an exporter.
+Adopt **Pydantic AI Slim** (`pydantic-ai-slim`, pinned) for the generic runtime: the model client (HTTP stream,
+chunk parsing, tool-call assembly, provider request fields), tool dispatch and run cancellation. Its tracing is OpenTelemetry from the start, with no outbound export unless we configure an exporter.
 That fits #35 directly. The dependency cost is the smaller of the two SDKs.
 
 Neither SDK met the plan's "clearly less code to maintain" rule: each removes about 5% net. The owner chose
@@ -54,6 +53,13 @@ was considered and rejected on these grounds.
 - **SSE contract** (`status`, `card`, `delta`, `replace`, `done`, `error`) is unchanged; SDK events are mapped to it.
 - **Budgets and concurrency:** `budget.py`, turn slots, per-user caps, conversation locks, `llm_calls` records and the
   usage estimate when usage is missing (cancelled or cut streams).
+- **Retries and per-call time limits:** ours. The SDK retries a streamed request only before any output reaches the
+  consumer; we retry while none of the call's text has been *released*, and log and charge every attempt (design §4.6,
+  §4.8). The provider SDK's own retries are off (`max_retries=0`); a retried step restarts the run from our context.
+- **What goes on the wire:** ours. Every request is rebuilt from the loop's context (`before_model_request`): wire-safe
+  tool calls, our JSON tool results, mid-conversation system messages kept as system messages, reasoning passed back
+  verbatim, no SDK announcement text, no SDK fingerprint headers. The one SDK addition we keep is its note after user
+  text that imitates a `<system>` frame (it reaches only the model).
 - **Error mapping:** SDK exceptions (`ModelAPIError`, `UnexpectedModelBehavior`, timeouts, tool exceptions) map to
   today's fallbacks and templates. A stream that ends without `finish_reason` is not treated as `stop`.
 
@@ -64,9 +70,18 @@ was considered and rejected on these grounds.
 - There are two HTTP stacks: `httpx` (Google JWKS) and `httpx2` (openai 3.x). Proxy settings come from the
   environment (`trust_env`).
 - Fast-moving 2.x API: pin the version. Upgrades run the full test suite plus `spikes/pydantic-ai/poc/checks_fake.py`.
-- Settings that must be explicit: sequential tool execution, `strict` off for our schemas, DeepSeek thinking fields
-  via `extra_body` (same request as today), `PYDANTIC_AI_NO_BANNER=1`, and `iter` + `run.cancel()` rather than
-  `run_stream`.
+- SDK hooks and settings we depend on (all public API): `Agent.iter` + `node.stream(run.ctx)`; `Tool.from_schema`
+  (`sequential=True`, `strict=False`); capabilities `before_model_request` (wire context) and `before_tool_validate`
+  (raw arguments); `ModelProfile.supports_inline_system_prompts=True`; settings `framing_announcement="never"`,
+  `max_retries=0`, `extra_body` (DeepSeek thinking fields); `end_strategy="graceful"`; `UsageLimits(request_limit=None)`;
+  `retries` high enough that the SDK never ends a turn (unknown tool names); `DeepSeekProvider` for every base URL;
+  `provider_details["finish_reason"]` (raw), `ModelResponse.usage` (+ `details`); `PYDANTIC_AI_NO_BANNER=1`.
+- Upgrade check: pin the new version, run the full suite (the tests that pin the above are in
+  `tests/test_agent_runtime.py`, `test_agent_llm.py`, `test_agent_loop.py`; tests touching private SDK attributes say so),
+  `spikes/pydantic-ai/poc/checks_fake.py`, and a real-model evals run (N=1, about $0.023).
+- Measured cost of the boundary: `backend/app/agent` grew from 2237 to 2665 lines (+428, of which 145 are the shared
+  offline fake), not the 5% reduction the POC estimated; see `docs/iterations/08-runtime/migration/report.md`.
+  Real-model evals after migration: 92/93 and 30/31 (0 safety violations), latency unchanged.
 - #48 builds Stop on this runtime: an app-owned `run_id`, cancelling the run task, and `Threads` drain. #35 adds the
   OTLP exporter, business spans and the Phoenix profile on its OpenTelemetry spans.
 - Rollback: the migration is one PR; reverting it restores the own loop.

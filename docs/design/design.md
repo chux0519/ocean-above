@@ -54,9 +54,9 @@ flowchart LR
 
   subgraph Backend["FastAPI 后端（单进程）"]
     API["api/<br/>HTTP 路由 · SSE · 归属检查 · 限流"]
-    subgraph Agent["agent/ (自写)"]
-      Loop["agent loop"]
-      LLMC["llm client<br/>(httpx, OpenAI 兼容)"]
+    subgraph Agent["agent/"]
+      Loop["agent loop（自写）<br/>预算 · 重试 · guard · 卡片 · 落库 · 取消"]
+      Runtime["Pydantic AI Slim（ADR-001）<br/>Agent.iter · 工具分发 · OpenAIChatModel"]
       Tools["tools<br/>参数校验 + 分发"]
       Guard["reply guard<br/>数字 / 城市名按值溯源"]
     end
@@ -78,8 +78,8 @@ flowchart LR
   UI_Chat & UI_Tickets & UI_History --> API
   API --> Loop
   API -->|"用户点击确认（凭证）"| Airline
-  Loop <--> LLMC <--> LLM
-  Loop --> Tools --> Airline --> Core
+  Loop <--> Runtime <--> LLM
+  Runtime --> Tools --> Airline --> Core
   Loop --> Guard
   API --> Auth
   Auth -.->|"核验令牌 (JWKS)"| Google["Google Identity"]
@@ -91,6 +91,8 @@ flowchart LR
 ```
 
 模块边界：
+- `agent/` 的通用运行时（模型流、chunk 解析、工具分发、取消、OpenTelemetry span）是 Pydantic AI Slim（钉 2.71.0）；出票、
+  ReplyGuard、app.db 历史、SSE 契约、重试、请求上下文、预算和并发仍是我们的代码（[ADR-001](adr-001-agent-runtime.md)）。
 - `core/` 不知道 LLM、HTTP、app.db，只吃 `Network` 和参数，返回记录或明确的错误类型。可单独穷举测试。
 - `airline/`：`find_city`、`quote_route`、`request_booking`（只出确认卡）、`post_assistant_message`（`done` 时展示卡片并签发 nonce）、`book(quote_id, nonce)`（出票）、
   `list_tickets`；内部调 core 和 store，负责出票条件 B1–B7 和权限（只能操作自己的报价和票）。时刻、座位接口位置预留，
@@ -228,7 +230,8 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
   **不放城市列表**（城市由工具解析）。
 - 历史：本会话全部消息，**用 LLM 原文**（与渲染后一致，因为文本不再做替换）；工具结果以精简 JSON 保留
   （记录 id + 显示值），超过预算时从最早的轮次开始压缩成摘要，quote 和 ticket id 始终保留。
-- LLM 参数：`temperature=0`，`tool_choice=auto`；并行工具调用允许（按顺序执行）。
+- LLM 参数：`temperature=0`，`tool_choice=auto`；并行工具调用允许（按顺序执行）。由 Pydantic AI 的 `OpenAIChatModel`（DeepSeek
+  方言）发出；`max_tokens` 同 §4.8。
 
 ### 4.4 工具
 
@@ -357,6 +360,23 @@ def run_turn(conv, user_text, emit) -> AssistantMessage:
 - 未覆盖（替换原句）：读 locations.db 没有操作时限；出票事务里的严格复核仍在 app.db 写锁内哈希 locations.db，文件系统卡住时
   写锁被一直占着，其他写入 10 s 后 `StoreUnavailable`。CPU 计算（路由毫秒级）。等名额时持有会话锁：全站满载时，
   同会话的点击最多等 5 s（在事件循环上，不占线程）后得到 `conversation_busy`。
+
+
+### 4.10 运行时（ADR-001，#49）
+每轮一个 Pydantic AI run：`Agent.iter(message_history=…)`，loop 在 `ModelRequestNode` 上流式读事件（文本 → SentenceBuffer →
+ReplyGuard → `delta`），在 `CallToolsNode` 上执行工具。§4.2 的伪代码不变。
+- 工具：`Tool.from_schema(TOOL_SCHEMAS)`，串行、按调用顺序，`strict` 关；执行体是 `Toolbox.run`，用户和会话来自 run 的 `deps`，
+  阻塞部分走 `Threads`。参数不是 JSON 对象时原串交给 `Toolbox.run`（`invalid_arguments`）；未知工具名由 loop 记为 `unknown_tool`；
+  同一响应里重复的 `tool_call_id` 改成 `id~2`… 后照常执行。
+- 请求：每次请求的消息都是 loop 自己的上下文（`before_model_request`：app.db 历史 + 本轮步骤，工具调用为 wire-safe 形式，会话中途的
+  system 消息保持 system 角色）；thinking 字段经 `extra_body` 发出，与迁移前相同；不加 SDK 的说明文字和 openai 客户端指纹头。
+  唯一保留的 SDK 附加：用户文字里出现仿冒 `<system>` 的标签时，SDK 在后面加一条说明（只到模型）。
+- 重试：provider SDK 自身不重试（`max_retries=0`）；loop 在一步还没放出文字时按 §4.6 重试，每一步各有 2 次，每次尝试都记 `llm_calls`
+  并计费，从上下文重开 run。模型流里的任何异常都算一次失败的调用；模型调用之外的异常仍是 `internal_error`。
+- 结束原因：读服务商原始 `finish_reason`；没有时当作断流（可重试），不当作 `stop`。
+- 取消：`Agent.cancel(user, conversation)` 取消本轮步骤任务；模型流立即关闭，不再有新的请求和工具调用；已开始的工具线程跑完、drain
+  后才落库（模板，`cancelled`）并释放锁和名额。Stop 接口和界面、被打断的工具结果是否结算见 #48。
+- Tracing：默认不装 instrumentation、无 exporter、无 logfire；`Agent(tracer_provider=…)` 给 #35 用（不带消息内容）。
 
 ## 5. 路线、距离、价格
 

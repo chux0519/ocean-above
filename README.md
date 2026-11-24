@@ -1,5 +1,9 @@
 # Ocean Above
 
+Natural-language flight booking for the airline Ocean Above. The agent's generic runtime (model streaming, tool
+dispatch, cancellation) is Pydantic AI Slim ([ADR-001](docs/design/adr-001-agent-runtime.md)); booking, the reply
+guard, history and budgets are our own code. Roadmap: [docs/roadmap.md](docs/roadmap.md).
+
 ## Run locally
 
 Requirements: Docker with Compose v2.24+ (or OrbStack / Docker Desktop), and an OpenAI-compatible LLM key.
@@ -27,7 +31,7 @@ Requirements: [uv](https://docs.astral.sh/uv/) (it installs Python and the depen
 
 ```bash
 cd backend
-uv sync                                               # runtime: fastapi, uvicorn, networkx; dev: pytest, hypothesis, httpx
+uv sync                                               # runtime: fastapi, uvicorn, networkx, pydantic-ai-slim (agent runtime, ADR-001); dev: pytest, hypothesis, httpx
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 curl http://localhost:8000/health                     # {"status":"ok","network":{"cities":711,...,"fingerprint":"sha256:..."}}
 curl http://localhost:8000/api/cities                 # debug listing of the loaded network
