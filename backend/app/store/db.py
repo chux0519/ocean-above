@@ -16,7 +16,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, NamedTuple
 
 Clock = Callable[[], datetime]
 
@@ -25,6 +25,51 @@ Clock = Callable[[], datetime]
 BUSY_TIMEOUT = 10.0  # seconds a statement waits for another connection's lock ("database is locked")
 OPERATION_TIMEOUT = 10.0  # wall seconds one connection (= one read / write transaction) may live while SQL runs
 _PROGRESS_OPS = 1000  # SQLite VM instructions between two deadline checks
+
+
+class OpTiming(NamedTuple):
+    """One `Store.read()` / `Store.write()`, for the optional timing hook (benchmarks, #41).
+
+    `wait`: seconds spent in `BEGIN` / `BEGIN IMMEDIATE` - for a write, the time spent waiting for
+    app.db's single writer lock (SQLite's busy handler). `hold`: seconds from the end of BEGIN to
+    the end of COMMIT / ROLLBACK (the writer lock is held for this long). `total`: seconds from
+    opening to closing the connection. Times not reached are None. `outcome`: "commit" (write),
+    "ok" (read: the body finished), "rollback" (the body raised), "busy" (a lock wait passed busy_timeout), "timeout" (the
+    operation deadline interrupted SQL) or "error" (any other failure)."""
+    kind: str  # "read" | "write"
+    wait: float | None
+    hold: float | None
+    total: float
+    outcome: str
+
+
+_timing_hook: Callable[[OpTiming], Any] | None = None
+
+
+def set_timing_hook(hook: Callable[[OpTiming], Any] | None) -> Callable[[OpTiming], Any] | None:
+    """Install (or with None remove) a process-wide function called once after every
+    `Store.read()` / `Store.write()` with its `OpTiming`; returns the previous hook. Off by default:
+    then the only cost is one global lookup per operation. The hook runs in the calling thread
+    after the connection is closed; it must be fast and thread-safe. Its exceptions are ignored,
+    so it cannot change what the store does."""
+    global _timing_hook
+    previous, _timing_hook = _timing_hook, hook
+    return previous
+
+
+def _report(hook: Callable[[OpTiming], Any], kind: str, started: float, begun: float | None,
+            locked: float | None, ended: float | None, outcome: str) -> None:
+    total = time.perf_counter() - started
+    wait = None if begun is None or locked is None else locked - begun
+    hold = None if locked is None or ended is None else ended - locked
+    try:
+        hook(OpTiming(kind, wait, hold, total, outcome))
+    except Exception:  # noqa: BLE001 - a measurement must never change the store's behaviour
+        pass
+
+
+def _failure(exc: BaseException) -> str:
+    return "timeout" if "interrupted" in str(exc).lower() else "busy"
 
 SCHEMA_VERSION = 3
 
@@ -267,44 +312,83 @@ class Store:
     @contextmanager
     def read(self) -> Iterator[sqlite3.Connection]:
         """A connection for reads; several statements see one snapshot."""
+        hook = _timing_hook  # timing (set_timing_hook): every `hook is not None` branch only measures
+        started = time.perf_counter() if hook is not None else 0.0
+        begun = locked = ended = None
+        outcome = "error"
         try:
             con = self._connect()
             try:
+                if hook is not None:
+                    begun = time.perf_counter()
                 con.execute("BEGIN")
+                if hook is not None:
+                    locked = time.perf_counter()
                 try:
                     yield con
+                    outcome = "ok"
+                except BaseException:
+                    outcome = "rollback"
+                    raise
                 finally:
                     _disarm(con)
                     con.execute("ROLLBACK")
+                    if hook is not None:
+                        ended = time.perf_counter()
             finally:
                 con.close()
         except sqlite3.OperationalError as exc:
             if _unavailable(exc):
+                outcome = _failure(exc)
                 raise StoreUnavailable(str(exc)) from exc
+            outcome = "error"
             raise
+        finally:
+            if hook is not None:
+                _report(hook, "read", started, begun, locked, ended, outcome)
 
     @contextmanager
     def write(self) -> Iterator[sqlite3.Connection]:
         """One `BEGIN IMMEDIATE` transaction: commit on normal exit, roll back on any exception."""
+        hook = _timing_hook  # timing (set_timing_hook): every `hook is not None` branch only measures
+        started = time.perf_counter() if hook is not None else 0.0
+        begun = locked = ended = None
+        outcome = "error"
         try:
             con = self._connect()
             try:
+                if hook is not None:
+                    begun = time.perf_counter()
                 con.execute("BEGIN IMMEDIATE")
+                if hook is not None:
+                    locked = time.perf_counter()
                 try:
                     yield con
                 except BaseException:
+                    outcome = "rollback"
                     _disarm(con)
                     if con.in_transaction:  # sqlite rolls back by itself on some errors (disk full)
                         con.execute("ROLLBACK")
+                    if hook is not None:
+                        ended = time.perf_counter()
                     raise
                 _disarm(con)
                 con.execute("COMMIT")
+                if hook is not None:
+                    ended = time.perf_counter()
+                outcome = "commit"
             finally:
                 con.close()
         except sqlite3.OperationalError as exc:
             if _unavailable(exc):  # lock wait or deadline: rolled back, nothing written
+                outcome = _failure(exc)
                 raise StoreUnavailable(str(exc)) from exc
+            if outcome != "rollback":
+                outcome = "error"
             raise
+        finally:
+            if hook is not None:
+                _report(hook, "write", started, begun, locked, ended, outcome)
 
     # Every method below that takes a conversation or message id also takes the user and checks
     # ownership in the same transaction; NotFound when it is missing or someone else's.
