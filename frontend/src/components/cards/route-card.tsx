@@ -168,10 +168,11 @@ export function bookingErrorInfo(code: string, serverMessage: string): { text: s
   }
 }
 
-/** Quote / booking_request card. Confirm is shown only when the server says bookable and no stream is running. */
+/** Quote / booking_request card. Confirm is shown only when the server says bookable and no stream is running.
+ * `stopped`: the card belongs to a reply the user stopped (contract v1.6): never bookable, with a note. */
 export function QuoteCardView({
-  card, streaming = false, readOnly = false, onBooked, onAsk,
-}: { card: QuoteCard | BookingRequestCard; streaming?: boolean; readOnly?: boolean; onBooked?: () => void; onAsk?: (text: string) => void }) {
+  card, streaming = false, readOnly = false, stopped = false, onBooked, onAsk,
+}: { card: QuoteCard | BookingRequestCard; streaming?: boolean; readOnly?: boolean; stopped?: boolean; onBooked?: () => void; onAsk?: (text: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ReturnType<typeof bookingErrorInfo> | null>(null);
   const status = card.state.status;
@@ -181,7 +182,7 @@ export function QuoteCardView({
   const left = new Date(card.expires_at).getTime() - now;
   const lapsed = live && left <= 0;
   const st = lapsed ? STATUS_LABEL.expired : STATUS_LABEL[status] ?? STATUS_LABEL.quoted;
-  const showConfirm = card.state.bookable && !!card.state.nonce && !readOnly && !lapsed && !dead;
+  const showConfirm = card.state.bookable && !!card.state.nonce && !readOnly && !lapsed && !dead && !stopped;
   const showNewQuote = !readOnly && onAsk && (err?.newQuote || lapsed || status === "stale" || status === "expired");
 
   async function confirm() {
@@ -211,6 +212,9 @@ export function QuoteCardView({
         <Button className="mt-5 min-h-12 w-full text-[0.9375rem]" onClick={confirm} disabled={streaming || busy}>
           Confirm booking
         </Button>
+      )}
+      {stopped && status !== "booked" && (
+        <p className="mt-4 text-sm text-ink-2" data-testid="stopped-note">Stopped before confirmation — ask again to book.</p>
       )}
       {lapsed && !err && <Alert role="status" className="mt-3">This quote has expired.</Alert>}
       {err && (

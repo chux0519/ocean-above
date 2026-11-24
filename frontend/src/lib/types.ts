@@ -38,7 +38,11 @@ export type Card =
   | AmbiguousCityCard | UnknownCityCard | NoticeCard;
 export type Message = {
   id: string; role: "user" | "assistant" | "system"; text: string; cards: Card[]; created_at: string;
+  /** v1.6: "cancelled" = the user stopped this reply (Stop). Older servers omit it. */
+  status?: "completed" | "cancelled";
 };
+/** v1.6: state of a run after `POST /conversations/{id}/runs/{run_id}/cancel`. */
+export type RunStatus = "queued" | "running" | "cancelling" | "finishing" | "cancelled" | "completed" | "failed";
 export type Conversation = ConversationSummary & { messages: Message[] };
 export type Trace = {
   quote_id: string; formula: string; algorithm: string; network_fingerprint: string;
@@ -47,11 +51,12 @@ export type Trace = {
 };
 
 export type SseEvent =
-  | { event: "user_message"; data: Message }
+  | { event: "user_message"; data: Message & { run_id?: string } }
   | { event: "status"; data: { text: string } }
   | { event: "card"; data: { card: Card } }
   | { event: "delta"; data: { text: string } }
   | { event: "replace"; data: { text: string } }
   | { event: "ping"; data: Record<string, never> }
   | { event: "done"; data: { message: Message } }
-  | { event: "error"; data: { code: string; message: string } };
+  | { event: "cancelled"; data: { run_id: string; message: Message | null } }
+  | { event: "error"; data: { code: string; message: string; run_id?: string } };

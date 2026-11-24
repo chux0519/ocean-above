@@ -1,4 +1,4 @@
-import type { AppConfig, Conversation, ConversationSummary, Me, Message, SseEvent, TicketCard, Trace, User } from "./types";
+import type { AppConfig, Conversation, ConversationSummary, Me, Message, RunStatus, SseEvent, TicketCard, Trace, User } from "./types";
 import { readSse } from "./sse";
 
 type ErrorBody = { code?: string; message?: string; scope?: string; resets_at?: string };
@@ -52,8 +52,17 @@ export const api = {
   trace: (quoteId: string) => req<Trace>(`/quotes/${quoteId}/trace`),
   tickets: () => req<{ tickets: TicketCard[] }>("/tickets").then((r) => r.tickets),
 
-  /** POST a user message and stream SSE events. Resolves when the stream ends. */
-  async sendMessage(conversationId: string, text: string, onEvent: (e: SseEvent) => void, signal?: AbortSignal) {
+  /** Stop a running reply (v1.6). The server's state of the run afterwards; 404 when it is unknown. */
+  cancelRun: (conversationId: string, runId: string) =>
+    req<{ run_id: string; status: RunStatus }>(`/conversations/${conversationId}/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+      body: "{}",
+    }),
+
+  /** POST a user message and stream SSE events. Resolves when the stream ends. `onRun` gets the run id as soon as
+   * the response headers arrive (`X-Run-Id`), before any event, so Stop works while the turn still waits. */
+  async sendMessage(conversationId: string, text: string, onEvent: (e: SseEvent) => void, signal?: AbortSignal,
+    onRun?: (runId: string) => void) {
     const res = await fetch(`/api/conversations/${conversationId}/messages`, {
       method: "POST",
       credentials: "same-origin",
@@ -64,6 +73,12 @@ export const api = {
     if (!res.ok || !res.body) {
       throw toError(res, await res.json().catch(() => ({})));
     }
-    await readSse(res.body, onEvent);
+    let runId = res.headers.get("X-Run-Id");
+    if (runId) onRun?.(runId);
+    await readSse(res.body, (e) => {
+      const first = (e.data as { run_id?: unknown } | null)?.run_id;
+      if (!runId && typeof first === "string") { runId = first; onRun?.(first); } // a proxy dropped the header
+      onEvent(e);
+    });
   },
 };
