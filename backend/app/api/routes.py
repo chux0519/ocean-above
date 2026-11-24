@@ -18,6 +18,7 @@ from ..agent import Agent, ChatModel, LLMConfig, LLMNotConfigured, encode_stream
 from ..agent.concurrency import executor_workers
 from ..agent.loop import MAX_USER_CHARS, TITLE_CHARS
 from ..agent.sse import HEADERS as SSE_HEADERS, MEDIA_TYPE as SSE_MEDIA_TYPE
+from .. import tracing
 from ..airline import Airline, NotFound
 from ..core.network import NetworkProvider
 from ..store import Store
@@ -350,6 +351,10 @@ def install(app: FastAPI, settings: Settings, networks: NetworkProvider, clock=N
         except LLMNotConfigured:
             llm = None
     app.state.llm = llm
+    # Tracing (#35): only when OTEL_TRACING_ENABLED; otherwise nothing is built or exported
+    app.state.tracer_provider = tracing.build() if settings.tracing else None
+    if app.state.tracer_provider is not None:
+        tracing.use(app.state.tracer_provider)
     agent_kwargs = {"budget": settings.agent_budget, "concurrency": settings.turn_concurrency,
                     **(agent_kwargs or {})}
     app.state.agent = Agent(airline, llm, **agent_kwargs) if llm is not None else None
@@ -377,6 +382,8 @@ async def shutdown(app: FastAPI) -> None:
     close = getattr(getattr(app.state, "llm", None), "aclose", None)
     if close is not None:
         await close()
+    if getattr(app.state, "tracer_provider", None) is not None and tracing.provider() is app.state.tracer_provider:
+        await asyncio.to_thread(tracing.shutdown)  # flushes queued spans (bounded by the export timeout)
 
 
 def mount(app: FastAPI) -> None:

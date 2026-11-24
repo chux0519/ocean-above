@@ -20,8 +20,10 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Iterable
+from contextlib import contextmanager
+from typing import Any, Iterable, Iterator
 
+from .. import tracing
 from ..core import places
 from ..core.network import Network, NetworkDataError, NetworkProvider
 from ..core.pricing import FORMULA, InvalidPathError, price_path
@@ -131,6 +133,13 @@ class Airline:
         """Cheapest route between two cities, stored as an immutable quote (status `quoted`).
         Codes: ok, unknown_city, ambiguous_city, same_city, no_service, unreachable.
         Raises NotFound when the conversation is not the user's."""
+        with tracing.span("airline.quote_route") as span:  # #35: code and counts only
+            result = self._quote_route(user_id, conversation_id, origin, destination)
+            span.set_attributes({"ocean.result.code": result.code, "ocean.quote.legs":
+                                 len(result.data.get("legs") or ()) if result.ok else None})
+            return result
+
+    def _quote_route(self, user_id: str, conversation_id: str, origin: str, destination: str) -> Result:
         net = self.networks.current()
         route = cheapest_route(net, origin, destination)
         if isinstance(route, RouteError):
@@ -277,13 +286,14 @@ class Airline:
         and waits up to `lock_timeout` seconds for a running chat turn, then refuses with
         conversation_busy (None waits without limit). On the event loop use `book_async`.
         """
-        quote = self._book_quote(user_id, quote_id)
-        try:
-            with self.locks.hold(quote["conversation_id"], timeout=lock_timeout):
-                outcome = self._book_transaction(user_id, quote_id, nonce)
-        except ConversationBusy:
-            raise BookingError("conversation_busy") from None
-        return _booking_result(outcome)
+        with tracing.span("airline.book") as span, _book_status(span):
+            quote = self._book_quote(user_id, quote_id)
+            try:
+                with self.locks.hold(quote["conversation_id"], timeout=lock_timeout):
+                    outcome = self._book_transaction(user_id, quote_id, nonce)
+            except ConversationBusy:
+                raise BookingError("conversation_busy") from None
+            return _booking_result(outcome)
 
     async def book_async(self, user_id: str, quote_id: str, nonce: str, *,
                          lock_timeout: float | None = BOOK_LOCK_TIMEOUT) -> dict:
@@ -295,20 +305,21 @@ class Airline:
         short read and the booking transaction run in worker threads. At most
         `BOOK_MAX_PENDING_PER_USER` clicks of one user are in progress at once; more are refused
         with conversation_busy (retryable, nothing changed)."""
-        quote = await asyncio.to_thread(self._book_quote, user_id, quote_id)
-        if self._booking.get(user_id, 0) >= BOOK_MAX_PENDING_PER_USER:
-            raise BookingError("conversation_busy")
-        self._booking[user_id] = self._booking.get(user_id, 0) + 1
-        try:
-            async with self.locks.hold_async(quote["conversation_id"], timeout=lock_timeout):
-                outcome = await _to_thread_to_the_end(self._book_transaction, user_id, quote_id, nonce)
-        except ConversationBusy:
-            raise BookingError("conversation_busy") from None
-        finally:
-            self._booking[user_id] -= 1
-            if not self._booking[user_id]:
-                del self._booking[user_id]
-        return _booking_result(outcome)
+        with tracing.span("airline.book") as span, _book_status(span):
+            quote = await asyncio.to_thread(self._book_quote, user_id, quote_id)
+            if self._booking.get(user_id, 0) >= BOOK_MAX_PENDING_PER_USER:
+                raise BookingError("conversation_busy")
+            self._booking[user_id] = self._booking.get(user_id, 0) + 1
+            try:
+                async with self.locks.hold_async(quote["conversation_id"], timeout=lock_timeout):
+                    outcome = await _to_thread_to_the_end(self._book_transaction, user_id, quote_id, nonce)
+            except ConversationBusy:
+                raise BookingError("conversation_busy") from None
+            finally:
+                self._booking[user_id] -= 1
+                if not self._booking[user_id]:
+                    del self._booking[user_id]
+            return _booking_result(outcome)
 
     def _book_quote(self, user_id: str, quote_id: str) -> dict:
         """B1 before any waiting: the quote must exist and be the user's."""
@@ -436,6 +447,14 @@ class Airline:
         city, coordinate, leg, distance and price equals the stored quote and the itinerary is
         still the cheapest one; otherwise (None, what differs). Raises NetworkDataError when
         the database cannot be read or is not valid right now."""
+        with tracing.span("booking.recheck") as span:  # #35: the result's category, never its text
+            fingerprint, problem = self._recheck_quote(quote)
+            span.set_attributes({"ocean.recheck.result": "same" if problem is None else "changed",
+                                 "ocean.recheck.reason": None if problem is None else _reason_kind(problem),
+                                 "ocean.network.fingerprint": fingerprint})
+            return fingerprint, problem
+
+    def _recheck_quote(self, quote: dict) -> tuple[str, None] | tuple[None, str]:
         net = self.networks.current(strict=True)
         legs = quote["legs"]
         itinerary = _cities(legs)
@@ -492,6 +511,23 @@ class Airline:
 
 
 # ---------------------------------------------------------------------- helpers ---------------
+@contextmanager
+def _book_status(span: Any) -> Iterator[None]:
+    """`airline.book`'s only attribute: booked, or the refusal code (#35)."""
+    try:
+        yield
+    except BookingError as exc:
+        span.set_attribute("ocean.book.status", exc.code)
+        raise
+    span.set_attribute("ocean.book.status", "booked")
+
+
+def _reason_kind(problem: str) -> str:
+    """The fixed part of a re-check problem ("city no longer exists: X" -> "city no longer
+    exists"): no city names in spans."""
+    return problem.split(":", 1)[0]
+
+
 def _booking_result(outcome: dict | BookingError) -> dict:
     # A refusal may have changed the quote (expired / stale), so it is raised after COMMIT.
     if isinstance(outcome, BookingError):

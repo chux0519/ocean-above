@@ -8,6 +8,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from app import tracing
 from app.agent import ChatModel, LLMConfig, LLMNotConfigured
 from app.agent.config import EFFORTS
 
@@ -68,14 +69,16 @@ async def main(argv: list[str]) -> int:
         done += 1
         print(f"[{done}/{len(cases) * args.n}] {res.case}#{res.index} {'ok' if res.passed else 'FAILED'}", flush=True)
 
+    tracing.use(tracing.from_env())  # OTEL_TRACING_ENABLED=1: every run's turns are traced (#35)
     try:
         results = await run_all(cases, args.n, mode=args.mode, llm=llm, effort=args.effort,
                                 parallel=args.parallel if args.mode == "real" else 1, progress=progress)
     finally:
         if llm is not None:
             await llm.aclose()
+        await asyncio.to_thread(tracing.shutdown)
     meta = {"mode": args.mode, "model": model, "effort": effort, "n": args.n, "date": date.today().isoformat(),
-            "commit": commit()}
+            "commit": commit(), "tracing": tracing.enabled_in()}
     summary = summarize(cases, results, meta)
     text = markdown(summary, cases, results)
     print(text)

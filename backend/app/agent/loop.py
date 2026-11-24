@@ -34,6 +34,7 @@ from pydantic_ai.messages import (FunctionToolResultEvent, PartDeltaEvent, PartS
                                   TextPart, TextPartDelta, ThinkingPart, ThinkingPartDelta, ToolCallPart,
                                   ToolCallPartDelta)
 
+from .. import tracing
 from ..airline import ConversationBusy, NotFound
 from .budget import AgentBudget, BudgetTracker, refusal
 from .concurrency import ServerBusy, Threads, TurnConcurrency, TurnSlots
@@ -67,6 +68,7 @@ TERMINAL = {"done": "completed", "cancelled": "cancelled", "error": "failed"}  #
 FLOOD_FACTOR = 4  # a completion with more than max_tool_calls_per_step * this many calls runs none
 SDK_TOOL_RETRIES = 1000  # the SDK's own per-tool retry cap; our budget ends a turn long before
 _RAW = "__raw__"  # arguments the SDK could not parse, handed to Toolbox.run as the raw string
+_ACTIVE = object()  # `Agent(tracer_provider=...)` default: the provider of `app.tracing` (None: off)
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,7 @@ class Run:
     tokens_at_stop: int | None = None
     terminal: str | None = None  # the terminal event sent (done / cancelled / error)
     sent_first: bool = False  # the first event (it carries the run id) was sent
+    error_code: str | None = None  # the code of the terminal `error` event (tracing)
 
 
 class TurnStream:
@@ -173,6 +176,8 @@ class _Turn:
     steps_task: asyncio.Future | None = None
     cancelled: bool = False  # the user stopped the run (`Agent.cancel_run`)
     in_flight: str | None = None  # the tool call whose worker thread is running
+    span: Any = tracing.NO_SPAN  # the turn's `agent.turn` span (#35; a no-op when tracing is off)
+    fallback_kind: str | None = None  # the template replaced the reply because of this (tracing)
 
 
 def message_view(message: dict) -> dict:
@@ -215,13 +220,17 @@ class Agent:
                  lock_timeout: float | None = LOCK_TIMEOUT,
                  concurrency: TurnConcurrency | None = None, drain_timeout: float = DRAIN_TIMEOUT,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-                 tracer_provider: Any = None):
+                 tracer_provider: Any = _ACTIVE):
         """`budget`: the per-turn limits (design §4.8; default `AgentBudget()`). `max_steps` and
         `turn_timeout` override its fields (tests, older callers). `concurrency`: the server-wide
         limit on running turns (design §4.9; default `TurnConcurrency()`). `drain_timeout`: how
         long a cut-short turn waits for its worker threads before it ends anyway.
-        `tracer_provider`: an OpenTelemetry TracerProvider for the runtime's spans (entry point for
-        #35). None (default): no instrumentation at all, nothing is traced or exported."""
+        `tracer_provider`: an OpenTelemetry TracerProvider for the runtime's spans (#35). Default:
+        the one `app.tracing` holds when the agent is built (none unless OTEL_TRACING_ENABLED);
+        None: no SDK instrumentation at all. The loop's own spans (`agent.turn`, `reply_guard`,
+        `run.stop`) always go to `app.tracing`'s provider."""
+        if tracer_provider is _ACTIVE:
+            tracer_provider = tracing.provider()
         budget = budget or DEFAULT_BUDGET
         if max_steps is not None:
             budget = replace(budget, max_steps=max_steps)
@@ -391,7 +400,7 @@ class Agent:
     # ------------------------------------------------------------------ one turn -----------
     async def _run(self, run: Run, text: str, reasoning_effort: str | None,
                    queue: asyncio.Queue, on_not_stored: Callable[[], Any] | None = None) -> None:
-        user_id, conversation_id = run.user_id, run.conversation_id
+        conversation_id = run.conversation_id
         run.started = True
 
         def emit(name: str, data: dict) -> None:
@@ -404,6 +413,8 @@ class Agent:
             if name in TERMINAL:
                 run.terminal = name
                 run.state = TERMINAL[name]
+                if name == "error":
+                    run.error_code = data.get("code")
             queue.put_nowait(Event(name, data))
 
         async def not_stored() -> None:
@@ -413,6 +424,18 @@ class Agent:
                 except Exception:
                     log.exception("not-stored callback failed (conversation %s)", conversation_id)
 
+        # One trace per turn (#35): `agent.turn` is the root; the SDK's run / chat / tool spans
+        # and the airline's spans nest under it. Correlation: the run id (SSE `X-Run-Id`) and
+        # the user message id (app.db llm_calls / tool_calls rows) are attributes.
+        with tracing.span("agent.turn", {"ocean.run_id": run.id,
+                                         "ocean.conversation_hash": tracing.digest(conversation_id),
+                                         "ocean.reasoning_effort": reasoning_effort}) as span:
+            await self._run_traced(run, text, reasoning_effort, queue, emit, not_stored, span)
+
+    async def _run_traced(self, run: Run, text: str, reasoning_effort: str | None, queue: asyncio.Queue,
+                          emit: Callable[[str, dict], None], not_stored: Callable[[], Awaitable[None]],
+                          span: Any) -> None:
+        user_id, conversation_id = run.user_id, run.conversation_id
         # The conversation lock first, then the user's own limit, then a server-wide slot: a
         # second message of a busy conversation waits without taking a slot. Every refusal comes
         # before anything is stored.
@@ -456,6 +479,7 @@ class Agent:
                 # R4 backstop (review P2-1): every stream ends with a terminal event, also when the
                 # task was cancelled by a shutdown or a path above ended without one
                 emit("error", {"code": "internal_error", "message": INTERNAL})
+            _trace_end(span, run)
             self._retire(run)
             queue.put_nowait(None)
 
@@ -464,6 +488,12 @@ class Agent:
         (log fields now; spans in #35)."""
         latency = None if run.stop_requested is None else int((time.monotonic() - run.stop_requested) * 1000)
         after = None if turn is None or run.tokens_at_stop is None else turn.budget.tokens - run.tokens_at_stop
+        # `run.stop`: from the accepted Stop to the stopped reply stored (#35)
+        start = None if run.stop_requested is None else tracing.monotonic_to_epoch_ns(run.stop_requested)
+        with tracing.span("run.stop", {"ocean.run_id": run.id, "ocean.stop.stored": turn is not None,
+                                       "ocean.stop.stop_to_end_ms": latency, "ocean.stop.drain_ms": drain_ms,
+                                       "ocean.stop.tokens_after_stop": after}, start_time_ns=start):
+            pass
         log.info("agent.run.cancelled run=%s conversation=%s stored=%s stop_to_end_ms=%s tokens_after_stop=%s "
                  "drain_ms=%s", run.id, run.conversation_id, turn is not None, latency, after, drain_ms)
 
@@ -504,6 +534,8 @@ class Agent:
         turn = _Turn(user_id, conversation_id, user_message, guard, emit, BudgetTracker(self.budget),
                      reasoning_effort)
         turn.messages = messages = [{"role": "system", "content": system_prompt(today)}, *context.messages]
+        turn.span = tracing.current()  # `agent.turn` (set in `_run`)
+        turn.span.set_attribute("ocean.message_id", user_message["id"])
         run.turn = turn
         if run.state == "cancelling":  # stopped while the message was stored: no step starts
             turn.cancelled = True
@@ -639,7 +671,11 @@ class Agent:
         def body(name: str) -> Callable[..., Awaitable[str]]:
             async def run(ctx: RunContext[_Turn], **_args: Any) -> str:
                 # the arguments the model sent are taken raw from the completion in `_tool_call`
-                return (await self._tool_call(ctx.deps, ctx.tool_call_id or "", name)).for_llm()
+                span = tracing.current()  # the SDK's `execute_tool` span: our result code on it
+                outcome = await self._tool_call(ctx.deps, ctx.tool_call_id or "", name)
+                span.set_attributes({"ocean.tool.code": outcome.code, "ocean.tool.cards": len(outcome.cards),
+                                     "ocean.tool.refused": (outcome.error or "").startswith("budget")})
+                return outcome.for_llm()
             return run
 
         tools = []
@@ -718,6 +754,8 @@ class Agent:
         """Persist the assistant message (the `done` moment: quote cards become bookable)."""
         text = turn.text.rstrip()
         if fallback is not None:
+            turn.fallback_kind = fallback[0]["kind"]
+            turn.span.set_attribute("ocean.fallback_kind", turn.fallback_kind)
             text = fallback_reply(turn.outcomes)
             turn.emit("replace", {"text": text})
         elif CLICK_TO_BOOK not in text and any(
@@ -759,7 +797,11 @@ class Agent:
             piece = piece.lstrip()
         elif first_of_step and not turn.text[-1].isspace() and not piece[:1].isspace():
             piece = "\n\n" + piece  # text of a later step starts a new paragraph
-        problems = turn.guard.check(turn.text + piece)
+        with tracing.span("reply_guard", {"ocean.guard.chars": len(turn.text) + len(piece)}) as span:
+            problems = turn.guard.check(turn.text + piece)
+            span.set_attribute("ocean.guard.result", "fail" if problems else "pass")
+            if problems:
+                span.set_attribute("ocean.guard.problems", sorted({p["kind"] for p in problems}))
         if problems:
             raise _GuardFailed(problems)
         turn.text += piece
@@ -884,6 +926,9 @@ class Agent:
             await asyncio.shield(log_call(
                 {"content": content, "error": str(error)[:300], "attempt": attempt + 1}, usage,
                 output_chars=received, no_response=not isinstance(exc, TimeoutError) and received is None))
+            turn.span.add_event("llm.attempt_failed", {
+                "ocean.llm.attempt": attempt + 1, "ocean.llm.error": type(exc).__name__,
+                "ocean.llm.retryable": error.retryable, "ocean.llm.released": released})
             if released or not error.retryable or attempt == self.retries:
                 raise error from None
             if (stop := turn.budget.out_of_tokens()) is not None:
@@ -930,3 +975,16 @@ def _unique_call_ids(response: Any) -> None:
 def _flooded(completion: Completion, budget: AgentBudget) -> bool:
     """More tool calls in one completion than any honest step needs (P2-3)."""
     return len(completion.tool_calls) > budget.max_tool_calls_per_step * FLOOD_FACTOR
+
+
+def _trace_end(span: Any, run: Run) -> None:
+    """The turn's outcome on its `agent.turn` span: completed / fallback (the template replaced
+    the reply) / cancelled / failed, plus the budget used (counts only)."""
+    turn = run.turn
+    if run.terminal == "done":
+        outcome = "fallback" if turn is not None and turn.fallback_kind else "completed"
+    else:
+        outcome = "cancelled" if run.terminal == "cancelled" else "failed"
+    span.set_attributes({"ocean.outcome": outcome, "ocean.error_code": run.error_code})
+    if turn is not None:
+        span.set_attributes({f"ocean.budget.{k}": v for k, v in turn.budget.snapshot().items()})
