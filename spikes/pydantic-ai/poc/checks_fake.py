@@ -372,7 +372,7 @@ async def check_tracing() -> dict:
     await agent.run("x [[tools2]]", deps=deps_for(w), model_settings=settings())
     spans = exporter.get_finished_spans()
     attrs = {k for s in spans for k in (s.attributes or {})}
-    content_leak = any(("Paris" in json.dumps(dict(s.attributes or {}), default=str) or "tools2" in json.dumps(dict(s.attributes or {}), default=str) for s in spans)
+    content_leak = any(w in json.dumps(dict(s.attributes or {}), default=str) for s in spans for w in ("Paris", "tools2"))
     return {"logfire_installed": importlib.util.find_spec("logfire") is not None,
             "logfire_api_installed": importlib.util.find_spec("logfire_api") is not None,
             "spans": [s.name for s in spans], "attribute_keys": sorted(attrs)[:40],
